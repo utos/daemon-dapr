@@ -1,0 +1,34 @@
+using Common.Constants;
+using Execution.Infrastructure.Extensions;
+using Observability.Features.Extensions;
+using Tools.ServiceDefaults;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Enable Service Defaults
+builder.AddServiceDefaults();
+
+builder.AddExecutionModule(ServiceName.Database.WorkflowExecution, ServiceName.App.EventStore);
+builder.AddObservabilityModule();
+
+// Add services to the container.
+// builder.Services.AddControllers();
+// builder.Services.AddEndpointsApiExplorer();
+// builder.Services.AddOpenApi();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+// if (app.Environment.IsDevelopment())
+// {
+//     app.MapOpenApi();
+// }
+
+// app.UseHttpsRedirection();
+
+// app.MapControllers();
+
+app.UseExecutionModule();
+app.UseObservabilityModule();
+
+app.Run();

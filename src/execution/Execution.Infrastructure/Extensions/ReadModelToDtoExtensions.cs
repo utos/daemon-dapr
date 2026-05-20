@@ -1,0 +1,93 @@
+using System.Text.Json;
+using Google.Protobuf;
+using Utos.Daemon.V1;
+using Utos.Workflow.V1;
+using Execution.Features.Models;
+using Execution.Infrastructure.ReadModels;
+using ExecutionDetails = Execution.Features.Models.ExecutionDetails;
+using ExecutionSummary = Execution.Features.Models.ExecutionSummary;
+
+namespace Execution.Infrastructure.Extensions;
+
+/// <summary>
+/// Extension methods for converting read models to POCO/DTO types
+/// </summary>
+public static class ReadModelToDtoExtensions
+{
+    private static readonly JsonParser Parser = new(JsonParser.Settings.Default);
+
+    public static ExecutionSummary ToSummaryDto(this WorkflowExecutionReadModel readModel)
+    {
+        return new ExecutionSummary
+        {
+            Id = readModel.Id,
+            Status = ParseStatus(readModel.Status),
+            WorkflowName = readModel.WorkflowName,
+            WorkflowVersion = readModel.WorkflowVersion,
+            CreatedAt = readModel.CreatedAt,
+            ScheduledAt = readModel.ScheduledAt,
+            StartedAt = readModel.StartedAt,
+            FinishedAt = readModel.CompletedAt ?? readModel.FailedAt,
+            ErrorMessage = readModel.ErrorMessage != null && readModel.ErrorMessage.Length > 200
+                ? readModel.ErrorMessage.Substring(0, 200)
+                : readModel.ErrorMessage
+        };
+    }
+
+    public static ExecutionDetails ToDetailsDto(this WorkflowExecutionReadModel readModel)
+    {
+        WorkflowBundle? bundle = null;
+        if (!string.IsNullOrEmpty(readModel.WorkflowDefinitionJson))
+            try
+            {
+                bundle = Parser.Parse<WorkflowBundle>(readModel.WorkflowDefinitionJson);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to deserialize workflow bundle for execution {readModel.Id}", ex);
+            }
+
+        Dictionary<string, object> input = new();
+        if (!string.IsNullOrEmpty(readModel.InputJson))
+            try
+            {
+                input = JsonSerializer.Deserialize<Dictionary<string, object>>(readModel.InputJson) ??
+                        new Dictionary<string, object>();
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidOperationException($"Failed to deserialize payload for execution {readModel.Id}", ex);
+            }
+
+        return new ExecutionDetails
+        {
+            Id = readModel.Id,
+            Status = ParseStatus(readModel.Status),
+            WorkflowName = readModel.WorkflowName,
+            WorkflowVersion = readModel.WorkflowVersion,
+            Bundle = bundle ??
+                     throw new InvalidOperationException($"Workflow bundle is missing for execution {readModel.Id}"),
+            Input = input,
+            CreatedAt = readModel.CreatedAt,
+            ScheduledAt = readModel.ScheduledAt,
+            StartedAt = readModel.StartedAt,
+            CompletedAt = readModel.CompletedAt,
+            FailedAt = readModel.FailedAt,
+            ErrorMessage = readModel.ErrorMessage
+        };
+    }
+
+    private static ExecutionStatus ParseStatus(string status)
+    {
+        return status switch
+        {
+            ReadModelStatus.Unspecified => ExecutionStatus.Unspecified,
+            ReadModelStatus.Scheduled => ExecutionStatus.Scheduled,
+            ReadModelStatus.Active => ExecutionStatus.Active,
+            ReadModelStatus.Completed => ExecutionStatus.Completed,
+            ReadModelStatus.Failed => ExecutionStatus.Failed,
+            _ => throw new ArgumentException($"Unknown status: {status}")
+        };
+    }
+}

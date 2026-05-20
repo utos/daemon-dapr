@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <PackageReference Include="BSR.Utos.Api.Protocolbuffers.Csharp" Version="34.0.10001.6"/>
+        <PackageReference Include="BSR.Utos.Api.Grpc.Csharp" Version="1.78.10101.6"/>
+        <PackageReference Include="Grpc.AspNetCore" Version="2.76.0"/>
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Observability.Domain/Observability.Domain.csproj"/>
+        <ProjectReference Include="../../common/Common.Infrastructure/Common.Infrastructure.csproj"/>
+    </ItemGroup>
+
+</Project>

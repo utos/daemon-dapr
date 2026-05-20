@@ -1,0 +1,296 @@
+using Google.Protobuf.WellKnownTypes;
+using IntegrationTests.Shared;
+using IntegrationTests.Shared.Builders;
+using IntegrationTests.Shared.Fixtures;
+using Utos.Daemon.V1;
+using WireMock.RequestBuilders;
+using WireMock.ResponseBuilders;
+
+namespace IntegrationTests.Executions;
+
+[Collection(DaemonTestCollection.Name)]
+public class PromiseTests(DaemonTestFixture fixture)
+{
+    [Fact]
+    public async Task Promise_AllMode_AllBranchesSucceed()
+    {
+        // Arrange — 2 branches, each calling a dependent workflow with an HTTP GET
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/promise-all-branch1").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"result": "from-branch1"}"""));
+
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/promise-all-branch2").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"result": "from-branch2"}"""));
+
+        var returnStruct = new Struct();
+        returnStruct.Fields.Add("result", Value.ForString("{{ output.result }}"));
+
+        var promiseReturnStruct = new Struct();
+        promiseReturnStruct.Fields.Add("branch1", Value.ForString("{{ output.branch1.result }}"));
+        promiseReturnStruct.Fields.Add("branch2", Value.ForString("{{ output.branch2.result }}"));
+
+        var request = new TestWorkflowBuilder("promise-all-parent", fixture.MockBaseUrl)
+            // Branch target activities (workflow-type) in the parent workflow
+            .WorkflowCall("call-wf1", "child-wf1", "http-step")
+            .WorkflowCall("call-wf2", "child-wf2", "http-step")
+            // Promise activity references those workflow-call activities
+            .Promise("fan-out", "all")
+            .Branch("branch1", "call-wf1")
+            .Branch("branch2", "call-wf2")
+            .OnReturn(promiseReturnStruct)
+            // Dependent workflows
+            .AddDependentWorkflow("child-wf1", child =>
+            {
+                child.HttpGet("http-step", "/promise-all-branch1")
+                    .OnReturn(returnStruct);
+            })
+            .AddDependentWorkflow("child-wf2", child =>
+            {
+                child.HttpGet("http-step", "/promise-all-branch2")
+                    .OnReturn(returnStruct);
+            })
+            .Build("fan-out");
+
+        // Act
+        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = response.Id
+        });
+
+        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        // Assert — Both endpoints were hit
+        var logEntries = fixture.WireMockServer.LogEntries.ToList();
+        Assert.NotNull(logEntries.FirstOrDefault(e => e.RequestMessage.Path == "/promise-all-branch1"));
+        Assert.NotNull(logEntries.FirstOrDefault(e => e.RequestMessage.Path == "/promise-all-branch2"));
+
+        // Assert — Execution completed successfully
+        var execution = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
+        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+    }
+
+    [Fact]
+    public async Task Promise_AllMode_BranchFailure_Propagates()
+    {
+        // Arrange — 2 branches, one succeeds, one returns 500
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/promise-allfail-ok").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"result": "ok"}"""));
+
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/promise-allfail-500").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(500)
+                .WithBody("Internal Server Error"));
+
+        var request = new TestWorkflowBuilder("promise-allfail-parent", fixture.MockBaseUrl)
+            .WorkflowCall("call-ok", "child-ok", "http-step")
+            .WorkflowCall("call-fail", "child-fail", "http-step")
+            .Promise("fan-out", "all")
+            .Branch("ok-branch", "call-ok")
+            .Branch("fail-branch", "call-fail")
+            .OnSuccess("end")
+            .AddDependentWorkflow("child-ok", child => { child.HttpGet("http-step", "/promise-allfail-ok"); })
+            .AddDependentWorkflow("child-fail", child => { child.HttpGet("http-step", "/promise-allfail-500"); })
+            .Build("fan-out");
+
+        // Act
+        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = response.Id
+        });
+
+        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        // Assert — Execution failed
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        ExecutionStatus status;
+        do
+        {
+            var execution = await fixture.DaemonClient.GetExecutionAsync(
+                new GetExecutionRequest { ExecutionId = response.Id });
+            status = execution.Status;
+            if (status == ExecutionStatus.Failed) break;
+            await Task.Delay(250);
+        } while (DateTime.UtcNow < deadline);
+
+        Assert.Equal(ExecutionStatus.Failed, status);
+    }
+
+    [Fact]
+    public async Task Promise_AnyMode_FirstSuccessWins()
+    {
+        // Arrange — 2 branches, first fails (500), second succeeds
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/promise-any-fail").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(500)
+                .WithBody("Internal Server Error"));
+
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/promise-any-ok").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"result": "any-winner"}"""));
+
+        var returnStruct = new Struct();
+        returnStruct.Fields.Add("result", Value.ForString("{{ output.result }}"));
+
+        var request = new TestWorkflowBuilder("promise-any-parent", fixture.MockBaseUrl)
+            .WorkflowCall("call-fail", "child-any-fail", "http-step")
+            .WorkflowCall("call-ok", "child-any-ok", "http-step")
+            .Promise("fan-out", "any")
+            .Branch("fail-branch", "call-fail")
+            .Branch("ok-branch", "call-ok")
+            .OnSuccess("end")
+            .AddDependentWorkflow("child-any-fail", child => { child.HttpGet("http-step", "/promise-any-fail"); })
+            .AddDependentWorkflow("child-any-ok", child =>
+            {
+                child.HttpGet("http-step", "/promise-any-ok")
+                    .OnReturn(returnStruct);
+            })
+            .Build("fan-out");
+
+        // Act
+        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = response.Id
+        });
+
+        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        // Assert — Execution completed (any mode: one success is enough)
+        var execution = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
+        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+    }
+
+    [Fact]
+    public async Task Promise_RaceMode_FirstSettlementWins()
+    {
+        // Arrange — 2 branches, both succeed (race picks whichever settles first)
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/promise-race-a").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"result": "racer-a"}"""));
+
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/promise-race-b").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"result": "racer-b"}"""));
+
+        var returnStruct = new Struct();
+        returnStruct.Fields.Add("result", Value.ForString("{{ output.result }}"));
+
+        var request = new TestWorkflowBuilder("promise-race-parent", fixture.MockBaseUrl)
+            .WorkflowCall("call-a", "child-race-a", "http-step")
+            .WorkflowCall("call-b", "child-race-b", "http-step")
+            .Promise("fan-out", "race")
+            .Branch("racer-a", "call-a")
+            .Branch("racer-b", "call-b")
+            .OnSuccess("end")
+            .AddDependentWorkflow("child-race-a", child =>
+            {
+                child.HttpGet("http-step", "/promise-race-a")
+                    .OnReturn(returnStruct);
+            })
+            .AddDependentWorkflow("child-race-b", child =>
+            {
+                child.HttpGet("http-step", "/promise-race-b")
+                    .OnReturn(returnStruct);
+            })
+            .Build("fan-out");
+
+        // Act
+        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = response.Id
+        });
+
+        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        // Assert — Execution completed, one of the racers won
+        var execution = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
+        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+    }
+
+    [Fact]
+    public async Task Promise_ForEach_ExpandsBranches()
+    {
+        // Arrange — 1 branch with for_each over a 3-item collection from input
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/promise-foreach-item").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"processed": true}"""));
+
+        var returnStruct = new Struct();
+        returnStruct.Fields.Add("processed", Value.ForString("{{ output.processed }}"));
+
+        var branchInput = new Struct();
+        branchInput.Fields.Add("itemValue", Value.ForString("{{ item }}"));
+
+        var request = new TestWorkflowBuilder("promise-foreach-parent", fixture.MockBaseUrl)
+            .WorkflowCall("call-item-wf", "child-foreach", "http-step")
+            .Promise("fan-out", "all")
+            .ForEachBranch("item", "call-item-wf", "{{ input.items }}", "item", branchInput)
+            .OnSuccess("end")
+            .AddDependentWorkflow("child-foreach", child =>
+            {
+                child.HttpGet("http-step", "/promise-foreach-item")
+                    .OnReturn(returnStruct);
+            })
+            .WithInput("items", Value.ForList(
+                Value.ForString("alpha"),
+                Value.ForString("beta"),
+                Value.ForString("gamma")))
+            .Build("fan-out");
+
+        // Act
+        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = response.Id
+        });
+
+        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        // Assert — The endpoint was hit 3 times (once per item)
+        var logEntries = fixture.WireMockServer.LogEntries
+            .Where(e => e.RequestMessage.Path == "/promise-foreach-item")
+            .ToList();
+        Assert.Equal(3, logEntries.Count);
+
+        // Assert — Execution completed
+        var execution = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
+        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+    }
+}

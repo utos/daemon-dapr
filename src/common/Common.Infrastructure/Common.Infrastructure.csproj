@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <ProjectReference Include="../Common.SeedWork/Common.SeedWork.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="CommunityToolkit.Aspire.KurrentDB" Version="13.1.1"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.3"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.3"/>
+    </ItemGroup>
+
+</Project>

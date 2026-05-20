@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <ItemGroup>
+        <PackageReference Include="BSR.Utos.Api.Protocolbuffers.Csharp" Version="34.0.10001.6"/>
+        <PackageReference Include="BSR.Utos.Api.Grpc.Csharp" Version="1.78.10101.6"/>
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.3">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../../common/Common.Constants/Common.Constants.csproj"/>
+        <ProjectReference Include="../../tools/Tools.ServiceDefaults/Tools.ServiceDefaults.csproj"/>
+        <ProjectReference Include="../../execution/Execution.Infrastructure/Execution.Infrastructure.csproj"/>
+        <ProjectReference Include="../../observability/Observability.Features/Observability.Features.csproj"/>
+    </ItemGroup>
+
+</Project>

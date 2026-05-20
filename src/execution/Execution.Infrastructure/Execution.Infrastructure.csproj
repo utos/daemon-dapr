@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <ProjectReference Include="../../common/Common.Infrastructure/Common.Infrastructure.csproj"/>
+        <ProjectReference Include="../Execution.Domain/Execution.Domain.csproj"/>
+        <ProjectReference Include="../Execution.Features/Execution.Features.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Aspire.Microsoft.EntityFrameworkCore.SqlServer" Version="13.1.2"/>
+        <PackageReference Include="Dapr.AspNetCore" Version="1.17.1"/>
+        <PackageReference Include="Dapr.Workflow" Version="1.17.1"/>
+        <PackageReference Include="Mediator.SourceGenerator" Version="3.0.1" PrivateAssets="all"/>
+        <PackageReference Include="Scriban" Version="6.5.5"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Folder Include="Migrations/"/>
+    </ItemGroup>
+
+</Project>

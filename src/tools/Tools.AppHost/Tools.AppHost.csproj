@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <Sdk Name="Aspire.AppHost.Sdk" Version="13.1.0"/>
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <IsAspireHost>true</IsAspireHost>
+        <UserSecretsId>a0b75a0e-8d9a-4ba2-861a-be1abfbe37b7</UserSecretsId>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Aspire.Hosting.AppHost" Version="13.1.2"/>
+        <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.1.2"/>
+        <PackageReference Include="CommunityToolkit.Aspire.Hosting.Dapr" Version="13.0.0"/>
+        <PackageReference Include="CommunityToolkit.Aspire.Hosting.KurrentDB" Version="13.1.1"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../../api/API.Main/API.Main.csproj"/>
+        <ProjectReference Include="../../common/Common.Constants/Common.Constants.csproj" IsAspireProjectResource="false"/>
+    </ItemGroup>
+
+</Project>

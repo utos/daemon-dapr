@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Aspire.Hosting.Testing" Version="13.1.2"/>
+        <PackageReference Include="coverlet.collector" Version="8.0.0">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0"/>
+        <PackageReference Include="WireMock.NET" Version="1.25.0"/>
+        <PackageReference Include="xunit" Version="2.9.3"/>
+        <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="BSR.Utos.Api.Protocolbuffers.Csharp" Version="34.0.10001.6"/>
+        <PackageReference Include="BSR.Utos.Api.Grpc.Csharp" Version="1.78.10101.6"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../../src/tools/Tools.AppHost/Tools.AppHost.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="System.Net"/>
+        <Using Include="Microsoft.Extensions.DependencyInjection"/>
+        <Using Include="Aspire.Hosting.ApplicationModel"/>
+        <Using Include="Aspire.Hosting.Testing"/>
+        <Using Include="Xunit"/>
+    </ItemGroup>
+
+</Project>
