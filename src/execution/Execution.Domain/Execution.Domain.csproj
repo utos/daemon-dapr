@@ -5,10 +5,10 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="BSR.Utos.Api.Protocolbuffers.Csharp" Version="34.0.10001.6"/>
-        <PackageReference Include="BSR.Utos.Api.Grpc.Csharp" Version="1.78.10101.6"/>
+        <PackageReference Include="BSR.Utos.Api.Protocolbuffers.Csharp" Version="34.1.10001.6" />
+        <PackageReference Include="BSR.Utos.Api.Grpc.Csharp" Version="1.80.10001.6" />
         <PackageReference Include="FluentValidation" Version="12.1.1"/>
-        <PackageReference Include="Mediator.Abstractions" Version="3.0.1"/>
+        <PackageReference Include="Mediator.Abstractions" Version="3.0.2" />
     </ItemGroup>
 
 </Project>
