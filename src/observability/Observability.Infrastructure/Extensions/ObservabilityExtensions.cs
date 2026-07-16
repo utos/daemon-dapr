@@ -1,24 +1,24 @@
-using Common.SeedWork;
+using Common.Infrastructure.EventHandling;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Observability.Domain;
-using Observability.Features.Persistence;
 using Observability.Features.Services;
+using Observability.Infrastructure.EventHandling;
+using Observability.Infrastructure.Logging;
+using Observability.Infrastructure.Store;
 
-namespace Observability.Features.Extensions;
+namespace Observability.Infrastructure.Extensions;
 
 public static class ObservabilityExtensions
 {
     public static IHostApplicationBuilder AddObservabilityModule(this IHostApplicationBuilder builder)
     {
+        builder.Services.AddSingleton<IExecutionLogStore, ExecutionLogStore>();
+        builder.Services.AddSingleton<ILoggerProvider, ExecutionLogProvider>();
         builder.Services.AddScoped<ObservabilityGrpcService>();
-
-        // Add Workflow Logger (cross-cutting capability)
-        builder.Services.AddScoped<IWorkflowLogger, WorkflowLogger>();
-
-        // Add Log Stream Repository
-        builder.Services.AddScoped<ILogStreamRepository, LogStreamRepository>();
+        builder.Services.AddSingleton<IEventHandler, ExecutionLogStreamCompletionHandler>();
 
         return builder;
     }

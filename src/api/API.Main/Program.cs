@@ -1,6 +1,6 @@
 using Common.Constants;
 using Execution.Infrastructure.Extensions;
-using Observability.Features.Extensions;
+using Observability.Infrastructure.Extensions;
 using Tools.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);

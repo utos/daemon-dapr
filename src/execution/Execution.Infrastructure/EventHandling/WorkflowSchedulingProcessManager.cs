@@ -15,7 +15,6 @@ public class WorkflowSchedulingProcessManager(
     IEventStoreRepository eventStore,
     DaprWorkflowClient workflowClient,
     IExecutionContextStore contextStore,
-    IWorkflowLogger workflowLogger,
     ILogger<WorkflowSchedulingProcessManager> logger) : IEventHandler
 {
     public async Task HandleAsync(IDomainEvent @event, long position, CancellationToken cancellationToken = default)
@@ -55,13 +54,12 @@ public class WorkflowSchedulingProcessManager(
             else
             {
                 logger.LogInformation(
-                    "[{ExecutionId}] Already in status '{Status}', skipping Schedule() (likely replay)",
-                    executionId, workflowExecution.Status);
+                    "Already in status '{Status}', skipping Schedule() — likely replay (execution {WorkflowExecutionId})",
+                    workflowExecution.Status, executionId);
             }
 
-            // Log lifecycle event to observability stream
-            await workflowLogger.LogAsync(executionId, "system", "lifecycle",
-                WorkflowLogLevel.Info, "Execution created and scheduled");
+            logger.LogInformation(
+                "Execution created and scheduled (execution {WorkflowExecutionId})", executionId);
 
             // Step 2: Write context to store BEFORE scheduling the workflow (idempotent — skip if exists)
             await contextStore.SaveContextAsync(new ExecutionContext
@@ -85,19 +83,19 @@ public class WorkflowSchedulingProcessManager(
                     executionId.ToString(),
                     workflowInput);
 
-                logger.LogInformation("[{ExecutionId}] Workflow scheduled starting from activity '{StartActivity}'",
-                    executionId, startActivity);
+                logger.LogInformation("Workflow scheduled starting from activity '{StartActivity}' (execution {WorkflowExecutionId})",
+                    startActivity, executionId);
             }
             catch (Exception ex) when (IsDuplicateWorkflowException(ex))
             {
                 logger.LogInformation(
-                    "[{ExecutionId}] Dapr workflow already exists (likely replay), continuing",
+                    "Dapr workflow already exists — likely replay, continuing (execution {WorkflowExecutionId})",
                     executionId);
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{ExecutionId}] Failed to schedule workflow", executionId);
+            logger.LogError(ex, "Failed to schedule workflow (execution {WorkflowExecutionId})", executionId);
             throw;
         }
     }

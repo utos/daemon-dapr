@@ -1,4 +1,3 @@
-using Common.SeedWork;
 using Dapr.Workflow;
 using Microsoft.Extensions.Logging;
 using Execution.Domain.Constants;
@@ -20,15 +19,16 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         var logger = context.CreateReplaySafeLogger<WorkflowExecutor>();
         var startTime = context.CurrentUtcDateTime;
         var isChild = input.ParentExecutionId != null;
+        // Child workflows log under the parent's execution ID so their entries appear in the parent's WatchExecution stream.
         var logExecutionId = input.ParentExecutionId ?? input.ExecutionId;
 
         if (!isChild)
             await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
                 new WriteLifecycleEventInput(input.ExecutionId, "Active", null));
 
-        await context.CallActivityAsync(nameof(LogActivity), new LogInput(
-            logExecutionId, "system", "workflow", WorkflowLogLevel.Info,
-            $"Workflow execution started from activity '{input.StartActivity}'"));
+        logger.LogInformation(
+            "Workflow execution started from activity '{WorkflowStartActivity}' (execution {WorkflowExecutionId})",
+            input.StartActivity, logExecutionId);
 
         try
         {
@@ -48,7 +48,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             {
                 if (string.Equals(currentActivityName, ReservedKeywords.End, StringComparison.OrdinalIgnoreCase))
                 {
-                    logger.LogInformation("[{ExecutionId}] Workflow reached 'end' transition", input.ExecutionId);
+                    logger.LogInformation("Workflow reached 'end' transition (execution {WorkflowExecutionId})", logExecutionId);
                     break;
                 }
 
@@ -64,8 +64,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     case WorkflowActivity.ConfigOneofCase.Workflow:
                     {
                         logger.LogInformation(
-                            "[{ExecutionId}] Entering sub-workflow from activity '{Activity}'",
-                            input.ExecutionId, currentActivityName);
+                            "Entering sub-workflow from activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
+                            currentActivityName, logExecutionId);
 
                         // Resolve workflow call input via central template rendering
                         var resolved = await context.CallActivityAsync<ResolveActivityInputOutput>(
@@ -107,9 +107,9 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
                     case WorkflowActivity.ConfigOneofCase.Http:
                     {
-                        await context.CallActivityAsync(nameof(LogActivity), new LogInput(
-                            logExecutionId, "system", "activity", WorkflowLogLevel.Info,
-                            $"Activity '{currentActivityName}' started"));
+                        logger.LogInformation(
+                            "Activity '{WorkflowActivity}' started (execution {WorkflowExecutionId})",
+                            currentActivityName, logExecutionId);
 
                         var activityStartTime = context.CurrentUtcDateTime;
 
@@ -131,9 +131,9 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
                             var activityDuration = (context.CurrentUtcDateTime - activityStartTime).TotalMilliseconds;
 
-                            await context.CallActivityAsync(nameof(LogActivity), new LogInput(
-                                logExecutionId, "system", "activity", WorkflowLogLevel.Info,
-                                $"Activity '{currentActivityName}' completed successfully in {activityDuration:F0}ms"));
+                            logger.LogInformation(
+                                "Activity '{WorkflowActivity}' completed in {DurationMs}ms (execution {WorkflowExecutionId})",
+                                currentActivityName, (long)activityDuration, logExecutionId);
 
                             var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
                                 nameof(EvaluateTransitionActivity),
@@ -152,9 +152,9 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                         }
                         catch (Exception activityEx)
                         {
-                            await context.CallActivityAsync(nameof(LogActivity), new LogInput(
-                                logExecutionId, "system", "activity", WorkflowLogLevel.Error,
-                                $"Activity '{currentActivityName}' failed: {activityEx.Message}"));
+                            logger.LogError(
+                                "Activity '{WorkflowActivity}' failed: {ErrorMessage} (execution {WorkflowExecutionId})",
+                                currentActivityName, activityEx.Message, logExecutionId);
                             throw;
                         }
 
@@ -164,8 +164,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     case WorkflowActivity.ConfigOneofCase.Promise:
                     {
                         logger.LogInformation(
-                            "[{ExecutionId}] Entering promise activity '{Activity}' (mode: {Mode})",
-                            input.ExecutionId, currentActivityName, activity.Promise.Mode);
+                            "Entering promise activity '{WorkflowActivity}' (mode: {PromiseMode}) (execution {WorkflowExecutionId})",
+                            currentActivityName, activity.Promise.Mode, logExecutionId);
 
                         // 1. Resolve branches (expand for_each, filter conditions, save child contexts)
                         var resolved = await context.CallActivityAsync<ResolvePromiseOutput>(
@@ -189,9 +189,9 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                         var promiseOutput = await ResolveByMode(
                             resolved.Mode, resolved.RequiredCount, branchTasks);
 
-                        await context.CallActivityAsync(nameof(LogActivity), new LogInput(
-                            logExecutionId, "system", "activity", WorkflowLogLevel.Info,
-                            $"Promise activity '{currentActivityName}' resolved ({resolved.Mode} mode, {resolved.Branches.Count} branches)"));
+                        logger.LogInformation(
+                            "Promise activity '{WorkflowActivity}' resolved ({PromiseMode} mode, {BranchCount} branches) (execution {WorkflowExecutionId})",
+                            currentActivityName, resolved.Mode, resolved.Branches.Count, logExecutionId);
 
                         // 4. Evaluate transition with promise output
                         var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
@@ -223,35 +223,25 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             var totalDuration = (context.CurrentUtcDateTime - startTime).TotalMilliseconds;
 
-            await context.CallActivityAsync(nameof(LogActivity), new LogInput(
-                logExecutionId, "system", "workflow", WorkflowLogLevel.Info,
-                $"Workflow execution completed successfully in {totalDuration:F0}ms"));
+            logger.LogInformation(
+                "Workflow execution completed successfully in {DurationMs}ms (execution {WorkflowExecutionId})",
+                (long)totalDuration, logExecutionId);
 
             if (!isChild)
-            {
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
                     new WriteLifecycleEventInput(input.ExecutionId, "Completed", null));
-
-                await context.CallActivityAsync(nameof(TerminateLogActivity),
-                    new TerminateLogInput(input.ExecutionId));
-            }
 
             return workflowOutput;
         }
         catch (Exception ex)
         {
-            await context.CallActivityAsync(nameof(LogActivity), new LogInput(
-                logExecutionId, "system", "workflow", WorkflowLogLevel.Error,
-                $"Workflow execution failed: {ex.Message}"));
+            logger.LogError(
+                "Workflow execution failed: {ErrorMessage} (execution {WorkflowExecutionId})",
+                ex.Message, logExecutionId);
 
             if (!isChild)
-            {
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
                     new WriteLifecycleEventInput(input.ExecutionId, "Failed", ex.Message));
-
-                await context.CallActivityAsync(nameof(TerminateLogActivity),
-                    new TerminateLogInput(input.ExecutionId));
-            }
 
             throw;
         }

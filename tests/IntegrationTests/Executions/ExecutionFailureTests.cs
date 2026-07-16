@@ -34,7 +34,7 @@ public class ExecutionFailureTests(DaemonTestFixture fixture)
             ExecutionId = response.Id
         });
 
-        // Assert - Stream should close after workflow fails (via StreamTerminatedEvent)
+        // Assert - Stream should close after workflow fails (store.Complete() called on terminal event)
         var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(300));
 
         // Should have received log events including a failure log

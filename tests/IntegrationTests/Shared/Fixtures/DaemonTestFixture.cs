@@ -28,6 +28,15 @@ public class DaemonTestFixture : IAsyncLifetime
             clientBuilder.AddStandardResilienceHandler();
         });
 
+        // Allow the ExecutionLog provider to receive Debug-level logs so that WatchExecution
+        // clients can observe HTTP request details emitted by activities during test runs.
+        appHost.Resources
+            .Single(r => r.Name == ServiceName.App.MainApi)
+            .Annotations.Add(new EnvironmentCallbackAnnotation(ctx =>
+            {
+                ctx.EnvironmentVariables["Logging__ExecutionLog__LogLevel__Default"] = "Debug";
+            }));
+
         App = await appHost.BuildAsync();
         var resourceNotificationService = App.Services.GetRequiredService<ResourceNotificationService>();
         await App.StartAsync();

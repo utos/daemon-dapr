@@ -66,7 +66,7 @@ public static class WatchExecutionResponseStreamExtensions
     /// <summary>
     /// Collects all events until the server closes the stream.
     /// The stream closes automatically when the workflow reaches a terminal state
-    /// and the server receives a StreamTerminatedEvent.
+    /// when the execution log store signals completion on the terminal event.
     /// </summary>
     /// <param name="call">The streaming call</param>
     /// <param name="timeout">Maximum time to wait for the stream to close</param>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Observability.Domain/Observability.Domain.csproj"/>
+        <ProjectReference Include="../Observability.Features/Observability.Features.csproj"/>
+        <ProjectReference Include="../../execution/Execution.Domain/Execution.Domain.csproj"/>
+        <ProjectReference Include="../../common/Common.Infrastructure/Common.Infrastructure.csproj"/>
+    </ItemGroup>
+
+</Project>

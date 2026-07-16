@@ -7,11 +7,6 @@ public static class StreamNames
         return $"workflowexecution-{id}";
     }
 
-    public static string ExecutionLog(Guid id)
-    {
-        return $"executionlog-{id}";
-    }
-
     public static string SubWorkflowCalls(Guid id)
     {
         return $"subworkflowcalls-{id}";

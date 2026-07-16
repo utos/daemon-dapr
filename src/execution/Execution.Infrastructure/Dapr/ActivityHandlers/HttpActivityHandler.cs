@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using Common.SeedWork;
 using Microsoft.Extensions.Logging;
 using Utos.Workflow.V1;
 using Execution.Domain.Services;
@@ -9,7 +8,6 @@ namespace Execution.Infrastructure.Dapr.ActivityHandlers;
 
 public class HttpActivityHandler(
     HttpClient httpClient,
-    IWorkflowLogger workflowLogger,
     ILogger<HttpActivityHandler> logger)
     : IActivityHandler
 {
@@ -23,14 +21,9 @@ public class HttpActivityHandler(
         var url = input.Url
                   ?? throw new InvalidOperationException("URL is required for HTTP activity");
 
-        logger.LogInformation("Executing HTTP {Method} to {Url}", httpMethod, url);
-
-        await workflowLogger.LogAsync(
-            input.LogExecutionId,
-            "system",
-            "http",
-            WorkflowLogLevel.Debug,
-            $"HTTP {httpMethod.Method} {url}");
+        logger.LogDebug(
+            "HTTP {HttpMethod} {Url} starting (execution {WorkflowExecutionId})",
+            httpMethod, url, input.LogExecutionId);
 
         var startTime = DateTimeOffset.UtcNow;
         var request = new HttpRequestMessage(httpMethod, url);
@@ -46,25 +39,20 @@ public class HttpActivityHandler(
         var responseContent = await response.Content.ReadAsStringAsync(ct);
         var duration = (DateTimeOffset.UtcNow - startTime).TotalMilliseconds;
 
-        logger.LogInformation("HTTP {Method} completed with status {StatusCode}", httpMethod, response.StatusCode);
-
         var statusCode = (int)response.StatusCode;
         var statusText = response.ReasonPhrase ?? string.Empty;
 
         var logLevel = statusCode switch
         {
-            >= 200 and < 300 => WorkflowLogLevel.Info,
-            >= 400 and < 500 => WorkflowLogLevel.Error,
-            >= 500 => WorkflowLogLevel.Warn,
-            _ => WorkflowLogLevel.Info
+            >= 200 and < 300 => LogLevel.Information,
+            >= 400 and < 500 => LogLevel.Error,
+            >= 500 => LogLevel.Warning,
+            _ => LogLevel.Information
         };
 
-        await workflowLogger.LogAsync(
-            input.LogExecutionId,
-            "system",
-            "http",
-            logLevel,
-            $"HTTP {httpMethod.Method} {url} ({statusCode} {statusText}, {duration:F0}ms)");
+        logger.Log(logLevel,
+            "HTTP {HttpMethod} {Url} completed: {StatusCode} {StatusText} in {DurationMs}ms (execution {WorkflowExecutionId})",
+            httpMethod.Method, url, statusCode, statusText, (long)duration, input.LogExecutionId);
 
         // TODO: Add on-error handler support - check if status code should be handled before throwing
         if (!response.IsSuccessStatusCode)

@@ -92,8 +92,6 @@ public static class ExecutionExtensions
 
             // Register activities
             options.RegisterActivity<WriteLifecycleEventActivity>();
-            options.RegisterActivity<LogActivity>();
-            options.RegisterActivity<TerminateLogActivity>();
             options.RegisterActivity<LoadWorkflowActivity>();
             options.RegisterActivity<ResolveActivityInputActivity>();
             options.RegisterActivity<ExecuteActivity>();
