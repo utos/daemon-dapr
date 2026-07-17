@@ -2,6 +2,7 @@ version: 2
 updates:
   - package-ecosystem: nuget
     directory: "/"
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -16,8 +17,13 @@ updates:
 
   - package-ecosystem: github-actions
     directory: "/"
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
     commit-message:
       prefix: ci
+    groups:
+      github-actions:
+        patterns:
+          - "*"
