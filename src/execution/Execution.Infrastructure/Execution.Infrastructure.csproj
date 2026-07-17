@@ -7,11 +7,11 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Aspire.Microsoft.EntityFrameworkCore.SqlServer" Version="13.4.6" />
-        <PackageReference Include="Dapr.AspNetCore" Version="1.18.4" />
-        <PackageReference Include="Dapr.Workflow" Version="1.18.4" />
-        <PackageReference Include="Mediator.SourceGenerator" Version="3.0.2" PrivateAssets="all" />
-        <PackageReference Include="Scriban" Version="7.2.5" />
+        <PackageReference Include="Aspire.Microsoft.EntityFrameworkCore.SqlServer" />
+        <PackageReference Include="Dapr.AspNetCore" />
+        <PackageReference Include="Dapr.Workflow" />
+        <PackageReference Include="Mediator.SourceGenerator" PrivateAssets="all" />
+        <PackageReference Include="Scriban" />
     </ItemGroup>
 
     <ItemGroup>
