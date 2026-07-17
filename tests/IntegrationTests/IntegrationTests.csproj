@@ -6,23 +6,23 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Aspire.Hosting.Testing" Version="13.4.6" />
-        <PackageReference Include="coverlet.collector" Version="10.0.1">
+        <PackageReference Include="Aspire.Hosting.Testing" />
+        <PackageReference Include="coverlet.collector">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
-        <PackageReference Include="WireMock.NET" Version="2.12.0" />
-        <PackageReference Include="xunit" Version="2.9.3"/>
-        <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+        <PackageReference Include="Microsoft.NET.Test.Sdk" />
+        <PackageReference Include="WireMock.NET" />
+        <PackageReference Include="xunit"/>
+        <PackageReference Include="xunit.runner.visualstudio">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Utos.Workflow" Version="0.0.8.3" />
-        <PackageReference Include="Utos.Daemon.Client" Version="0.0.8.3" />
+        <PackageReference Include="Utos.Workflow" />
+        <PackageReference Include="Utos.Daemon.Client" />
     </ItemGroup>
 
     <ItemGroup>

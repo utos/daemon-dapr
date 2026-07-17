@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <ItemGroup>
-        <PackageReference Include="Utos.Daemon.Server" Version="0.0.8.3" />
-        <PackageReference Include="Grpc.AspNetCore" Version="2.80.0" />
-        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
+        <PackageReference Include="Utos.Daemon.Server" />
+        <PackageReference Include="Grpc.AspNetCore" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     </ItemGroup>
 
     <ItemGroup>

@@ -9,10 +9,10 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Aspire.Hosting.AppHost" Version="13.4.6" />
-        <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.4.6" />
-        <PackageReference Include="CommunityToolkit.Aspire.Hosting.Dapr" Version="13.0.0"/>
-        <PackageReference Include="CommunityToolkit.Aspire.Hosting.KurrentDB" Version="13.4.0" />
+        <PackageReference Include="Aspire.Hosting.AppHost" />
+        <PackageReference Include="Aspire.Hosting.SqlServer" />
+        <PackageReference Include="CommunityToolkit.Aspire.Hosting.Dapr"/>
+        <PackageReference Include="CommunityToolkit.Aspire.Hosting.KurrentDB" />
     </ItemGroup>
 
     <ItemGroup>
