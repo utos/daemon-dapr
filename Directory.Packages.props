@@ -28,8 +28,8 @@
         <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
         <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
         <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
-        <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.16.0" />
-        <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.16.0" />
+        <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
+        <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.17.0" />
         <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.16.0" />
         <PackageVersion Include="Scriban" Version="7.2.5" />
         <PackageVersion Include="Utos.Daemon.Client" Version="0.0.8.3" />
