@@ -30,7 +30,7 @@ public class WorkflowExecutionBehaviorTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to complete
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -80,7 +80,7 @@ public class WorkflowExecutionBehaviorTests(DaemonTestFixture fixture)
             .BuildSequential();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to complete
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest

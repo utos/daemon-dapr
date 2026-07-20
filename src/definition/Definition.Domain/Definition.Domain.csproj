@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <PackageReference Include="Utos.Workflow" />
+        <PackageReference Include="Utos.Daemon.Server" />
+    </ItemGroup>
+
+</Project>

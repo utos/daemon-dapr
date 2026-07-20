@@ -9,7 +9,7 @@ public class TransitionRuleValidator : AbstractValidator<TransitionRule>
     {
         RuleFor(t => t.ActionCase)
             .NotEqual(TransitionRule.ActionOneofCase.None)
-            .WithMessage("Transition rule must have an action (transition or return)");
+            .WithMessage("Transition rule must have an action (transition or result)");
 
         When(t => t.ActionCase == TransitionRule.ActionOneofCase.Transition, () =>
         {
@@ -19,11 +19,11 @@ public class TransitionRuleValidator : AbstractValidator<TransitionRule>
                 .SetValidator(new TransitionTargetValidator());
         });
 
-        When(t => t.ActionCase == TransitionRule.ActionOneofCase.Return, () =>
+        When(t => t.ActionCase == TransitionRule.ActionOneofCase.Result, () =>
         {
-            RuleFor(t => t.Return)
+            RuleFor(t => t.Result)
                 .NotNull()
-                .WithMessage("Return value cannot be null");
+                .WithMessage("Result value cannot be null");
         });
     }
 }

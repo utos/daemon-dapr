@@ -11,6 +11,7 @@
 
     <ItemGroup>
         <ProjectReference Include="../Execution.Domain/Execution.Domain.csproj"/>
+        <ProjectReference Include="../../definition/Definition.Domain/Definition.Domain.csproj"/>
     </ItemGroup>
 
 </Project>

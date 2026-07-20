@@ -26,7 +26,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Assert
         Assert.NotNull(response);
@@ -47,7 +47,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             .BuildSequential();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Assert
         Assert.NotNull(response);
@@ -71,7 +71,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Assert
         Assert.NotNull(response);
@@ -104,7 +104,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<RpcException>(async () =>
-            await fixture.DaemonClient.ScheduleExecutionAsync(request));
+            await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
         Assert.Contains(reason.ToLowerInvariant(), exception.Status.Detail.ToLowerInvariant());
@@ -122,7 +122,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<RpcException>(async () =>
-            await fixture.DaemonClient.ScheduleExecutionAsync(request));
+            await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
         Assert.Contains("activity name too long", exception.Status.Detail.ToLowerInvariant());
@@ -146,7 +146,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<RpcException>(async () =>
-            await fixture.DaemonClient.ScheduleExecutionAsync(request));
+            await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
         Assert.Contains("workflow must contain at least one activity", exception.Status.Detail.ToLowerInvariant());
@@ -166,7 +166,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<RpcException>(async () =>
-            await fixture.DaemonClient.ScheduleExecutionAsync(request));
+            await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
         Assert.Contains("reserved keyword", exception.Status.Detail.ToLowerInvariant());
@@ -191,7 +191,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<RpcException>(async () =>
-            await fixture.DaemonClient.ScheduleExecutionAsync(request));
+            await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
         Assert.Contains(reason.ToLowerInvariant(), exception.Status.Detail.ToLowerInvariant());
@@ -209,7 +209,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Assert
         Assert.NotNull(response);
@@ -230,7 +230,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<RpcException>(async () =>
-            await fixture.DaemonClient.ScheduleExecutionAsync(request));
+            await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
         Assert.Contains("description too long", exception.Status.Detail.ToLowerInvariant());
@@ -251,7 +251,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Assert
         Assert.NotNull(response);
@@ -277,7 +277,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<RpcException>(async () =>
-            await fixture.DaemonClient.ScheduleExecutionAsync(request));
+            await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
         Assert.Contains(reason.ToLowerInvariant(), exception.Status.Detail.ToLowerInvariant());

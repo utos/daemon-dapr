@@ -38,7 +38,7 @@ public class DataFlowTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for completion
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -119,7 +119,7 @@ public class DataFlowTests(DaemonTestFixture fixture)
             .Build("get-current-user");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -166,7 +166,7 @@ public class DataFlowTests(DaemonTestFixture fixture)
             .Build("get-config");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -236,7 +236,7 @@ public class DataFlowTests(DaemonTestFixture fixture)
             .Build("step-a");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -292,7 +292,7 @@ public class DataFlowTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -347,7 +347,7 @@ public class DataFlowTests(DaemonTestFixture fixture)
             .Build("fetch-items");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -380,7 +380,7 @@ public class DataFlowTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {

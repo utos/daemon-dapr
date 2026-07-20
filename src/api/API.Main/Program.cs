@@ -1,4 +1,5 @@
 using Common.Constants;
+using Definition.Infrastructure.Extensions;
 using Execution.Infrastructure.Extensions;
 using Observability.Infrastructure.Extensions;
 using Tools.ServiceDefaults;
@@ -9,6 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 
 builder.AddExecutionModule(ServiceName.Database.WorkflowExecution, ServiceName.App.EventStore);
+builder.AddDefinitionModule();
 builder.AddObservabilityModule();
 
 // Add services to the container.
@@ -29,6 +31,7 @@ var app = builder.Build();
 // app.MapControllers();
 
 app.UseExecutionModule();
+app.UseDefinitionModule();
 app.UseObservabilityModule();
 
 app.Run();

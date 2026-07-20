@@ -1,3 +1,4 @@
+using Definition.Domain;
 using Execution.Features.Extensions;
 using Execution.Features.Commands;
 using Execution.Features.Queries;
@@ -8,15 +9,25 @@ using Utos.Daemon.V1;
 
 namespace Execution.Features.Services;
 
-public class ExecutionGrpcService(IMediator mediator) : ExecutionService.ExecutionServiceBase
+public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore definitionStore)
+    : ExecutionService.ExecutionServiceBase
 {
     public override async Task<ScheduleExecutionResponse> ScheduleExecution(
         ScheduleExecutionRequest request, ServerCallContext context)
     {
+        if (string.IsNullOrEmpty(request.Workflow?.Name))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Workflow name is required"));
+
+        // Resolve against the local store, then snapshot the content into the execution.
+        var definition = definitionStore.Resolve(request.Workflow)
+                         ?? throw new RpcException(new Status(StatusCode.NotFound,
+                             $"Workflow definition '{WorkflowIdentity.Key(request.Workflow)}' not found"));
+
         try
         {
             var command = new ScheduleExecutionCommand(
-                request.Bundle,
+                definition.Reference,
+                definition.Bundle,
                 request.Input.ToDictionary(),
                 request.StartActivity);
 

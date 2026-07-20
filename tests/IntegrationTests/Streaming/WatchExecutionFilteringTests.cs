@@ -23,7 +23,7 @@ public class WatchExecutionFilteringTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("after-position-workflow", fixture.MockBaseUrl)
             .HttpGet("filter-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // First, collect all events to know how many there are
         var fullCall = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -58,7 +58,7 @@ public class WatchExecutionFilteringTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("tail-events-workflow", fixture.MockBaseUrl)
             .HttpGet("filter-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // Wait for events to be generated
         await Task.Delay(TimeSpan.FromSeconds(2));
@@ -100,7 +100,7 @@ public class WatchExecutionFilteringTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("test-workflow", fixture.MockBaseUrl)
             .HttpGet("valid-activity", "/log-level-test")
             .Build();
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Act - Filter for ERROR level and above
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -131,7 +131,7 @@ public class WatchExecutionFilteringTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("source-filter-workflow", fixture.MockBaseUrl)
             .HttpGet("test-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // Act - Filter by specific activity source
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));

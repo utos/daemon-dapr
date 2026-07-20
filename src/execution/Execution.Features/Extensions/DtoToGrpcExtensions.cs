@@ -11,9 +11,9 @@ using GrpcWorkflowActivity = Utos.Workflow.V1.WorkflowActivity;
 using GrpcHttpActivityConfig = Utos.Workflow.V1.HttpActivityConfig;
 using GrpcWorkflowMetadata = Utos.Workflow.V1.WorkflowMetadata;
 using GrpcExecutionPayload = Utos.Daemon.V1.ExecutionPayload;
-using GrpcWorkflowApiVersion = Utos.Workflow.V1.WorkflowApiVersion;
-using GrpcWorkflowKind = Utos.Workflow.V1.WorkflowKind;
 using GrpcTransitionTarget = Utos.Workflow.V1.TransitionTarget;
+using GrpcWorkflowReference = Utos.Daemon.V1.WorkflowReference;
+using GrpcWorkflowError = Utos.Workflow.V1.WorkflowError;
 
 namespace Execution.Features.Extensions;
 
@@ -22,14 +22,23 @@ namespace Execution.Features.Extensions;
 /// </summary>
 public static class DtoToGrpcExtensions
 {
+    /// <summary>
+    /// Coarse code carried on <see cref="GrpcWorkflowError"/> until the execution pipeline
+    /// records structured failure causes of its own.
+    /// </summary>
+    private const string ExecutionFailedCode = "EXECUTION_FAILED";
+
     public static GrpcExecutionSummary ToGrpc(this ExecutionSummary dto)
     {
         var grpc = new GrpcExecutionSummary
         {
             Id = dto.Id.ToString(),
             Status = dto.Status,
-            WorkflowName = dto.WorkflowName,
-            WorkflowVersion = dto.WorkflowVersion,
+            Workflow = new GrpcWorkflowReference
+            {
+                Name = dto.WorkflowName,
+                Version = dto.WorkflowVersion
+            },
             CreatedAt = Timestamp.FromDateTime(dto.CreatedAt.ToUniversalTime())
         };
 
@@ -43,40 +52,57 @@ public static class DtoToGrpcExtensions
             grpc.FinishedAt = Timestamp.FromDateTime(dto.FinishedAt.Value.ToUniversalTime());
 
         if (!string.IsNullOrEmpty(dto.ErrorMessage))
-            grpc.ErrorMessage = dto.ErrorMessage;
+            grpc.Error = new GrpcWorkflowError
+            {
+                Code = ExecutionFailedCode,
+                Message = dto.ErrorMessage
+            };
 
         return grpc;
     }
 
     public static GrpcExecutionDetails ToGrpc(this ExecutionDetails dto)
     {
-        var grpc = new GrpcExecutionDetails
+        // Identity, status, timing and error all live on the embedded summary since v0.0.10;
+        // the response itself carries only the summary, the snapshotted bundle and the input.
+        var summary = new GrpcExecutionSummary
         {
             Id = dto.Id.ToString(),
             Status = dto.Status,
-            WorkflowName = dto.WorkflowName,
-            WorkflowVersion = dto.WorkflowVersion,
-            Bundle = dto.Bundle,
+            Workflow = new GrpcWorkflowReference
+            {
+                Name = dto.WorkflowName,
+                Version = dto.WorkflowVersion
+            },
             CreatedAt = Timestamp.FromDateTime(dto.CreatedAt.ToUniversalTime())
+        };
+
+        if (dto.ScheduledAt.HasValue)
+            summary.ScheduledAt = Timestamp.FromDateTime(dto.ScheduledAt.Value.ToUniversalTime());
+
+        if (dto.StartedAt.HasValue)
+            summary.StartedAt = Timestamp.FromDateTime(dto.StartedAt.Value.ToUniversalTime());
+
+        // ExecutionSummary has a single finished_at; take whichever terminal time is set.
+        var finishedAt = dto.CompletedAt ?? dto.FailedAt;
+        if (finishedAt.HasValue)
+            summary.FinishedAt = Timestamp.FromDateTime(finishedAt.Value.ToUniversalTime());
+
+        if (!string.IsNullOrEmpty(dto.ErrorMessage))
+            summary.Error = new GrpcWorkflowError
+            {
+                Code = ExecutionFailedCode,
+                Message = dto.ErrorMessage
+            };
+
+        var grpc = new GrpcExecutionDetails
+        {
+            Summary = summary,
+            Bundle = dto.Bundle
         };
 
         if (dto.Input.Count > 0)
             grpc.Input = dto.Input.ToGrpc();
-
-        if (dto.ScheduledAt.HasValue)
-            grpc.ScheduledAt = Timestamp.FromDateTime(dto.ScheduledAt.Value.ToUniversalTime());
-
-        if (dto.StartedAt.HasValue)
-            grpc.StartedAt = Timestamp.FromDateTime(dto.StartedAt.Value.ToUniversalTime());
-
-        if (dto.CompletedAt.HasValue)
-            grpc.CompletedAt = Timestamp.FromDateTime(dto.CompletedAt.Value.ToUniversalTime());
-
-        if (dto.FailedAt.HasValue)
-            grpc.FailedAt = Timestamp.FromDateTime(dto.FailedAt.Value.ToUniversalTime());
-
-        if (!string.IsNullOrEmpty(dto.ErrorMessage))
-            grpc.ErrorMessage = dto.ErrorMessage;
 
         return grpc;
     }

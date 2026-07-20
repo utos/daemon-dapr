@@ -1,8 +1,19 @@
+using Common.Constants;
 using Google.Protobuf.WellKnownTypes;
 using Utos.Daemon.V1;
 using Utos.Workflow.V1;
 
 namespace IntegrationTests.Shared.Builders;
+
+/// <summary>
+/// What a test wants to run. Since v0.0.10 a bundle is no longer shipped on the schedule
+/// call, so this is loaded into the daemon's definition store first and then scheduled by
+/// reference — see <c>DaemonTestFixture.ScheduleAsync</c>.
+/// </summary>
+public sealed record TestWorkflowRequest(
+    WorkflowBundle Bundle,
+    ExecutionPayload Input,
+    string StartActivity);
 
 public class TestWorkflowBuilder
 {
@@ -71,8 +82,8 @@ public class TestWorkflowBuilder
 
         var workflow = new Workflow
         {
-            ApiVersion = WorkflowApiVersion.V100,
-            Kind = WorkflowKind.WorkflowUtos,
+            ApiVersion = WorkflowDocument.ApiVersion,
+            Kind = WorkflowDocument.Kind,
             Metadata = new WorkflowMetadata
             {
                 Name = workflowName,
@@ -99,7 +110,7 @@ public class TestWorkflowBuilder
         return this;
     }
 
-    public ScheduleExecutionRequest Build(string? startActivity = null)
+    public TestWorkflowRequest Build(string? startActivity = null)
     {
         var spec = new WorkflowSpec();
         foreach (var (name, activity) in _activities)
@@ -107,8 +118,8 @@ public class TestWorkflowBuilder
 
         var workflow = new Workflow
         {
-            ApiVersion = WorkflowApiVersion.V100,
-            Kind = WorkflowKind.WorkflowUtos,
+            ApiVersion = WorkflowDocument.ApiVersion,
+            Kind = WorkflowDocument.Kind,
             Metadata = new WorkflowMetadata
             {
                 Name = _workflowName,
@@ -124,15 +135,13 @@ public class TestWorkflowBuilder
         foreach (var (name, depWorkflow) in _dependentWorkflows)
             bundle.Workflows.Add(name, depWorkflow);
 
-        return new ScheduleExecutionRequest
-        {
-            Bundle = bundle,
-            Input = _input,
-            StartActivity = startActivity ?? (_activities.Count > 0 ? _activities[0].Name : "")
-        };
+        return new TestWorkflowRequest(
+            bundle,
+            _input,
+            startActivity ?? (_activities.Count > 0 ? _activities[0].Name : ""));
     }
 
-    public ScheduleExecutionRequest BuildSequential(string? startActivity = null)
+    public TestWorkflowRequest BuildSequential(string? startActivity = null)
     {
         for (var i = 0; i < _activities.Count - 1; i++)
             _activities[i].Activity.OnSuccess.Add(new TransitionRule
@@ -220,9 +229,9 @@ public class ActivityBuilder
         return this;
     }
 
-    public ActivityBuilder OnReturn(Struct returnValue, string? when = null)
+    public ActivityBuilder OnResult(Struct resultValue, string? when = null)
     {
-        var rule = new TransitionRule { Return = returnValue };
+        var rule = new TransitionRule { Result = resultValue };
 
         if (when != null)
             rule.Condition = when;
@@ -283,12 +292,12 @@ public class ActivityBuilder
         return _parent.WithInput(payload);
     }
 
-    public ScheduleExecutionRequest Build(string? startActivity = null)
+    public TestWorkflowRequest Build(string? startActivity = null)
     {
         return _parent.Build(startActivity);
     }
 
-    public ScheduleExecutionRequest BuildSequential(string? startActivity = null)
+    public TestWorkflowRequest BuildSequential(string? startActivity = null)
     {
         return _parent.BuildSequential(startActivity);
     }
@@ -359,9 +368,9 @@ public class PromiseBranchListBuilder
         return this;
     }
 
-    public PromiseBranchListBuilder OnReturn(Struct returnValue, string? when = null)
+    public PromiseBranchListBuilder OnResult(Struct resultValue, string? when = null)
     {
-        var rule = new TransitionRule { Return = returnValue };
+        var rule = new TransitionRule { Result = resultValue };
         if (when != null)
             rule.Condition = when;
 
@@ -379,12 +388,12 @@ public class PromiseBranchListBuilder
         return _parent.WithInput(key, value);
     }
 
-    public ScheduleExecutionRequest Build(string? startActivity = null)
+    public TestWorkflowRequest Build(string? startActivity = null)
     {
         return _parent.Build(startActivity);
     }
 
-    public ScheduleExecutionRequest BuildSequential(string? startActivity = null)
+    public TestWorkflowRequest BuildSequential(string? startActivity = null)
     {
         return _parent.BuildSequential(startActivity);
     }

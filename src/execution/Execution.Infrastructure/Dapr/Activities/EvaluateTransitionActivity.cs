@@ -59,11 +59,11 @@ public class EvaluateTransitionActivity(
                 Utos.Workflow.V1.TransitionRule.ActionOneofCase.Transition =>
                     HandleTransition(rule.Transition, templateContext, activityOutput),
 
-                Utos.Workflow.V1.TransitionRule.ActionOneofCase.Return =>
-                    HandleReturn(rule.Return, templateContext),
+                Utos.Workflow.V1.TransitionRule.ActionOneofCase.Result =>
+                    HandleResult(rule.Result, templateContext),
 
                 _ => throw new InvalidOperationException(
-                    "Transition rule has no action set (neither transition nor return)")
+                    "Transition rule has no action set (neither transition nor result)")
             };
         }
 
@@ -82,11 +82,11 @@ public class EvaluateTransitionActivity(
         return new EvaluateTransitionOutput(nextActivityName, mappedInput, null);
     }
 
-    private EvaluateTransitionOutput HandleReturn(
-        Struct returnStruct,
+    private EvaluateTransitionOutput HandleResult(
+        Struct resultStruct,
         TemplateContext templateContext)
     {
-        var rendered = RenderStruct(returnStruct, templateContext);
+        var rendered = RenderStruct(resultStruct, templateContext);
         return new EvaluateTransitionOutput(ReservedKeywords.End, null, rendered);
     }
 
