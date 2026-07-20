@@ -2,6 +2,7 @@ using Dapr.Workflow;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Execution.Domain.Services;
+using Execution.Domain.Validation;
 using Execution.Infrastructure.Extensions;
 using Execution.Infrastructure.Templating;
 using Utos.Workflow.V1;
@@ -50,7 +51,7 @@ public class ResolveActivityInputActivity(
         return activity.ConfigCase switch
         {
             WorkflowActivity.ConfigOneofCase.Http =>
-                ResolveHttpActivity(activity.Http, templateContext),
+                ResolveHttpActivity(activity.Http, templateContext, input.ActivityName),
 
             WorkflowActivity.ConfigOneofCase.Workflow =>
                 ResolveWorkflowActivity(activity.Workflow, templateContext, activityInput, input.ActivityInput),
@@ -62,9 +63,18 @@ public class ResolveActivityInputActivity(
 
     private ResolveActivityInputOutput ResolveHttpActivity(
         HttpActivityConfig httpConfig,
-        TemplateContext templateContext)
+        TemplateContext templateContext,
+        string activityName)
     {
         var url = templateEngine.RenderToString(httpConfig.Url, templateContext, logger);
+
+        // A templated URL skips the load-time shape check, since its scheme or host may
+        // come from {{ env.x }}. Re-apply the same rules now that it is rendered, so a bad
+        // value fails with the same diagnostic instead of a raw HTTP client error.
+        if (!HttpUrlRules.IsValidRendered(url))
+            throw new InvalidOperationException(
+                $"Activity '{activityName}' resolved to an unusable URL '{url}': " +
+                $"{HttpUrlRules.GetError(url)}");
 
         var headers = new Dictionary<string, string>();
         if (httpConfig.Headers.Count > 0)

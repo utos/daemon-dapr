@@ -252,15 +252,18 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
         Assert.Empty(execution.Env);
     }
 
-    [Fact]
-    public async Task Env_TemplatedUrlRenderingToGarbage_ShouldFailTheExecution()
+    [Theory]
+    [InlineData("not-a-url", "invalid url format")]
+    [InlineData("ftp://wrong-scheme.test", "unsupported url scheme")]
+    public async Task Env_TemplatedUrlRenderingToGarbage_ShouldFailWithTheSameDiagnostic(
+        string envBaseUrl, string expectedReason)
     {
         // Arrange - a templated URL skips the load-time absolute-URL check (its host is
-        // not known until rendered), so this pins down that a bad render still fails the
-        // run rather than passing silently.
+        // not known until rendered), so the same rules are re-applied after rendering.
+        // A bad value must fail with that diagnostic, not a raw HTTP client error.
         var request = new TestWorkflowBuilder("env-bad-url-workflow", fixture.MockBaseUrl)
             .HttpGet("fetch", "/ignored", customUrl: "{{ env.baseUrl }}/thing")
-            .WithEnv("baseUrl", "not-a-url")
+            .WithEnv("baseUrl", envBaseUrl)
             .Build();
 
         // Act - schedule succeeds; the failure surfaces during execution
@@ -273,6 +276,10 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         Assert.Equal(ExecutionStatus.Failed, execution.Summary.Status);
         Assert.NotNull(execution.Summary.Error);
+
+        var message = execution.Summary.Error.Message.ToLowerInvariant();
+        Assert.Contains(expectedReason, message);
+        Assert.Contains("fetch", message); // names the offending activity
     }
 
     private async Task WatchToCompletion(string executionId)
