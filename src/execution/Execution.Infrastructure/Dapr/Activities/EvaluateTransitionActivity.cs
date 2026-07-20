@@ -40,7 +40,8 @@ public class EvaluateTransitionActivity(
         // Build template context with both input and output
         var templateContext = new TemplateContext()
             .SetInput(activityInput)
-            .SetOutput(activityOutput);
+            .SetOutput(activityOutput)
+            .SetEnv(executionContext.Env);
 
         // Evaluate transitions in order, first matching condition wins
         foreach (var rule in activity.OnSuccess)

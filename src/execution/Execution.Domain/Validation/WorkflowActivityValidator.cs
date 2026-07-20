@@ -49,10 +49,20 @@ public class WorkflowActivityValidator : AbstractValidator<WorkflowActivity>
             .SetValidator(new TransitionRuleValidator());
     }
 
+    /// <summary>
+    /// A URL whose scheme or host comes from a template — typically
+    /// "{{ env.baseUrl }}/path" — is not an absolute URI until it is rendered, so its
+    /// shape can only be checked at execution time.
+    /// </summary>
+    private static bool HasTemplateExpression(string url) => url.Contains("{{");
+
     private static bool IsValidHttpUrl(string url)
     {
         if (string.IsNullOrWhiteSpace(url))
             return false;
+
+        if (HasTemplateExpression(url))
+            return true;
 
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return false;

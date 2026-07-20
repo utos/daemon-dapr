@@ -13,7 +13,8 @@ namespace IntegrationTests.Shared.Builders;
 public sealed record TestWorkflowRequest(
     WorkflowBundle Bundle,
     ExecutionPayload Input,
-    string StartActivity);
+    string StartActivity,
+    Dictionary<string, string> Env);
 
 public class TestWorkflowBuilder
 {
@@ -23,6 +24,7 @@ public class TestWorkflowBuilder
     private readonly string? _description;
     private readonly List<(string Name, WorkflowActivity Activity)> _activities = [];
     private readonly ExecutionPayload _input = new();
+    private readonly Dictionary<string, string> _env = new();
     private readonly Dictionary<string, Workflow> _dependentWorkflows = new();
 
     public TestWorkflowBuilder(string workflowName, string mockBaseUrl,
@@ -110,6 +112,13 @@ public class TestWorkflowBuilder
         return this;
     }
 
+    /// <summary>Ambient config for the run, reachable from every activity as {{ env.key }}.</summary>
+    public TestWorkflowBuilder WithEnv(string key, string value)
+    {
+        _env[key] = value;
+        return this;
+    }
+
     public TestWorkflowRequest Build(string? startActivity = null)
     {
         var spec = new WorkflowSpec();
@@ -138,7 +147,8 @@ public class TestWorkflowBuilder
         return new TestWorkflowRequest(
             bundle,
             _input,
-            startActivity ?? (_activities.Count > 0 ? _activities[0].Name : ""));
+            startActivity ?? (_activities.Count > 0 ? _activities[0].Name : ""),
+            _env);
     }
 
     public TestWorkflowRequest BuildSequential(string? startActivity = null)
@@ -292,6 +302,11 @@ public class ActivityBuilder
         return _parent.WithInput(payload);
     }
 
+    public TestWorkflowBuilder WithEnv(string key, string value)
+    {
+        return _parent.WithEnv(key, value);
+    }
+
     public TestWorkflowRequest Build(string? startActivity = null)
     {
         return _parent.Build(startActivity);
@@ -386,6 +401,11 @@ public class PromiseBranchListBuilder
     public TestWorkflowBuilder WithInput(string key, object? value)
     {
         return _parent.WithInput(key, value);
+    }
+
+    public TestWorkflowBuilder WithEnv(string key, string value)
+    {
+        return _parent.WithEnv(key, value);
     }
 
     public TestWorkflowRequest Build(string? startActivity = null)

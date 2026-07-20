@@ -12,4 +12,10 @@ public sealed class ExecutionContext
     public WorkflowBundle Bundle { get; init; } = null!;
     public string EntryPoint { get; init; } = null!;
     public Dictionary<string, object> Input { get; init; } = new();
+
+    /// <summary>
+    /// Ambient environment for the run, available to every activity as {{ env.x }}.
+    /// Sub-workflow executions inherit their parent's.
+    /// </summary>
+    public Dictionary<string, string> Env { get; init; } = new();
 }

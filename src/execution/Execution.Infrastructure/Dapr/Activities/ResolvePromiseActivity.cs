@@ -45,7 +45,9 @@ public class ResolvePromiseActivity(
 
         var promiseConfig = activity.Promise;
         var activityInput = input.ActivityInput ?? executionContext.Input;
-        var templateContext = new TemplateContext().SetInput(activityInput);
+        var templateContext = new TemplateContext()
+            .SetInput(activityInput)
+            .SetEnv(executionContext.Env);
 
         var branches = new List<PromiseBranchResolution>();
 
@@ -70,6 +72,7 @@ public class ResolvePromiseActivity(
                 {
                     var itemContext = new TemplateContext()
                         .SetInput(activityInput)
+                        .SetEnv(executionContext.Env)
                         .Set(branch.ForEach.Alias, item);
 
                     var resolution = ResolveBranch(

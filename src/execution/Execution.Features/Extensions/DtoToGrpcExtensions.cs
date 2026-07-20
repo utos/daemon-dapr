@@ -104,6 +104,9 @@ public static class DtoToGrpcExtensions
         if (dto.Input.Count > 0)
             grpc.Input = dto.Input.ToGrpc();
 
+        foreach (var (key, value) in dto.Env)
+            grpc.Env.Add(key, value);
+
         return grpc;
     }
 

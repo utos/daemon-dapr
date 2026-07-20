@@ -77,7 +77,8 @@ public class WorkflowExecutionReadModelProjection(
             WorkflowName = entryWorkflow.Metadata.Name,
             WorkflowVersion = entryWorkflow.Metadata.Version,
             WorkflowDefinitionJson = Formatter.Format(@event.Bundle),
-            InputJson = @event.Input.Count > 0 ? JsonSerializer.Serialize(@event.Input, JsonOptions) : null
+            InputJson = @event.Input.Count > 0 ? JsonSerializer.Serialize(@event.Input, JsonOptions) : null,
+            EnvJson = @event.Env.Count > 0 ? JsonSerializer.Serialize(@event.Env) : null
         };
 
         dbContext.WorkflowExecutions.Add(readModel);

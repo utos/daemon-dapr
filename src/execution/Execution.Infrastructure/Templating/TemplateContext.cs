@@ -18,6 +18,23 @@ public sealed class TemplateContext
         return this;
     }
 
+    /// <summary>
+    /// Sets the run's ambient environment, available to every activity as {{ env.x }}.
+    /// Always set it — an empty map makes {{ env.missing }} behave like any other missing
+    /// key rather than failing on an undefined root object.
+    /// </summary>
+    public TemplateContext SetEnv(IDictionary<string, string>? env)
+    {
+        var scriptObject = new ScriptObject();
+
+        if (env != null)
+            foreach (var (key, value) in env)
+                scriptObject[key] = value;
+
+        _scriptObject["env"] = scriptObject;
+        return this;
+    }
+
     public TemplateContext SetWorkflow(object workflow)
     {
         _scriptObject["workflow"] = workflow;

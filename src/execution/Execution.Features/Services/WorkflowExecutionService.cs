@@ -29,7 +29,8 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
                 definition.Reference,
                 definition.Bundle,
                 request.Input.ToDictionary(),
-                request.StartActivity);
+                request.StartActivity,
+                request.Env.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
 
             var result = await mediator.Send(command, context.CancellationToken);
 

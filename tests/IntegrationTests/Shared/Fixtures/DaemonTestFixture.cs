@@ -76,12 +76,17 @@ public class DaemonTestFixture : IAsyncLifetime
         var loaded = await DefinitionClient.LoadWorkflowAsync(
             new LoadWorkflowRequest { Bundle = request.Bundle });
 
-        return await DaemonClient.ScheduleExecutionAsync(new ScheduleExecutionRequest
+        var scheduleRequest = new ScheduleExecutionRequest
         {
             Workflow = loaded.Reference,
             Input = request.Input,
             StartActivity = request.StartActivity
-        });
+        };
+
+        foreach (var (key, value) in request.Env)
+            scheduleRequest.Env.Add(key, value);
+
+        return await DaemonClient.ScheduleExecutionAsync(scheduleRequest);
     }
 
     public async Task DisposeAsync()

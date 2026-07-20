@@ -14,6 +14,9 @@ public record ScheduleExecutionCommand(
     WorkflowReference Workflow,
     WorkflowBundle Bundle,
     Dictionary<string, object> Input,
-    string StartActivity) : ICommand<ScheduleExecutionResult>;
+    string StartActivity,
+    // Ambient config available to every activity via {{ env.x }}, unlike Input which
+    // reaches only the start activity. Non-secret only.
+    Dictionary<string, string> Env) : ICommand<ScheduleExecutionResult>;
 
 public record ScheduleExecutionResult(Guid Id, ExecutionStatus Status);

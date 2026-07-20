@@ -43,7 +43,9 @@ public class ResolveActivityInputActivity(
                 $"Activity '{input.ActivityName}' not found in workflow '{input.WorkflowKey}'");
 
         var activityInput = input.ActivityInput ?? executionContext.Input;
-        var templateContext = new TemplateContext().SetInput(activityInput);
+        var templateContext = new TemplateContext()
+            .SetInput(activityInput)
+            .SetEnv(executionContext.Env);
 
         return activity.ConfigCase switch
         {

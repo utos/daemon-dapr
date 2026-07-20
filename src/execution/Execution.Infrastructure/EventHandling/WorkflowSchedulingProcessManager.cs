@@ -39,6 +39,7 @@ public class WorkflowSchedulingProcessManager(
         var bundle = @event.Bundle;
         var input = @event.Input;
         var startActivity = @event.StartActivity;
+        var env = @event.Env;
 
         try
         {
@@ -62,12 +63,18 @@ public class WorkflowSchedulingProcessManager(
                 "Execution created and scheduled (execution {WorkflowExecutionId})", executionId);
 
             // Step 2: Write context to store BEFORE scheduling the workflow (idempotent — skip if exists)
+            if (env.Count > 0)
+                logger.LogDebug(
+                    "Ambient env for this run: {AmbientEnv} (execution {WorkflowExecutionId})",
+                    string.Join(", ", env.Select(kvp => $"{kvp.Key}={kvp.Value}")), executionId);
+
             await contextStore.SaveContextAsync(new ExecutionContext
             {
                 ExecutionId = executionId,
                 Bundle = bundle,
                 EntryPoint = bundle.EntryPoint,
-                Input = input
+                Input = input,
+                Env = env
             }, cancellationToken);
 
             // Step 3: Schedule Dapr workflow (idempotent — handle duplicate instance)
