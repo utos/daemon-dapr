@@ -64,6 +64,12 @@ public class WorkflowExecutionReadModel : Entity
     /// </summary>
     public string? InputJson { get; set; }
 
+    /// <summary>
+    /// Ambient environment as JSON. Kept here as well as on ExecutionContext because that
+    /// context row is deleted when the run ends, and GetExecution still echoes env back.
+    /// </summary>
+    public string? EnvJson { get; set; }
+
     // Audit fields inherited from Entity:
     // - CreatedAt (when first event was received)
     // - LastModifiedAt (when last event was received)

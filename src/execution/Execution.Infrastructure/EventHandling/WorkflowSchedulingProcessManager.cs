@@ -1,8 +1,10 @@
 using Common.Infrastructure.EventHandling;
 using Common.SeedWork;
 using Dapr.Workflow;
+using Execution.Features.Models;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Utos.Daemon.V1;
 using Execution.Domain.Events;
 using Execution.Domain.Services;
@@ -15,6 +17,7 @@ public class WorkflowSchedulingProcessManager(
     IEventStoreRepository eventStore,
     DaprWorkflowClient workflowClient,
     IExecutionContextStore contextStore,
+    IOptions<ExecutionLimitsOptions> limits,
     ILogger<WorkflowSchedulingProcessManager> logger) : IEventHandler
 {
     public async Task HandleAsync(IDomainEvent @event, long position, CancellationToken cancellationToken = default)
@@ -39,6 +42,7 @@ public class WorkflowSchedulingProcessManager(
         var bundle = @event.Bundle;
         var input = @event.Input;
         var startActivity = @event.StartActivity;
+        var env = @event.Env;
 
         try
         {
@@ -62,19 +66,30 @@ public class WorkflowSchedulingProcessManager(
                 "Execution created and scheduled (execution {WorkflowExecutionId})", executionId);
 
             // Step 2: Write context to store BEFORE scheduling the workflow (idempotent — skip if exists)
+            if (env.Count > 0)
+                logger.LogDebug(
+                    "Ambient env for this run: {AmbientEnv} (execution {WorkflowExecutionId})",
+                    string.Join(", ", env.Select(kvp => $"{kvp.Key}={kvp.Value}")), executionId);
+
             await contextStore.SaveContextAsync(new ExecutionContext
             {
                 ExecutionId = executionId,
                 Bundle = bundle,
                 EntryPoint = bundle.EntryPoint,
-                Input = input
+                Input = input,
+                Env = env
             }, cancellationToken);
 
             // Step 3: Schedule Dapr workflow (idempotent — handle duplicate instance)
+            // Limits are captured here rather than read inside the orchestrator: a Dapr
+            // workflow must replay identically, so a run keeps the limits it started with
+            // even if configuration changes underneath it.
             var workflowInput = new WorkflowExecutorInput(
                 executionId,
                 bundle.EntryPoint,
-                startActivity);
+                startActivity,
+                MaxLoopedTransitions: limits.Value.MaxLoopedTransitions,
+                ContinueAsNewAfterTransitions: limits.Value.ContinueAsNewAfterTransitions);
 
             try
             {

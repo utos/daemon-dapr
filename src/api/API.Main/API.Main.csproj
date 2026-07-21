@@ -11,6 +11,7 @@
     <ItemGroup>
         <ProjectReference Include="../../common/Common.Constants/Common.Constants.csproj"/>
         <ProjectReference Include="../../tools/Tools.ServiceDefaults/Tools.ServiceDefaults.csproj"/>
+        <ProjectReference Include="../../definition/Definition.Infrastructure/Definition.Infrastructure.csproj"/>
         <ProjectReference Include="../../execution/Execution.Infrastructure/Execution.Infrastructure.csproj"/>
         <ProjectReference Include="../../observability/Observability.Infrastructure/Observability.Infrastructure.csproj"/>
     </ItemGroup>

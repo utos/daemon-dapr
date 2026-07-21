@@ -17,14 +17,14 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         var execution = await WaitForExecutionInList(scheduleResponse.Id, TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.NotNull(execution);
         Assert.Equal(scheduleResponse.Id, execution.Id);
-        Assert.Equal("list-basic-test", execution.WorkflowName);
-        Assert.Equal("1.0.0", execution.WorkflowVersion);
+        Assert.Equal("list-basic-test", execution.Workflow.Name);
+        Assert.Equal("1.0.0", execution.Workflow.Version);
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         var execution = await WaitForExecutionInList(scheduleResponse.Id, TimeSpan.FromSeconds(5));
 
         // Assert
@@ -60,7 +60,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         var execution = await WaitForExecutionInList(scheduleResponse.Id, TimeSpan.FromSeconds(5));
 
         // Assert
@@ -80,14 +80,14 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
         var request1 = new TestWorkflowBuilder($"order-test-{testId}-1", fixture.MockBaseUrl)
             .HttpGet("valid-activity", "/success")
             .Build();
-        var execution1 = await fixture.DaemonClient.ScheduleExecutionAsync(request1);
+        var execution1 = await fixture.ScheduleAsync(request1);
 
         await Task.Delay(200); // Ensure different timestamps
 
         var request2 = new TestWorkflowBuilder($"order-test-{testId}-2", fixture.MockBaseUrl)
             .HttpGet("valid-activity", "/success")
             .Build();
-        var execution2 = await fixture.DaemonClient.ScheduleExecutionAsync(request2);
+        var execution2 = await fixture.ScheduleAsync(request2);
 
         // Wait for both projections
         await WaitForExecutionInList(execution1.Id, TimeSpan.FromSeconds(5));
@@ -98,7 +98,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
 
         // Assert - Find our test executions
         var ourExecutions = response.Executions
-            .Where(e => e.WorkflowName.StartsWith($"order-test-{testId}"))
+            .Where(e => e.Workflow.Name.StartsWith($"order-test-{testId}"))
             .ToList();
 
         Assert.Equal(2, ourExecutions.Count);
@@ -120,7 +120,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Wait for execution to reach at least Scheduled status
         var execution = await WaitForExecutionWithMinimumStatus(
@@ -142,7 +142,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Wait for execution to become active
         var execution = await WaitForExecutionWithMinimumStatus(
@@ -164,7 +164,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Wait for execution to complete
         var execution = await WaitForExecutionWithStatus(
@@ -193,7 +193,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Wait for execution to fail
         var execution = await WaitForExecutionWithStatus(
@@ -204,8 +204,8 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
         // Assert
         Assert.NotNull(execution);
         Assert.Equal(ExecutionStatus.Failed, execution.Status);
-        Assert.NotNull(execution.ErrorMessage);
-        Assert.NotEmpty(execution.ErrorMessage);
+        Assert.NotNull(execution.Error);
+        Assert.NotEmpty(execution.Error.Message);
         Assert.NotNull(execution.FinishedAt);
     }
 
@@ -226,7 +226,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         var execution = await WaitForExecutionWithStatus(
             scheduleResponse.Id,
             ExecutionStatus.Failed,
@@ -234,9 +234,9 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
 
         // Assert
         Assert.NotNull(execution);
-        if (execution.ErrorMessage != null)
-            Assert.True(execution.ErrorMessage.Length <= 200,
-                $"Error message should be truncated to 200 chars. Actual length: {execution.ErrorMessage.Length}");
+        if (execution.Error is { } error)
+            Assert.True(error.Message.Length <= 200,
+                $"Error message should be truncated to 200 chars. Actual length: {error.Message.Length}");
     }
 
     /// <summary>

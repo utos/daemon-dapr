@@ -50,6 +50,23 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
                     v => ProtoFormatter.Format(v),
                     v => ProtoParser.Parse<WorkflowBundle>(v)));
 
+            b.Property(e => e.Env)
+                .HasColumnName("EnvJson")
+                .HasColumnType("nvarchar(max)")
+                .IsRequired()
+                .HasConversion(
+                    new ValueConverter<Dictionary<string, string>, string>(
+                        v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                        v => JsonSerializer.Deserialize<Dictionary<string, string>>(
+                            v, (JsonSerializerOptions?)null)!),
+                    new ValueComparer<Dictionary<string, string>>(
+                        (a, b) => JsonSerializer.Serialize(a, (JsonSerializerOptions?)null)
+                                  == JsonSerializer.Serialize(b, (JsonSerializerOptions?)null),
+                        v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode(),
+                        v => JsonSerializer.Deserialize<Dictionary<string, string>>(
+                            JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                            (JsonSerializerOptions?)null)!));
+
             b.Property(e => e.Input)
                 .HasColumnName("InputJson")
                 .HasColumnType("nvarchar(max)")

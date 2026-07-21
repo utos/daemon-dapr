@@ -29,7 +29,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
             .Build("call-child");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -45,7 +45,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
         // Assert — Execution completed successfully
         var execution = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = response.Id });
-        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
     }
 
     [Fact]
@@ -81,12 +81,12 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
             .AddDependentWorkflow("child-return", child =>
             {
                 child.HttpGet("fetch-data", "/child-data")
-                    .OnReturn(returnStruct);
+                    .OnResult(returnStruct);
             })
             .Build("call-child");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -127,17 +127,17 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
             .AddDependentWorkflow("workflow-b", b =>
             {
                 b.WorkflowCall("call-c", "workflow-c", "do-http")
-                    .OnReturn(returnB);
+                    .OnResult(returnB);
             })
             .AddDependentWorkflow("workflow-c", c =>
             {
                 c.HttpGet("do-http", "/level-c")
-                    .OnReturn(returnC);
+                    .OnResult(returnC);
             })
             .Build("call-b");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -152,7 +152,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
 
         var execution = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = response.Id });
-        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
     }
 
     [Fact]
@@ -185,7 +185,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
             .Build("call-child");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -201,7 +201,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
 
         var execution = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = response.Id });
-        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
     }
 
     [Fact]
@@ -220,7 +220,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
             .Build("call-child");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -236,7 +236,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
         {
             var execution = await fixture.DaemonClient.GetExecutionAsync(
                 new GetExecutionRequest { ExecutionId = response.Id });
-            status = execution.Status;
+            status = execution.Summary.Status;
             if (status == ExecutionStatus.Failed) break;
             await Task.Delay(250);
         } while (DateTime.UtcNow < deadline);

@@ -1,7 +1,10 @@
+using System.Text.Json.Serialization;
+using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Execution.Domain.Services;
+using Execution.Domain.Validation;
 using Execution.Infrastructure.Extensions;
 using Execution.Infrastructure.Templating;
 using Utos.Workflow.V1;
@@ -12,6 +15,7 @@ public sealed record ResolveActivityInputInput(
     Guid ExecutionId,
     string WorkflowKey,
     string ActivityName,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? ActivityInput);
 
 public sealed record ResolveActivityInputOutput(
@@ -24,6 +28,7 @@ public sealed record ResolveActivityInputOutput(
     // Workflow call fields (null when not workflow)
     string? SubWorkflowKey,
     string? SubStartActivity,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? WorkflowInput);
 
 public class ResolveActivityInputActivity(
@@ -43,12 +48,14 @@ public class ResolveActivityInputActivity(
                 $"Activity '{input.ActivityName}' not found in workflow '{input.WorkflowKey}'");
 
         var activityInput = input.ActivityInput ?? executionContext.Input;
-        var templateContext = new TemplateContext().SetInput(activityInput);
+        var templateContext = new TemplateContext()
+            .SetInput(activityInput)
+            .SetEnv(executionContext.Env);
 
         return activity.ConfigCase switch
         {
             WorkflowActivity.ConfigOneofCase.Http =>
-                ResolveHttpActivity(activity.Http, templateContext),
+                ResolveHttpActivity(activity.Http, templateContext, input.ActivityName),
 
             WorkflowActivity.ConfigOneofCase.Workflow =>
                 ResolveWorkflowActivity(activity.Workflow, templateContext, activityInput, input.ActivityInput),
@@ -60,9 +67,18 @@ public class ResolveActivityInputActivity(
 
     private ResolveActivityInputOutput ResolveHttpActivity(
         HttpActivityConfig httpConfig,
-        TemplateContext templateContext)
+        TemplateContext templateContext,
+        string activityName)
     {
         var url = templateEngine.RenderToString(httpConfig.Url, templateContext, logger);
+
+        // A templated URL skips the load-time shape check, since its scheme or host may
+        // come from {{ env.x }}. Re-apply the same rules now that it is rendered, so a bad
+        // value fails with the same diagnostic instead of a raw HTTP client error.
+        if (!HttpUrlRules.IsValidRendered(url))
+            throw new InvalidOperationException(
+                $"Activity '{activityName}' resolved to an unusable URL '{url}': " +
+                $"{HttpUrlRules.GetError(url)}");
 
         var headers = new Dictionary<string, string>();
         if (httpConfig.Headers.Count > 0)
@@ -126,20 +142,12 @@ public class ResolveActivityInputActivity(
     {
         return value.KindCase switch
         {
-            Value.KindOneofCase.StringValue => RenderStringValue(value.StringValue, templateContext),
+            Value.KindOneofCase.StringValue => templateEngine.RenderTyped(value.StringValue, templateContext, logger),
             Value.KindOneofCase.StructValue => RenderStruct(value.StructValue, templateContext),
             Value.KindOneofCase.ListValue => value.ListValue.Values
                 .Select(v => RenderValue(v, templateContext))
                 .ToList(),
             _ => value.ToObject()
         };
-    }
-
-    private object RenderStringValue(string str, TemplateContext templateContext)
-    {
-        if (!templateEngine.HasTemplate(str))
-            return str;
-
-        return templateEngine.RenderToString(str, templateContext, logger);
     }
 }

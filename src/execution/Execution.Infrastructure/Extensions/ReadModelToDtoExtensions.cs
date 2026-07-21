@@ -60,6 +60,18 @@ public static class ReadModelToDtoExtensions
                 throw new InvalidOperationException($"Failed to deserialize payload for execution {readModel.Id}", ex);
             }
 
+        var env = new Dictionary<string, string>();
+        if (!string.IsNullOrEmpty(readModel.EnvJson))
+            try
+            {
+                env = JsonSerializer.Deserialize<Dictionary<string, string>>(readModel.EnvJson) ??
+                      new Dictionary<string, string>();
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidOperationException($"Failed to deserialize env for execution {readModel.Id}", ex);
+            }
+
         return new ExecutionDetails
         {
             Id = readModel.Id,
@@ -69,6 +81,7 @@ public static class ReadModelToDtoExtensions
             Bundle = bundle ??
                      throw new InvalidOperationException($"Workflow bundle is missing for execution {readModel.Id}"),
             Input = input,
+            Env = env,
             CreatedAt = readModel.CreatedAt,
             ScheduledAt = readModel.ScheduledAt,
             StartedAt = readModel.StartedAt,

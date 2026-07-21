@@ -53,5 +53,8 @@ public class WorkflowExecutionReadModelConfiguration : BaseConfiguration<Workflo
 
         builder.Property(e => e.InputJson)
             .HasColumnType("nvarchar(max)");
+
+        builder.Property(e => e.EnvJson)
+            .HasColumnType("nvarchar(max)");
     }
 }

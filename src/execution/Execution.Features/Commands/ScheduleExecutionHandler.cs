@@ -10,7 +10,8 @@ public class ScheduleExecutionHandler(IEventStoreRepository eventStore)
     public async ValueTask<ScheduleExecutionResult> Handle(
         ScheduleExecutionCommand command, CancellationToken ct)
     {
-        var workflowExecution = new WorkflowExecution(command.Bundle, command.Input, command.StartActivity);
+        var workflowExecution = new WorkflowExecution(
+            command.Bundle, command.Input, command.StartActivity, command.Env);
         await eventStore.SaveAsync(workflowExecution);
         return new ScheduleExecutionResult(workflowExecution.Id, workflowExecution.Status);
     }

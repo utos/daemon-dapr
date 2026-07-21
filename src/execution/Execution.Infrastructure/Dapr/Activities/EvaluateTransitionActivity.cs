@@ -40,7 +40,8 @@ public class EvaluateTransitionActivity(
         // Build template context with both input and output
         var templateContext = new TemplateContext()
             .SetInput(activityInput)
-            .SetOutput(activityOutput);
+            .SetOutput(activityOutput)
+            .SetEnv(executionContext.Env);
 
         // Evaluate transitions in order, first matching condition wins
         foreach (var rule in activity.OnSuccess)
@@ -59,11 +60,11 @@ public class EvaluateTransitionActivity(
                 Utos.Workflow.V1.TransitionRule.ActionOneofCase.Transition =>
                     HandleTransition(rule.Transition, templateContext, activityOutput),
 
-                Utos.Workflow.V1.TransitionRule.ActionOneofCase.Return =>
-                    HandleReturn(rule.Return, templateContext),
+                Utos.Workflow.V1.TransitionRule.ActionOneofCase.Result =>
+                    HandleResult(rule.Result, templateContext),
 
                 _ => throw new InvalidOperationException(
-                    "Transition rule has no action set (neither transition nor return)")
+                    "Transition rule has no action set (neither transition nor result)")
             };
         }
 
@@ -82,11 +83,11 @@ public class EvaluateTransitionActivity(
         return new EvaluateTransitionOutput(nextActivityName, mappedInput, null);
     }
 
-    private EvaluateTransitionOutput HandleReturn(
-        Struct returnStruct,
+    private EvaluateTransitionOutput HandleResult(
+        Struct resultStruct,
         TemplateContext templateContext)
     {
-        var rendered = RenderStruct(returnStruct, templateContext);
+        var rendered = RenderStruct(resultStruct, templateContext);
         return new EvaluateTransitionOutput(ReservedKeywords.End, null, rendered);
     }
 
@@ -129,7 +130,7 @@ public class EvaluateTransitionActivity(
     {
         return value.KindCase switch
         {
-            Value.KindOneofCase.StringValue => RenderStringValue(value.StringValue, templateContext),
+            Value.KindOneofCase.StringValue => templateEngine.RenderTyped(value.StringValue, templateContext, logger),
             Value.KindOneofCase.StructValue => RenderStruct(value.StructValue, templateContext),
             Value.KindOneofCase.ListValue => value.ListValue.Values
                 .Select(v => RenderValue(v, templateContext))
@@ -137,26 +138,20 @@ public class EvaluateTransitionActivity(
             _ => value.ToObject()
         };
     }
-
-    private object RenderStringValue(string str, TemplateContext templateContext)
-    {
-        if (!templateEngine.HasTemplate(str))
-            return str;
-
-        return templateEngine.RenderToString(str, templateContext, logger);
-    }
 }
 
 public sealed record EvaluateTransitionInput(
     Guid ExecutionId,
     string WorkflowKey,
     string ActivityName,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? ActivityInput,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? ActivityOutput);
 
 public sealed record EvaluateTransitionOutput(
     string? NextActivityName,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? MappedInput,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? ReturnValue);

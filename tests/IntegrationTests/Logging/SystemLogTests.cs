@@ -21,7 +21,7 @@ public class SystemLogTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("lifecycle-log-workflow", fixture.MockBaseUrl)
             .HttpGet("lifecycle-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // Act - Watch for log events
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -52,7 +52,7 @@ public class SystemLogTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("activity-log-workflow", fixture.MockBaseUrl)
             .HttpGet("activity-lifecycle", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // Act - Watch for log events
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -88,7 +88,7 @@ public class SystemLogTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("http-log-workflow", fixture.MockBaseUrl)
             .HttpGet("http-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // Act - Watch for log events
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -140,7 +140,7 @@ public class SystemLogTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("test-workflow", fixture.MockBaseUrl)
             .HttpGet("valid-activity", "/workflow-failure-test")
             .Build();
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Act - Watch for log events
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -210,7 +210,7 @@ public class SystemLogTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("test-workflow", fixture.MockBaseUrl)
             .HttpGet("test-metadata-activity", "/metadata-test")
             .Build();
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Act - Watch for log events
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest

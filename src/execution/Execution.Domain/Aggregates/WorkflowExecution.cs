@@ -13,11 +13,13 @@ public class WorkflowExecution : AggregateRoot
     {
     }
 
-    public WorkflowExecution(WorkflowBundle bundle, Dictionary<string, object> input, string startActivity)
+    public WorkflowExecution(WorkflowBundle bundle, Dictionary<string, object> input, string startActivity,
+        Dictionary<string, string>? env = null)
     {
         var executionId = Guid.NewGuid();
 
-        ApplyChange(new WorkflowExecutionCreatedEvent(executionId, bundle, input, startActivity, DateTime.UtcNow));
+        ApplyChange(new WorkflowExecutionCreatedEvent(
+            executionId, bundle, input, startActivity, DateTime.UtcNow, env));
     }
 
     public void Schedule()

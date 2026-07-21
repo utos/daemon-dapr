@@ -20,10 +20,8 @@ public class ObservabilityGrpcService(
         if (!Guid.TryParse(request.ExecutionId, out var executionId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid execution ID format"));
 
-        if (request is { HasTail: true, HasAfter: true })
-            throw new RpcException(new Status(StatusCode.InvalidArgument,
-                "Parameters 'tail' and 'after' are mutually exclusive"));
-
+        // 'tail' and 'after' are a oneof since v0.0.10 — the wire format now makes them
+        // mutually exclusive, so no explicit check is needed.
         logger.LogInformation("Starting stream for execution {ExecutionId}", executionId);
 
         try

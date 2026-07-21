@@ -17,7 +17,7 @@ namespace Execution.Infrastructure.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.3")
+                .HasAnnotation("ProductVersion", "10.0.10")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -36,6 +36,11 @@ namespace Execution.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Env")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("EnvJson");
 
                     b.Property<string>("Input")
                         .IsRequired()
@@ -94,6 +99,9 @@ namespace Execution.Infrastructure.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("EnvJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ErrorMessage")
                         .HasMaxLength(4000)

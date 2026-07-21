@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
@@ -13,6 +15,7 @@ public sealed record ResolvePromiseInput(
     Guid ExecutionId,
     string WorkflowKey,
     string ActivityName,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? ActivityInput);
 
 public sealed record ResolvePromiseOutput(
@@ -25,6 +28,7 @@ public sealed record PromiseBranchResolution(
     Guid BranchExecutionId,
     string WorkflowKey,
     string StartActivity,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? Input);
 
 public class ResolvePromiseActivity(
@@ -45,7 +49,9 @@ public class ResolvePromiseActivity(
 
         var promiseConfig = activity.Promise;
         var activityInput = input.ActivityInput ?? executionContext.Input;
-        var templateContext = new TemplateContext().SetInput(activityInput);
+        var templateContext = new TemplateContext()
+            .SetInput(activityInput)
+            .SetEnv(executionContext.Env);
 
         var branches = new List<PromiseBranchResolution>();
 
@@ -70,6 +76,7 @@ public class ResolvePromiseActivity(
                 {
                     var itemContext = new TemplateContext()
                         .SetInput(activityInput)
+                        .SetEnv(executionContext.Env)
                         .Set(branch.ForEach.Alias, item);
 
                     var resolution = ResolveBranch(
@@ -169,20 +176,12 @@ public class ResolvePromiseActivity(
     {
         return value.KindCase switch
         {
-            Value.KindOneofCase.StringValue => RenderStringValue(value.StringValue, templateContext),
+            Value.KindOneofCase.StringValue => templateEngine.RenderTyped(value.StringValue, templateContext, logger),
             Value.KindOneofCase.StructValue => RenderStruct(value.StructValue, templateContext),
             Value.KindOneofCase.ListValue => value.ListValue.Values
                 .Select(v => RenderValue(v, templateContext))
                 .ToList(),
             _ => value.ToObject()
         };
-    }
-
-    private object RenderStringValue(string str, TemplateContext templateContext)
-    {
-        if (!templateEngine.HasTemplate(str))
-            return str;
-
-        return templateEngine.RenderToString(str, templateContext, logger);
     }
 }

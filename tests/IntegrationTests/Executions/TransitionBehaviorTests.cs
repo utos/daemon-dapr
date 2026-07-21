@@ -39,7 +39,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to complete
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -84,7 +84,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to complete
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -139,7 +139,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to complete
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -194,7 +194,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to complete
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -233,7 +233,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to fail
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -269,7 +269,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to fail
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -305,7 +305,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to fail
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -341,7 +341,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to fail
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -375,7 +375,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to complete
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -409,7 +409,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             .Build("check-value");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to fail
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest

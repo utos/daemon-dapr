@@ -15,6 +15,7 @@ public class ExecutionDetails
     public string WorkflowVersion { get; set; } = null!;
     public WorkflowBundle Bundle { get; set; } = null!;
     public Dictionary<string, object> Input { get; set; } = new();
+    public Dictionary<string, string> Env { get; set; } = new();
     public DateTime CreatedAt { get; set; }
     public DateTime? ScheduledAt { get; set; }
     public DateTime? StartedAt { get; set; }

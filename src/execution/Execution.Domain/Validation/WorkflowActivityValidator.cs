@@ -49,28 +49,9 @@ public class WorkflowActivityValidator : AbstractValidator<WorkflowActivity>
             .SetValidator(new TransitionRuleValidator());
     }
 
-    private static bool IsValidHttpUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-            return false;
+    // Shape rules live in HttpUrlRules so the same checks run again on the rendered URL
+    // at execution time — see ResolveActivityInputActivity.
+    private static bool IsValidHttpUrl(string url) => HttpUrlRules.IsValidAuthored(url);
 
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return false;
-
-        return uri.Scheme == "http" || uri.Scheme == "https";
-    }
-
-    private static string GetHttpUrlError(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-            return "HTTP activity URL cannot be empty";
-
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return "Invalid URL format";
-
-        if (uri.Scheme != "http" && uri.Scheme != "https")
-            return "Unsupported URL scheme (only HTTP/HTTPS allowed)";
-
-        return "Invalid URL format";
-    }
+    private static string GetHttpUrlError(string url) => HttpUrlRules.GetError(url);
 }
