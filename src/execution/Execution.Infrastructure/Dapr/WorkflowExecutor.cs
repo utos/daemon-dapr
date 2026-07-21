@@ -383,6 +383,15 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
     /// than a second, which is the one thing a delay must not do. Rounding the deadline up
     /// means the truncated fire time always lands at or after the requested delay; the cost
     /// is waiting up to a second longer, which is the safe direction to err.
+    ///
+    /// Measured over 14 samples: none resumed early, and the overshoot ranged 109-989ms. So a
+    /// 700ms timer waited 1.6s. Below roughly a second the wait is dominated by this rounding
+    /// rather than by the requested duration — sub-second precision is not achievable against
+    /// a one-second granularity, and a delay that is too short is the worse failure.
+    ///
+    /// Note when measuring this: elapsed time across an orchestrator await must come from
+    /// <c>WorkflowContext.CurrentUtcDateTime</c>. <c>DateTime.UtcNow</c> reads the same instant
+    /// on both sides, because the code either side of the await runs back-to-back on replay.
     /// </summary>
     private static DateTime WholeSecondDeadline(DateTime from, TimeSpan delay)
     {
