@@ -79,9 +79,60 @@ public sealed class ScribanTemplateEngine : ITemplateEngine
         }
     }
 
+    public object? RenderTyped(string template, TemplateContext context, ILogger logger)
+    {
+        if (string.IsNullOrEmpty(template) || !HasTemplate(template))
+            return template;
+
+        // Interpolation ("user-{{ input.id }}") only makes sense as text.
+        if (!IsWholeExpression(template))
+            return RenderToString(template, context, logger);
+
+        return Normalize(Evaluate<object?>(template, context, logger));
+    }
+
     public bool HasTemplate(string? input)
     {
         return !string.IsNullOrEmpty(input) && TemplateRegex.IsMatch(input);
+    }
+
+    /// <summary>
+    /// True when the string is exactly one template expression and nothing else, so its
+    /// value can stand on its own rather than being spliced into surrounding text.
+    /// </summary>
+    private static bool IsWholeExpression(string template)
+    {
+        var trimmed = template.Trim();
+        var matches = TemplateRegex.Matches(trimmed);
+
+        return matches.Count == 1
+               && matches[0].Index == 0
+               && matches[0].Length == trimmed.Length;
+    }
+
+    /// <summary>
+    /// Converts Scriban's runtime collections into plain CLR types, so values that leave the
+    /// engine serialize predictably into execution state.
+    /// </summary>
+    private static object? Normalize(object? value)
+    {
+        switch (value)
+        {
+            case null:
+            case string:
+                return value;
+
+            // ScriptObject implements IDictionary<string, object>.
+            case IDictionary<string, object> dictionary:
+                return dictionary.ToDictionary(kv => kv.Key, kv => Normalize(kv.Value));
+
+            // ScriptArray implements IList<object>. Strings are excluded above.
+            case System.Collections.IEnumerable enumerable:
+                return enumerable.Cast<object?>().Select(Normalize).ToList();
+
+            default:
+                return value;
+        }
     }
 
     private static T ConvertValue<T>(object? value)

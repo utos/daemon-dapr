@@ -15,9 +15,9 @@ namespace IntegrationTests.Executions;
 /// looped work.
 ///
 /// Loops here terminate on <em>data</em>, so no timer or cancellation primitive is needed.
-/// State is accumulated as a string rather than a counter deliberately: the transform pipeline
-/// renders every templated value to a string, so "{{ input.n + 1 }}" concatenates ("1" + 1 =
-/// "11") rather than adding. That is a pre-existing property of transforms, not of loops.
+/// State is accumulated as a string, which exercises the same threading as a counter without
+/// depending on value typing; the numeric equivalent is covered by
+/// <see cref="TemplateTypingTests.WholeExpression_KeepsNumber_SoCountersAccumulateAcrossALoop"/>.
 /// </summary>
 [Collection(DaemonTestCollection.Name)]
 public class LoopTests(DaemonTestFixture fixture)

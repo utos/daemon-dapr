@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
 using Execution.Domain.Services;
 using ExecutionContext = Execution.Domain.Services.ExecutionContext;
@@ -8,6 +10,7 @@ public sealed record SaveChildContextInput(
     Guid ParentExecutionId,
     Guid ChildExecutionId,
     string WorkflowKey,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? Input);
 
 public class SaveChildContextActivity(IExecutionContextStore contextStore)

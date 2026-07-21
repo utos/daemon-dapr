@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
 using Microsoft.Extensions.Logging;
 using Execution.Domain.Constants;
@@ -28,6 +30,7 @@ public record WorkflowExecutorInput(
     string WorkflowKey,
     string StartActivity,
     Guid? ParentExecutionId = null,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? ActivityInput = null,
     List<string>? Visited = null,
     int LoopedTransitions = 0,
