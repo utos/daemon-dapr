@@ -276,6 +276,41 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                         break;
                     }
 
+                    case WorkflowActivity.ConfigOneofCase.Timer:
+                    {
+                        var delay = activity.Timer.Duration.ToTimeSpan();
+
+                        logger.LogInformation(
+                            "Timer activity '{WorkflowActivity}' waiting {DelayMs}ms (execution {WorkflowExecutionId})",
+                            currentActivityName, (long)delay.TotalMilliseconds, logExecutionId);
+
+                        // Created on the workflow context, not inside an activity: that is what
+                        // makes the delay durable, surviving a daemon restart and replaying
+                        // without re-waiting. CurrentUtcDateTime is the replay-safe clock, so
+                        // the deadline is deterministic.
+                        await context.CreateTimer(
+                            WholeSecondDeadline(context.CurrentUtcDateTime, delay),
+                            CancellationToken.None);
+
+                        // A timer performs no work, so it has no output of its own —
+                        // EvaluateTransitionActivity passes its input through instead.
+                        var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
+                            nameof(EvaluateTransitionActivity),
+                            new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
+                                currentActivityName, currentActivityInput, null));
+
+                        if (transition.ReturnValue != null)
+                        {
+                            workflowOutput = transition.ReturnValue;
+                            currentActivityName = null;
+                            break;
+                        }
+
+                        currentActivityName = transition.NextActivityName;
+                        currentActivityInput = transition.MappedInput;
+                        break;
+                    }
+
                     default:
                         throw new NotSupportedException(
                             $"Unsupported activity config type '{activity.ConfigCase.ToString()}' for activity '{currentActivityName}'");
@@ -337,6 +372,36 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// The instant a timer of <paramref name="delay"/> started at <paramref name="from"/> may
+    /// resume, rounded up to a whole second.
+    ///
+    /// Dapr truncates a timer's fire time to whole seconds, so a deadline of 12:00:30.416
+    /// fires at 12:00:30.000 — up to 999ms early. That would make "wait 1 second" wait less
+    /// than a second, which is the one thing a delay must not do. Rounding the deadline up
+    /// means the truncated fire time always lands at or after the requested delay; the cost
+    /// is waiting up to a second longer, which is the safe direction to err.
+    ///
+    /// Measured over 14 samples: none resumed early, and the overshoot ranged 109-989ms. So a
+    /// 700ms timer waited 1.6s. Below roughly a second the wait is dominated by this rounding
+    /// rather than by the requested duration — sub-second precision is not achievable against
+    /// a one-second granularity, and a delay that is too short is the worse failure.
+    ///
+    /// Note when measuring this: elapsed time across an orchestrator await must come from
+    /// <c>WorkflowContext.CurrentUtcDateTime</c>. <c>DateTime.UtcNow</c> reads the same instant
+    /// on both sides, because the code either side of the await runs back-to-back on replay.
+    /// </summary>
+    private static DateTime WholeSecondDeadline(DateTime from, TimeSpan delay)
+    {
+        var deadline = from + delay;
+
+        if (deadline.Ticks % TimeSpan.TicksPerSecond == 0)
+            return deadline;
+
+        var roundedUp = (deadline.Ticks / TimeSpan.TicksPerSecond + 1) * TimeSpan.TicksPerSecond;
+        return new DateTime(roundedUp, deadline.Kind);
     }
 
     private static async Task<Dictionary<string, object?>> ResolveByMode(

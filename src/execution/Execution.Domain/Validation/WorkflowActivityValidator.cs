@@ -17,6 +17,21 @@ public class WorkflowActivityValidator : AbstractValidator<WorkflowActivity>
                 .WithMessage(activity => GetHttpUrlError(activity.Http.Url));
         });
 
+        // Validate timer activities. There is no maximum — a long wait is legitimate, and
+        // Dapr splits long timers internally — but an unset or non-positive duration is
+        // malformed and would otherwise only surface mid-run.
+        When(a => a.ConfigCase == WorkflowActivity.ConfigOneofCase.Timer, () =>
+        {
+            RuleFor(a => a.Timer.Duration)
+                .NotNull()
+                .WithMessage("Timer activity requires a duration");
+
+            RuleFor(a => a.Timer.Duration)
+                .Must(duration => duration.ToTimeSpan() > TimeSpan.Zero)
+                .When(a => a.Timer.Duration != null)
+                .WithMessage("Timer duration must be positive");
+        });
+
         // Validate promise activities
         When(a => a.ConfigCase == WorkflowActivity.ConfigOneofCase.Promise, () =>
         {

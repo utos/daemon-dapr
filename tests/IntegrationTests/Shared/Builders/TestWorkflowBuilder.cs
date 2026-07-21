@@ -179,6 +179,30 @@ public class TestWorkflowBuilder
         return new ActivityBuilder(this, activity);
     }
 
+    /// <summary>A durable delay. Its input passes through unchanged as its output.</summary>
+    public ActivityBuilder Timer(string name, TimeSpan duration)
+    {
+        var activity = new WorkflowActivity
+        {
+            Timer = new TimerActivityConfig { Duration = Duration.FromTimeSpan(duration) }
+        };
+
+        _activities.Add((name, activity));
+        return new ActivityBuilder(this, activity);
+    }
+
+    /// <summary>Builds a timer whose duration is set directly, for validation tests.</summary>
+    public ActivityBuilder RawTimer(string name, Duration? duration)
+    {
+        var config = new TimerActivityConfig();
+        if (duration != null)
+            config.Duration = duration;
+
+        var activity = new WorkflowActivity { Timer = config };
+        _activities.Add((name, activity));
+        return new ActivityBuilder(this, activity);
+    }
+
     public PromiseBranchListBuilder Promise(string activityName, string mode, int requiredCount = 0)
     {
         var config = new PromiseActivityConfig { Mode = mode };
@@ -285,6 +309,11 @@ public class ActivityBuilder
     public PromiseBranchListBuilder Promise(string activityName, string mode, int requiredCount = 0)
     {
         return _parent.Promise(activityName, mode, requiredCount);
+    }
+
+    public ActivityBuilder Timer(string name, TimeSpan duration)
+    {
+        return _parent.Timer(name, duration);
     }
 
     public TestWorkflowBuilder AddDependentWorkflow(string workflowName, Action<TestWorkflowBuilder> configure)
