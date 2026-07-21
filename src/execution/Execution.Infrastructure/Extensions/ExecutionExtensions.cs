@@ -16,6 +16,7 @@ using Execution.Features.Repositories;
 using Execution.Domain.Validation;
 using Execution.Features.Behaviors;
 using Execution.Features.Commands;
+using Execution.Features.Models;
 using Execution.Features.Services;
 using Execution.Features.Validation;
 using Mediator;
@@ -107,6 +108,10 @@ public static class ExecutionExtensions
 
         // Event handlers (side-effect-producing reactions)
         builder.Services.AddScoped<IEventHandler, WorkflowSchedulingProcessManager>();
+
+        // Execution limits (loop ceiling, continue-as-new threshold)
+        builder.Services.Configure<ExecutionLimitsOptions>(
+            builder.Configuration.GetSection(ExecutionLimitsOptions.SectionName));
 
         // Add validation
         builder.Services.AddScoped<IValidator<WorkflowBundle>, WorkflowBundleValidator>();

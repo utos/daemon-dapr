@@ -1,8 +1,10 @@
 using Common.Infrastructure.EventHandling;
 using Common.SeedWork;
 using Dapr.Workflow;
+using Execution.Features.Models;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Utos.Daemon.V1;
 using Execution.Domain.Events;
 using Execution.Domain.Services;
@@ -15,6 +17,7 @@ public class WorkflowSchedulingProcessManager(
     IEventStoreRepository eventStore,
     DaprWorkflowClient workflowClient,
     IExecutionContextStore contextStore,
+    IOptions<ExecutionLimitsOptions> limits,
     ILogger<WorkflowSchedulingProcessManager> logger) : IEventHandler
 {
     public async Task HandleAsync(IDomainEvent @event, long position, CancellationToken cancellationToken = default)
@@ -78,10 +81,15 @@ public class WorkflowSchedulingProcessManager(
             }, cancellationToken);
 
             // Step 3: Schedule Dapr workflow (idempotent — handle duplicate instance)
+            // Limits are captured here rather than read inside the orchestrator: a Dapr
+            // workflow must replay identically, so a run keeps the limits it started with
+            // even if configuration changes underneath it.
             var workflowInput = new WorkflowExecutorInput(
                 executionId,
                 bundle.EntryPoint,
-                startActivity);
+                startActivity,
+                MaxLoopedTransitions: limits.Value.MaxLoopedTransitions,
+                ContinueAsNewAfterTransitions: limits.Value.ContinueAsNewAfterTransitions);
 
             try
             {
