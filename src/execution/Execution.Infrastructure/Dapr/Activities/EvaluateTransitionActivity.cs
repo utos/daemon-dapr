@@ -30,8 +30,14 @@ public class EvaluateTransitionActivity(
         // Resolve activity input (what this activity received)
         var activityInput = input.ActivityInput ?? executionContext.Input;
 
-        // Activity output passed in directly (no DB lookup)
-        var activityOutput = input.ActivityOutput;
+        // Activity output passed in directly (no DB lookup). A timer performs no work, so its
+        // input passes through unchanged as its output — that is what lets a back-edge keep
+        // threading accumulating loop state across the wait. Derived from the activity
+        // definition rather than supplied by the caller so the two cannot disagree, and so a
+        // timer used as the start activity picks up the executionContext.Input fallback above.
+        var activityOutput = activity.ConfigCase == Utos.Workflow.V1.WorkflowActivity.ConfigOneofCase.Timer
+            ? activityInput
+            : input.ActivityOutput;
 
         // If no transitions, workflow ends
         if (activity.OnSuccess == null || activity.OnSuccess.Count == 0)
