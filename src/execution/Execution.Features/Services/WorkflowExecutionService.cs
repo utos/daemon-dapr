@@ -1,6 +1,7 @@
 using Definition.Domain;
 using Execution.Features.Extensions;
 using Execution.Features.Commands;
+using Execution.Features.Exceptions;
 using Execution.Features.Queries;
 using FluentValidation;
 using Grpc.Core;
@@ -71,5 +72,26 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
         response.Executions.AddRange(summaries.Select(s => s.ToGrpc()));
 
         return response;
+    }
+
+    public override async Task<DeleteExecutionResponse> DeleteExecution(
+        DeleteExecutionRequest request, ServerCallContext context)
+    {
+        if (!Guid.TryParse(request.ExecutionId, out var executionId))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid execution ID format"));
+
+        try
+        {
+            await mediator.Send(new DeleteExecutionCommand(executionId), context.CancellationToken);
+            return new DeleteExecutionResponse();
+        }
+        catch (ExecutionNotFoundException ex)
+        {
+            throw new RpcException(new Status(StatusCode.NotFound, ex.Message));
+        }
+        catch (ExecutionNotTerminalException ex)
+        {
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, ex.Message));
+        }
     }
 }

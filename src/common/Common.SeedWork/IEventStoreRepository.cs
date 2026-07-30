@@ -16,6 +16,11 @@ public interface IEventStoreRepository
 
     Task<bool> ExistsAsync(string streamName, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Soft-deletes a stream. Idempotent: deleting a stream that does not exist is a no-op.
+    /// </summary>
+    Task DeleteStreamAsync(string streamName, CancellationToken cancellationToken = default);
+
     IAsyncEnumerable<EventWithNumber> SubscribeToStream<T>(Guid aggregateId, long? afterPosition,
         CancellationToken cancellationToken = default) where T : AggregateRoot, new();
 }
