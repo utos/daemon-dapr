@@ -148,6 +148,31 @@ public class EventStoreRepository(
         }
     }
 
+    public async Task DeleteStreamAsync(string streamName, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await eventStoreClient.DeleteAsync(
+                streamName,
+                StreamState.Any,
+                cancellationToken: cancellationToken);
+
+            logger.LogDebug("Deleted stream {StreamName}", streamName);
+        }
+        // Deleting an absent stream with StreamState.Any surfaces as WrongExpectedVersion
+        // (expected Any, actual NoStream), not StreamNotFound. Since Any is our only version
+        // constraint, this can only mean the stream does not exist — an idempotent no-op
+        // (e.g. a run with no sub-workflow calls has no subworkflowcalls-{id} stream).
+        catch (WrongExpectedVersionException)
+        {
+            logger.LogDebug("Stream {StreamName} does not exist; nothing to delete", streamName);
+        }
+        catch (StreamNotFoundException)
+        {
+            logger.LogDebug("Stream {StreamName} not found; nothing to delete", streamName);
+        }
+    }
+
     public async Task<bool> ExistsAsync<T>(Guid aggregateId, CancellationToken cancellationToken = default)
         where T : AggregateRoot, new()
     {
