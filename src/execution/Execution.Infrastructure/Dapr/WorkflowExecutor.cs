@@ -132,25 +132,48 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                                 currentActivityName, currentActivityInput));
 
                         var childExecutionId = context.NewGuid();
+                        object? childOutput;
 
-                        // Save child execution context (copies parent's bundle)
-                        await context.CallActivityAsync(nameof(SaveChildContextActivity),
-                            new SaveChildContextInput(input.ExecutionId, childExecutionId,
-                                resolved.SubWorkflowKey!, resolved.WorkflowInput));
+                        if (resolved.Detached)
+                        {
+                            // Fire-and-forget: start the sub-workflow as its own independent,
+                            // top-level execution and do NOT await it. Only a failure to *start*
+                            // the child (the activity throwing) surfaces here; the child's own
+                            // runtime failures never do — it runs on its own. A start failure
+                            // fails this parent execution, same as any other activity failure
+                            // (on_failure routing is not yet implemented in the executor).
+                            await context.CallActivityAsync(nameof(ScheduleDetachedExecutionActivity),
+                                new ScheduleDetachedExecutionInput(input.ExecutionId, childExecutionId,
+                                    resolved.SubWorkflowKey!, resolved.SubStartActivity!,
+                                    resolved.WorkflowInput));
 
-                        // Launch and await child workflow via Dapr's native child workflow support
-                        // The child inherits the limits but starts with its own empty visited
-                        // set and budget — a sub-workflow invoked twice from a parent loop is
-                        // two separate executions, not a back-edge.
-                        var childOutput = await context.CallChildWorkflowAsync<object?>(
-                            nameof(WorkflowExecutor),
-                            new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
-                                resolved.SubStartActivity!, input.ExecutionId,
-                                MaxLoopedTransitions: input.MaxLoopedTransitions,
-                                ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
-                            new ChildWorkflowTaskOptions(childExecutionId.ToString()));
+                            // The activity output is a handle to the started run, not its result.
+                            childOutput = new Dictionary<string, object>
+                            {
+                                ["execution_id"] = childExecutionId.ToString()
+                            };
+                        }
+                        else
+                        {
+                            // Save child execution context (copies parent's bundle)
+                            await context.CallActivityAsync(nameof(SaveChildContextActivity),
+                                new SaveChildContextInput(input.ExecutionId, childExecutionId,
+                                    resolved.SubWorkflowKey!, resolved.WorkflowInput));
 
-                        // Evaluate parent's transition with child's output
+                            // Launch and await child workflow via Dapr's native child workflow support
+                            // The child inherits the limits but starts with its own empty visited
+                            // set and budget — a sub-workflow invoked twice from a parent loop is
+                            // two separate executions, not a back-edge.
+                            childOutput = await context.CallChildWorkflowAsync<object?>(
+                                nameof(WorkflowExecutor),
+                                new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
+                                    resolved.SubStartActivity!, input.ExecutionId,
+                                    MaxLoopedTransitions: input.MaxLoopedTransitions,
+                                    ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
+                                new ChildWorkflowTaskOptions(childExecutionId.ToString()));
+                        }
+
+                        // Evaluate parent's transition with the child's output (or detached handle)
                         var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
                             nameof(EvaluateTransitionActivity),
                             new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,

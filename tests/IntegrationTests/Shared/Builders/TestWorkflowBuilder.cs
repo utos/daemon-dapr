@@ -57,12 +57,13 @@ public class TestWorkflowBuilder
     }
 
     public ActivityBuilder WorkflowCall(string activityName, string targetWorkflow,
-        string startActivity, Struct? input = null)
+        string startActivity, Struct? input = null, bool detached = false)
     {
         var config = new WorkflowActivityConfig
         {
             Workflow = targetWorkflow,
-            StartActivity = startActivity
+            StartActivity = startActivity,
+            Detached = detached
         };
 
         if (input != null)
@@ -301,9 +302,9 @@ public class ActivityBuilder
     }
 
     public ActivityBuilder WorkflowCall(string activityName, string targetWorkflow,
-        string startActivity, Struct? input = null)
+        string startActivity, Struct? input = null, bool detached = false)
     {
-        return _parent.WorkflowCall(activityName, targetWorkflow, startActivity, input);
+        return _parent.WorkflowCall(activityName, targetWorkflow, startActivity, input, detached);
     }
 
     public PromiseBranchListBuilder Promise(string activityName, string mode, int requiredCount = 0)
