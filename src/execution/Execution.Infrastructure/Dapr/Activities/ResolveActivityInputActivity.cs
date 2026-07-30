@@ -29,7 +29,10 @@ public sealed record ResolveActivityInputOutput(
     string? SubWorkflowKey,
     string? SubStartActivity,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
-    Dictionary<string, object>? WorkflowInput);
+    Dictionary<string, object>? WorkflowInput,
+    // True when the sub-workflow is fire-and-forget: the executor starts it as an independent
+    // execution and does not await it. False for HTTP and awaited sub-workflows.
+    bool Detached = false);
 
 public class ResolveActivityInputActivity(
     IExecutionContextStore contextStore,
@@ -121,7 +124,8 @@ public class ResolveActivityInputActivity(
             null,
             config.Workflow,
             config.StartActivity,
-            subInput);
+            subInput,
+            config.Detached);
     }
 
     private Dictionary<string, object> RenderStruct(Struct protoStruct, TemplateContext templateContext)

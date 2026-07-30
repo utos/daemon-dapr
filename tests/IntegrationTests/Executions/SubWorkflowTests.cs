@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Google.Protobuf.WellKnownTypes;
 using IntegrationTests.Shared;
 using IntegrationTests.Shared.Builders;
@@ -242,5 +243,112 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
         } while (DateTime.UtcNow < deadline);
 
         Assert.Equal(ExecutionStatus.Failed, status);
+    }
+
+    [Fact]
+    public async Task DetachedSubWorkflow_ParentDoesNotWait_ChildRunsAsOwnExecution()
+    {
+        // Arrange — The child waits, then hits an endpoint. Because the parent starts it
+        // detached, the parent should finish long before the child's delayed work runs.
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/detached-child").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"done": true}"""));
+
+        // The parent posts the detached handle here so the test can read the child's id.
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/parent-after").UsingPost())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"ok": true}"""));
+
+        // The detached activity's output is a handle { execution_id }, not the child's result.
+        var handleToInput = new Struct();
+        handleToInput.Fields.Add("childId", Value.ForString("{{ output.execution_id }}"));
+
+        var request = new TestWorkflowBuilder("parent-detached", fixture.MockBaseUrl)
+            .WorkflowCall("start-child", "child-detached", "wait", detached: true)
+            .OnSuccess("after", handleToInput)
+            .HttpPost("after", "/parent-after", """{"childId": "{{ input.childId }}"}""")
+            .OnSuccess("end")
+            .AddDependentWorkflow("child-detached", child =>
+            {
+                child.Timer("wait", TimeSpan.FromSeconds(6)).OnSuccess("hit");
+                child.HttpGet("hit", "/detached-child");
+            })
+            .Build("start-child");
+
+        // Act
+        var response = await fixture.ScheduleAsync(request);
+
+        // The parent's own stream closes when the parent finishes — the detached child logs
+        // to its own execution id, so it does not keep the parent's stream open.
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = response.Id
+        });
+        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        // Assert — Parent completed
+        var parent = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
+        Assert.Equal(ExecutionStatus.Completed, parent.Summary.Status);
+
+        // Assert — Fire-and-forget: the child's delayed work has NOT run yet at parent completion.
+        // If the parent had awaited the child, the 6s timer would have gated its completion.
+        Assert.DoesNotContain(fixture.WireMockServer.LogEntries,
+            e => e.RequestMessage.Path == "/detached-child");
+
+        // Assert — The activity output handle carried the child's execution id.
+        var postCall = fixture.WireMockServer.LogEntries
+            .FirstOrDefault(e => e.RequestMessage.Path == "/parent-after");
+        Assert.NotNull(postCall);
+        var childId = JsonDocument.Parse(postCall!.RequestMessage.Body!)
+            .RootElement.GetProperty("childId").GetString();
+        Assert.False(string.IsNullOrEmpty(childId));
+        Assert.True(Guid.TryParse(childId, out _));
+        Assert.NotEqual(response.Id, childId);
+
+        // Assert — The detached child is its own top-level execution and appears in ListExecutions.
+        await WaitUntil(async () =>
+        {
+            var list = await fixture.DaemonClient.ListExecutionsAsync(new ListExecutionsRequest());
+            return list.Executions.Any(e => e.Id == childId);
+        }, TimeSpan.FromSeconds(15));
+
+        var listed = await fixture.DaemonClient.ListExecutionsAsync(new ListExecutionsRequest());
+        Assert.Contains(listed.Executions, e => e.Id == childId);
+        Assert.Contains(listed.Executions, e => e.Id == response.Id);
+
+        // Assert — The child completes independently, on its own, and ran its own activity.
+        ExecutionStatus childStatus = default;
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        do
+        {
+            var child = await fixture.DaemonClient.GetExecutionAsync(
+                new GetExecutionRequest { ExecutionId = childId });
+            childStatus = child.Summary.Status;
+            if (childStatus is ExecutionStatus.Completed or ExecutionStatus.Failed) break;
+            await Task.Delay(250);
+        } while (DateTime.UtcNow < deadline);
+
+        Assert.Equal(ExecutionStatus.Completed, childStatus);
+        Assert.Contains(fixture.WireMockServer.LogEntries,
+            e => e.RequestMessage.Path == "/detached-child");
+    }
+
+    private static async Task WaitUntil(Func<Task<bool>> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await condition()) return;
+            await Task.Delay(250);
+        }
+
+        throw new TimeoutException($"Condition not met within {timeout}");
     }
 }

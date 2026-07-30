@@ -17,6 +17,10 @@ public record ScheduleExecutionCommand(
     string StartActivity,
     // Ambient config available to every activity via {{ env.x }}, unlike Input which
     // reaches only the start activity. Non-secret only.
-    Dictionary<string, string> Env) : ICommand<ScheduleExecutionResult>;
+    Dictionary<string, string> Env,
+    // Caller-supplied execution id. Set by the detached sub-workflow path, which mints a
+    // replay-safe id in the orchestrator so scheduling is idempotent across Dapr replays.
+    // Null for the gRPC path, which lets the aggregate mint its own.
+    Guid? ExecutionId = null) : ICommand<ScheduleExecutionResult>;
 
 public record ScheduleExecutionResult(Guid Id, ExecutionStatus Status);

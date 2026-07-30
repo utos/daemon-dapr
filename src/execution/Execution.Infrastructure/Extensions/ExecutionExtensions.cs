@@ -98,6 +98,7 @@ public static class ExecutionExtensions
             options.RegisterActivity<ExecuteActivity>();
             options.RegisterActivity<EvaluateTransitionActivity>();
             options.RegisterActivity<SaveChildContextActivity>();
+            options.RegisterActivity<ScheduleDetachedExecutionActivity>();
             options.RegisterActivity<ResolvePromiseActivity>();
         });
 
