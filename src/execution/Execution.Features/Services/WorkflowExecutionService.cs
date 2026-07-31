@@ -65,8 +65,13 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
     public override async Task<ListExecutionsResponse> ListExecutions(
         ListExecutionsRequest request, ServerCallContext context)
     {
+        // The workflow filter is optional; when present, name selects the workflow.
+        if (request.Workflow is not null && string.IsNullOrEmpty(request.Workflow.Name))
+            throw new RpcException(new Status(StatusCode.InvalidArgument,
+                "workflow.name is required when a workflow filter is set"));
+
         var summaries = await mediator.Send(
-            new ListExecutionsQuery(), context.CancellationToken);
+            new ListExecutionsQuery(request.Workflow), context.CancellationToken);
 
         var response = new ListExecutionsResponse();
         response.Executions.AddRange(summaries.Select(s => s.ToGrpc()));

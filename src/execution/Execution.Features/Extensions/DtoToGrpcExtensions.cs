@@ -28,17 +28,40 @@ public static class DtoToGrpcExtensions
     /// </summary>
     private const string ExecutionFailedCode = "EXECUTION_FAILED";
 
+    /// <summary>
+    /// Builds a <see cref="GrpcWorkflowReference"/> from the stored identity, leaving the
+    /// optional registry/namespace/digest fields unset when absent (same "only-if-set"
+    /// pattern as <c>WorkflowIdentity.ReferenceFor</c>).
+    /// </summary>
+    private static GrpcWorkflowReference BuildReference(string name, string version,
+        string? @namespace, string? registry, string? digest)
+    {
+        var reference = new GrpcWorkflowReference
+        {
+            Name = name,
+            Version = version
+        };
+
+        if (!string.IsNullOrEmpty(@namespace))
+            reference.Namespace = @namespace;
+
+        if (!string.IsNullOrEmpty(registry))
+            reference.Registry = registry;
+
+        if (!string.IsNullOrEmpty(digest))
+            reference.Digest = digest;
+
+        return reference;
+    }
+
     public static GrpcExecutionSummary ToGrpc(this ExecutionSummary dto)
     {
         var grpc = new GrpcExecutionSummary
         {
             Id = dto.Id.ToString(),
             Status = dto.Status,
-            Workflow = new GrpcWorkflowReference
-            {
-                Name = dto.WorkflowName,
-                Version = dto.WorkflowVersion
-            },
+            Workflow = BuildReference(dto.WorkflowName, dto.WorkflowVersion,
+                dto.WorkflowNamespace, dto.WorkflowRegistry, dto.WorkflowDigest),
             CreatedAt = Timestamp.FromDateTime(dto.CreatedAt.ToUniversalTime())
         };
 
@@ -69,11 +92,8 @@ public static class DtoToGrpcExtensions
         {
             Id = dto.Id.ToString(),
             Status = dto.Status,
-            Workflow = new GrpcWorkflowReference
-            {
-                Name = dto.WorkflowName,
-                Version = dto.WorkflowVersion
-            },
+            Workflow = BuildReference(dto.WorkflowName, dto.WorkflowVersion,
+                dto.WorkflowNamespace, dto.WorkflowRegistry, dto.WorkflowDigest),
             CreatedAt = Timestamp.FromDateTime(dto.CreatedAt.ToUniversalTime())
         };
 

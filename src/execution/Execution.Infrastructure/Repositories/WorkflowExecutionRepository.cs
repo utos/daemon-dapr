@@ -4,6 +4,7 @@ using Execution.Features.Models;
 using Execution.Features.Repositories;
 using Execution.Infrastructure.Data;
 using Execution.Infrastructure.ReadModels;
+using WorkflowReference = Utos.Daemon.V1.WorkflowReference;
 
 namespace Execution.Infrastructure.Repositories;
 
@@ -22,11 +23,33 @@ public class WorkflowExecutionRepository(WorkflowExecutionDbContext dbContext) :
         return readModel?.ToDetailsDto();
     }
 
-    public async Task<List<ExecutionSummary>> ListExecutionsAsync(CancellationToken cancellationToken = default)
+    public async Task<List<ExecutionSummary>> ListExecutionsAsync(WorkflowReference? workflow,
+        CancellationToken cancellationToken = default)
     {
-        var readModels = await dbContext.WorkflowExecutions
+        var query = dbContext.WorkflowExecutions
             .AsNoTracking()
-            .Where(e => e.ParentExecutionId == null)
+            .Where(e => e.ParentExecutionId == null);
+
+        if (workflow is not null)
+        {
+            // name selects the workflow; each other populated field narrows further.
+            // An empty/unset field imposes no constraint (proto: "omitted matches all").
+            query = query.Where(e => e.WorkflowName == workflow.Name);
+
+            if (!string.IsNullOrEmpty(workflow.Version))
+                query = query.Where(e => e.WorkflowVersion == workflow.Version);
+
+            if (!string.IsNullOrEmpty(workflow.Namespace))
+                query = query.Where(e => e.WorkflowNamespace == workflow.Namespace);
+
+            if (!string.IsNullOrEmpty(workflow.Registry))
+                query = query.Where(e => e.WorkflowRegistry == workflow.Registry);
+
+            if (!string.IsNullOrEmpty(workflow.Digest))
+                query = query.Where(e => e.WorkflowDigest == workflow.Digest);
+        }
+
+        var readModels = await query
             .OrderByDescending(e => e.CreatedAt)
             .ToListAsync(cancellationToken);
 

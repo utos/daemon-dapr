@@ -11,6 +11,6 @@ public class ListExecutionsHandler(
     public async ValueTask<List<ExecutionSummary>> Handle(
         ListExecutionsQuery query, CancellationToken ct)
     {
-        return await executionRepository.ListExecutionsAsync(ct);
+        return await executionRepository.ListExecutionsAsync(query.Workflow, ct);
     }
 }

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ExecutionService.ListExecutions` now honors the `ListExecutionsRequest.workflow` filter. When set,
+  `name` selects the workflow (required — an empty name returns `INVALID_ARGUMENT`) and each further
+  populated field of the `WorkflowReference` narrows the results: an omitted `version` matches all
+  loaded versions, and `namespace`, `registry`, and `digest` match exactly when provided. To support
+  digest/namespace/registry filtering, an execution now persists its full resolved workflow identity
+  (the bundle content `digest` is captured on the creation event; namespace and registry are projected
+  from the entry-point metadata), and execution summaries/details echo these fields back. Executions
+  created before this change have no stored digest/namespace/registry and are not matched by a filter
+  that specifies one of those fields. Previously the request was ignored and every execution returned.
 - `ExecutionService.DeleteExecution` now deletes a terminal execution's record — both its read-model
   row and its `workflowexecution-{id}` / `subworkflowcalls-{id}` event streams (soft delete), so a
   projection rebuild cannot resurrect it. Deletion cascades to the execution's non-detached

@@ -14,14 +14,14 @@ public class WorkflowExecution : AggregateRoot
     }
 
     public WorkflowExecution(WorkflowBundle bundle, Dictionary<string, object> input, string startActivity,
-        Dictionary<string, string>? env = null, Guid? executionId = null)
+        Dictionary<string, string>? env = null, Guid? executionId = null, string? digest = null)
     {
         // A detached sub-workflow supplies its own replay-safe id so re-scheduling is idempotent;
         // the gRPC path passes null and gets a fresh one.
         var id = executionId ?? Guid.NewGuid();
 
         ApplyChange(new WorkflowExecutionCreatedEvent(
-            id, bundle, input, startActivity, DateTime.UtcNow, env));
+            id, bundle, input, startActivity, DateTime.UtcNow, env, digest));
     }
 
     public void Schedule()
