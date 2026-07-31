@@ -1,38 +1,26 @@
 using System.Text.RegularExpressions;
+using Execution.Domain.Templating;
 using Microsoft.Extensions.Logging;
 using Scriban;
+using Scriban.Runtime;
 
 namespace Execution.Infrastructure.Templating;
 
-public sealed class ScribanTemplateEngine : ITemplateEngine
+public sealed class ScribanTemplateEngine(ILogger<ScribanTemplateEngine> logger) : ITemplateEngine
 {
     // Regex to detect template syntax
     private static readonly Regex TemplateRegex = new(@"\{\{.*?\}\}|\{%.*?%\}", RegexOptions.Compiled);
 
-    public string RenderToString(string template, TemplateContext context, ILogger logger)
+    public string RenderToString(string template, TemplateScope scope)
     {
         if (string.IsNullOrEmpty(template) || !HasTemplate(template))
             return template;
 
         try
         {
-            var scribanTemplate = Template.Parse(template);
+            var scribanTemplate = Parse(template);
 
-            if (scribanTemplate.HasErrors)
-            {
-                var errors = string.Join(", ", scribanTemplate.Messages.Select(m => m.Message));
-                logger.LogError("Template parsing failed: {Errors}", errors);
-                throw new TemplateException($"Template parsing failed: {errors}");
-            }
-
-            var scriptContext = new Scriban.TemplateContext
-            {
-                EnableRelaxedMemberAccess = false,
-                StrictVariables = true // Throw error on undefined variables
-            };
-            scriptContext.PushGlobal(context.GetScriptObject());
-
-            var result = scribanTemplate.Render(scriptContext);
+            var result = scribanTemplate.Render(CreateContext(scope));
             return result;
         }
         catch (Exception ex) when (ex is not TemplateException)
@@ -42,7 +30,7 @@ public sealed class ScribanTemplateEngine : ITemplateEngine
         }
     }
 
-    public T Evaluate<T>(string template, TemplateContext context, ILogger logger)
+    public T Evaluate<T>(string template, TemplateScope scope)
     {
         if (string.IsNullOrEmpty(template))
             return default!;
@@ -53,23 +41,9 @@ public sealed class ScribanTemplateEngine : ITemplateEngine
 
         try
         {
-            var scribanTemplate = Template.Parse(template);
+            var scribanTemplate = Parse(template);
 
-            if (scribanTemplate.HasErrors)
-            {
-                var errors = string.Join(", ", scribanTemplate.Messages.Select(m => m.Message));
-                logger.LogError("Template parsing failed: {Errors}", errors);
-                throw new TemplateException($"Template parsing failed: {errors}");
-            }
-
-            var scriptContext = new Scriban.TemplateContext
-            {
-                EnableRelaxedMemberAccess = false,
-                StrictVariables = true // Throw error on undefined variables
-            };
-            scriptContext.PushGlobal(context.GetScriptObject());
-
-            var result = scribanTemplate.Evaluate(scriptContext);
+            var result = scribanTemplate.Evaluate(CreateContext(scope));
             return ConvertValue<T>(result);
         }
         catch (Exception ex) when (ex is not TemplateException)
@@ -79,21 +53,66 @@ public sealed class ScribanTemplateEngine : ITemplateEngine
         }
     }
 
-    public object? RenderTyped(string template, TemplateContext context, ILogger logger)
+    public object? RenderTyped(string template, TemplateScope scope)
     {
         if (string.IsNullOrEmpty(template) || !HasTemplate(template))
             return template;
 
         // Interpolation ("user-{{ input.id }}") only makes sense as text.
         if (!IsWholeExpression(template))
-            return RenderToString(template, context, logger);
+            return RenderToString(template, scope);
 
-        return Normalize(Evaluate<object?>(template, context, logger));
+        return Normalize(Evaluate<object?>(template, scope));
     }
 
     public bool HasTemplate(string? input)
     {
         return !string.IsNullOrEmpty(input) && TemplateRegex.IsMatch(input);
+    }
+
+    private Template Parse(string template)
+    {
+        var scribanTemplate = Template.Parse(template);
+
+        if (!scribanTemplate.HasErrors)
+            return scribanTemplate;
+
+        var errors = string.Join(", ", scribanTemplate.Messages.Select(m => m.Message));
+        logger.LogError("Template parsing failed: {Errors}", errors);
+        throw new TemplateException($"Template parsing failed: {errors}");
+    }
+
+    /// <summary>
+    /// Projects the engine-agnostic scope onto Scriban's globals. A
+    /// <see cref="TemplateNamespace"/> becomes a <see cref="ScriptObject"/> so that, under
+    /// <c>StrictVariables</c>, a missing member of a present root ({{ env.missing }}) behaves
+    /// like any other missing key rather than failing as an undefined variable.
+    /// </summary>
+    private static Scriban.TemplateContext CreateContext(TemplateScope scope)
+    {
+        var globals = new ScriptObject();
+
+        foreach (var (key, value) in scope.Values)
+            globals[key] = value is TemplateNamespace ns ? ToScriptObject(ns) : value;
+
+        var context = new Scriban.TemplateContext
+        {
+            EnableRelaxedMemberAccess = false,
+            StrictVariables = true // Throw error on undefined variables
+        };
+        context.PushGlobal(globals);
+
+        return context;
+    }
+
+    private static ScriptObject ToScriptObject(TemplateNamespace ns)
+    {
+        var scriptObject = new ScriptObject();
+
+        foreach (var (key, value) in ns.Values)
+            scriptObject[key] = value;
+
+        return scriptObject;
     }
 
     /// <summary>
@@ -168,16 +187,5 @@ public sealed class ScribanTemplateEngine : ITemplateEngine
                         $"Cannot convert value '{value}' to type {typeof(T).Name}: {ex.Message}", ex);
                 }
         }
-    }
-}
-
-public sealed class TemplateException : Exception
-{
-    public TemplateException(string message) : base(message)
-    {
-    }
-
-    public TemplateException(string message, Exception innerException) : base(message, innerException)
-    {
     }
 }
