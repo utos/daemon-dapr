@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ObservabilityService.WatchExecution` now emits a structured terminal frame just before the
+  stream closes: a final `WatchExecutionResponse` with `status` set to `COMPLETED` or `FAILED`,
+  and — on failure — an `error` (`WorkflowError` with code `EXECUTION_FAILED` and the failure
+  reason as its message). Previously these fields were never populated and a watching client could
+  only infer failure by scraping error-level log text before the stream closed. The terminal frame
+  respects the request's level/source/category filters like any other frame (a `COMPLETED` frame is
+  Info-level, source `system`), so an unfiltered watcher always receives it.
 - `ExecutionService.ListExecutions` now honors the `ListExecutionsRequest.workflow` filter. When set,
   `name` selects the workflow (required — an empty name returns `INVALID_ARGUMENT`) and each further
   populated field of the `WorkflowReference` narrows the results: an omitted `version` matches all
