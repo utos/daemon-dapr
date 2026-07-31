@@ -4,6 +4,7 @@ using Execution.Features.Models;
 using Execution.Features.Repositories;
 using Execution.Infrastructure.Data;
 using Execution.Infrastructure.ReadModels;
+using Common.SeedWork;
 using Common.Workflow;
 
 namespace Execution.Infrastructure.Repositories;
@@ -13,7 +14,7 @@ namespace Execution.Infrastructure.Repositories;
 /// </summary>
 public class WorkflowExecutionRepository(WorkflowExecutionDbContext dbContext) : IWorkflowExecutionRepository
 {
-    public async Task<ExecutionDetails?> GetExecutionDetailsAsync(Guid executionId,
+    public async Task<ExecutionDetails?> GetExecutionDetailsAsync(ExecutionId executionId,
         CancellationToken cancellationToken = default)
     {
         var readModel = await dbContext.WorkflowExecutions
@@ -63,7 +64,7 @@ public class WorkflowExecutionRepository(WorkflowExecutionDbContext dbContext) :
         return readModels.Select(rm => rm.ToSummaryDto()).ToList();
     }
 
-    public async Task<ExecutionDeletionEligibility> GetDeletionEligibilityAsync(Guid executionId,
+    public async Task<ExecutionDeletionEligibility> GetDeletionEligibilityAsync(ExecutionId executionId,
         CancellationToken cancellationToken = default)
     {
         var status = await dbContext.WorkflowExecutions
@@ -80,7 +81,7 @@ public class WorkflowExecutionRepository(WorkflowExecutionDbContext dbContext) :
             : ExecutionDeletionEligibility.NonTerminal;
     }
 
-    public async Task DeleteAsync(IReadOnlyCollection<Guid> executionIds,
+    public async Task DeleteAsync(IReadOnlyCollection<ExecutionId> executionIds,
         CancellationToken cancellationToken = default)
     {
         if (executionIds.Count == 0)

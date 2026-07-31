@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Microsoft.Extensions.Logging;
 using Observability.Domain;
 
@@ -22,7 +23,7 @@ internal sealed class ExecutionLogger(IExecutionLogStore store, string category)
     {
         if (state is not IReadOnlyList<KeyValuePair<string, object?>> kvps) return;
 
-        Guid? executionId = null;
+        ExecutionId? executionId = null;
         string? source = null;
 
         foreach (var kv in kvps)
@@ -30,10 +31,14 @@ internal sealed class ExecutionLogger(IExecutionLogStore store, string category)
             switch (kv.Key)
             {
                 case "WorkflowExecutionId":
+                    // Callers log the id in whichever form they hold it. A shape missing from
+                    // this list is not an error anywhere — the entry is simply dropped — so
+                    // every form the daemon uses has to be listed.
                     executionId = kv.Value switch
                     {
-                        Guid g => g,
-                        string s when Guid.TryParse(s, out var g) => g,
+                        ExecutionId id => id,
+                        Guid g => new ExecutionId(g),
+                        string s when ExecutionId.TryParse(s, out var id) => id,
                         _ => null
                     };
                     break;
@@ -45,7 +50,7 @@ internal sealed class ExecutionLogger(IExecutionLogStore store, string category)
             if (executionId.HasValue && source != null) break;
         }
 
-        if (executionId == null) return;
+        if (!executionId.HasValue) return;
 
         store.AddEntry(executionId.Value, new ExecutionLogEntry(
             DateTime.UtcNow,

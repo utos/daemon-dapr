@@ -1,4 +1,5 @@
 using Common.Infrastructure.Data;
+using Common.SeedWork;
 using Common.Workflow;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -6,7 +7,7 @@ using Execution.Infrastructure.ReadModels;
 
 namespace Execution.Infrastructure.Data.Configurations;
 
-public class WorkflowExecutionReadModelConfiguration : BaseConfiguration<WorkflowExecutionReadModel>
+public class WorkflowExecutionReadModelConfiguration : BaseConfiguration<WorkflowExecutionReadModel, ExecutionId>
 {
     public override void Configure(EntityTypeBuilder<WorkflowExecutionReadModel> builder)
     {

@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Execution.Features.Models;
 using Common.Workflow;
 
@@ -11,7 +12,7 @@ public interface IWorkflowExecutionRepository
     /// <summary>
     /// Get detailed execution information by ID
     /// </summary>
-    Task<ExecutionDetails?> GetExecutionDetailsAsync(Guid executionId, CancellationToken cancellationToken = default);
+    Task<ExecutionDetails?> GetExecutionDetailsAsync(ExecutionId executionId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// List top-level executions ordered by creation date (newest first). When
@@ -25,11 +26,11 @@ public interface IWorkflowExecutionRepository
     /// <summary>
     /// Determine whether an execution may be deleted, based on its terminal status.
     /// </summary>
-    Task<ExecutionDeletionEligibility> GetDeletionEligibilityAsync(Guid executionId,
+    Task<ExecutionDeletionEligibility> GetDeletionEligibilityAsync(ExecutionId executionId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Delete the read-model rows for the given execution ids.
     /// </summary>
-    Task DeleteAsync(IReadOnlyCollection<Guid> executionIds, CancellationToken cancellationToken = default);
+    Task DeleteAsync(IReadOnlyCollection<ExecutionId> executionIds, CancellationToken cancellationToken = default);
 }

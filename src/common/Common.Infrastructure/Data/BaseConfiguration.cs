@@ -4,8 +4,9 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Common.Infrastructure.Data;
 
-public abstract class BaseConfiguration<TEntity> : IEntityTypeConfiguration<TEntity>
-    where TEntity : Entity
+public abstract class BaseConfiguration<TEntity, TId> : IEntityTypeConfiguration<TEntity>
+    where TEntity : Entity<TId>
+    where TId : notnull
 {
     public virtual void Configure(EntityTypeBuilder<TEntity> builder)
     {

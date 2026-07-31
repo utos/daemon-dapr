@@ -1,10 +1,11 @@
+using Common.SeedWork;
 using Common.Workflow;
 using Dapr.Workflow;
 using Execution.Domain.Services;
 
 namespace Execution.Infrastructure.Dapr.Activities;
 
-public sealed record LoadWorkflowInput(Guid ExecutionId, string WorkflowKey);
+public sealed record LoadWorkflowInput(ExecutionId ExecutionId, string WorkflowKey);
 
 public sealed record LoadWorkflowOutput(Workflow Workflow);
 

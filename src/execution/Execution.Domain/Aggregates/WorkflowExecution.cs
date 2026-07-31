@@ -21,7 +21,7 @@ namespace Execution.Domain.Aggregates;
 /// harmless duplicate write into a failed execution, and a throw raised while handling a
 /// failure would replace the real reason with this one.
 /// </summary>
-public class WorkflowExecution : AggregateRoot
+public class WorkflowExecution : AggregateRoot<ExecutionId>
 {
     public ExecutionStatus Status { get; private set; }
 
@@ -35,11 +35,11 @@ public class WorkflowExecution : AggregateRoot
     }
 
     public WorkflowExecution(WorkflowBundle bundle, Dictionary<string, object> input, string startActivity,
-        Dictionary<string, string>? env = null, Guid? executionId = null, string? digest = null)
+        Dictionary<string, string>? env = null, ExecutionId? executionId = null, string? digest = null)
     {
         // A detached sub-workflow supplies its own replay-safe id so re-scheduling is idempotent;
         // the gRPC path passes null and gets a fresh one.
-        var id = executionId ?? Guid.NewGuid();
+        var id = executionId ?? ExecutionId.New();
 
         ApplyChange(new WorkflowExecutionCreatedEvent(
             id, bundle, input, startActivity, DateTime.UtcNow, env, digest));

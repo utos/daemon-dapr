@@ -12,10 +12,10 @@ public class EventStoreRepository(
     IEventSerializer eventSerializer,
     ILogger<EventStoreRepository> logger) : IEventStoreRepository
 {
-    public async Task<T> LoadAsync<T>(Guid aggregateId, CancellationToken cancellationToken = default)
-        where T : AggregateRoot, new()
+    public async Task<T> LoadAsync<T, TId>(TId aggregateId, CancellationToken cancellationToken = default)
+        where T : AggregateRoot<TId>, new() where TId : notnull
     {
-        var streamName = GetStreamName<T>(aggregateId);
+        var streamName = StreamNames.For<T>(aggregateId);
         var aggregate = new T();
 
         try
@@ -30,7 +30,7 @@ public class EventStoreRepository(
             // Tracked separately from the event count: an event that fails to deserialize is
             // dropped below but still occupies a revision, and the revision is what the next
             // append is checked against.
-            var streamRevision = AggregateRoot.NoStream;
+            var streamRevision = AggregateRoot<TId>.NoStream;
 
             await foreach (var resolvedEvent in events.WithCancellation(cancellationToken))
             {
@@ -55,9 +55,10 @@ public class EventStoreRepository(
         }
     }
 
-    public async Task SaveAsync<T>(T aggregate) where T : AggregateRoot, new()
+    public async Task SaveAsync<T, TId>(T aggregate)
+        where T : AggregateRoot<TId>, new() where TId : notnull
     {
-        var streamName = GetStreamName<T>(aggregate.Id);
+        var streamName = StreamNames.For<T>(aggregate.Id);
 
         var uncommittedEvents = aggregate.GetDomainEvents();
 
@@ -82,7 +83,7 @@ public class EventStoreRepository(
         // Expected-version rather than Any: the aggregate decided what to append by reading
         // the stream, so if the stream has moved since, that decision was made against stale
         // state and must be reconsidered rather than blindly applied.
-        var expectedState = aggregate.Version == AggregateRoot.NoStream
+        var expectedState = aggregate.Version == AggregateRoot<TId>.NoStream
             ? StreamState.NoStream
             : StreamState.StreamRevision((ulong)aggregate.Version);
 
@@ -116,9 +117,10 @@ public class EventStoreRepository(
         }
     }
 
-    public async Task AppendEventAsync<T>(Guid aggregateId, IDomainEvent @event) where T : AggregateRoot, new()
+    public async Task AppendEventAsync<T, TId>(TId aggregateId, IDomainEvent @event)
+        where T : AggregateRoot<TId>, new() where TId : notnull
     {
-        var streamName = GetStreamName<T>(aggregateId);
+        var streamName = StreamNames.For<T>(aggregateId);
         var serializedEvent = eventSerializer.SerializeEvent(@event);
 
         var eventData = new EventData(
@@ -198,10 +200,10 @@ public class EventStoreRepository(
         }
     }
 
-    public async Task<bool> ExistsAsync<T>(Guid aggregateId, CancellationToken cancellationToken = default)
-        where T : AggregateRoot, new()
+    public async Task<bool> ExistsAsync<T, TId>(TId aggregateId, CancellationToken cancellationToken = default)
+        where T : AggregateRoot<TId>, new() where TId : notnull
     {
-        var streamName = GetStreamName<T>(aggregateId);
+        var streamName = StreamNames.For<T>(aggregateId);
 
         try
         {
@@ -251,12 +253,13 @@ public class EventStoreRepository(
         }
     }
 
-    public async IAsyncEnumerable<EventWithNumber> SubscribeToStream<T>(
-        Guid aggregateId,
+    public async IAsyncEnumerable<EventWithNumber> SubscribeToStream<T, TId>(
+        TId aggregateId,
         long? afterPosition,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default) where T : AggregateRoot, new()
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        where T : AggregateRoot<TId>, new() where TId : notnull
     {
-        var streamName = GetStreamName<T>(aggregateId);
+        var streamName = StreamNames.For<T>(aggregateId);
 
         var fromStream = afterPosition.HasValue
             ? FromStream.After(StreamPosition.FromInt64(afterPosition.Value))
@@ -281,11 +284,5 @@ public class EventStoreRepository(
 
             if (domainEvent != null) yield return new EventWithNumber(domainEvent, @event.GetEventNumber());
         }
-    }
-
-    private static string GetStreamName<T>(Guid aggregateId) where T : AggregateRoot
-    {
-        var aggregateType = typeof(T).Name.ToLowerInvariant();
-        return $"{aggregateType}-{aggregateId}";
     }
 }

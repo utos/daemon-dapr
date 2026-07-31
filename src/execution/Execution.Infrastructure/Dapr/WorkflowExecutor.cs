@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using System.Text.Json.Serialization;
 using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
@@ -27,10 +28,10 @@ namespace Execution.Infrastructure.Dapr;
 /// rather than just the final segment.
 /// </param>
 public record WorkflowExecutorInput(
-    Guid ExecutionId,
+    ExecutionId ExecutionId,
     string WorkflowKey,
     string StartActivity,
-    Guid? ParentExecutionId = null,
+    ExecutionId? ParentExecutionId = null,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? ActivityInput = null,
     List<string>? Visited = null,
@@ -182,7 +183,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         WorkflowExecutorInput input,
         WorkflowStep.Run run,
         Dictionary<string, object>? activityInput,
-        Guid logExecutionId)
+        ExecutionId logExecutionId)
     {
         switch (run.Activity.Config)
         {
@@ -231,7 +232,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         WorkflowExecutorInput input,
         WorkflowStep.Run run,
         Dictionary<string, object>? activityInput,
-        Guid logExecutionId)
+        ExecutionId logExecutionId)
     {
         logger.LogInformation(
             "Activity '{WorkflowActivity}' started (execution {WorkflowExecutionId})",
@@ -278,7 +279,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         WorkflowExecutorInput input,
         WorkflowStep.Run run,
         Dictionary<string, object>? activityInput,
-        Guid logExecutionId)
+        ExecutionId logExecutionId)
     {
         logger.LogInformation(
             "Entering sub-workflow from activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
@@ -290,7 +291,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             new ResolveActivityInputInput(input.ExecutionId, input.WorkflowKey,
                 run.ActivityName, activityInput));
 
-        var childExecutionId = context.NewGuid();
+        // NewGuid is the replay-safe source, so the same child id comes back on replay.
+        var childExecutionId = new ExecutionId(context.NewGuid());
 
         if (resolved.Detached)
         {
@@ -335,7 +337,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         WorkflowExecutorInput input,
         WorkflowStep.Run run,
         Dictionary<string, object>? activityInput,
-        Guid logExecutionId)
+        ExecutionId logExecutionId)
     {
         logger.LogInformation(
             "Entering promise activity '{WorkflowActivity}' (mode: {PromiseMode}) (execution {WorkflowExecutionId})",
@@ -350,7 +352,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         // 2. Assign each branch an execution id. Minted here rather than during expansion
         //    because NewGuid is the replay-safe source — the same ids come back on replay.
         var branches = resolved.Branches
-            .Select(branch => (Branch: branch, ExecutionId: context.NewGuid()))
+            .Select(branch => (Branch: branch, ExecutionId: new ExecutionId(context.NewGuid())))
             .ToList();
 
         // 3. Persist every branch context in one call, so each branch inherits the parent's

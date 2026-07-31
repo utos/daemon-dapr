@@ -9,7 +9,7 @@ namespace UnitTests.Persistence;
 
 public class ExecutionLifecycleWriterTests
 {
-    private static readonly Guid Id = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly ExecutionId Id = new(Guid.Parse("22222222-2222-2222-2222-222222222222"));
 
     private static WorkflowExecutionCreatedEvent CreatedEvent()
     {
@@ -118,8 +118,8 @@ public class ExecutionLifecycleWriterTests
         /// <summary>Appended to the history when a save is rejected, as the winning writer would.</summary>
         public IDomainEvent? OnConflictAppend { get; set; }
 
-        public Task<T> LoadAsync<T>(Guid aggregateId, CancellationToken cancellationToken = default)
-            where T : AggregateRoot, new()
+        public Task<T> LoadAsync<T, TId>(TId aggregateId, CancellationToken cancellationToken = default)
+            where T : AggregateRoot<TId>, new() where TId : notnull
         {
             Loads++;
 
@@ -129,7 +129,8 @@ public class ExecutionLifecycleWriterTests
             return Task.FromResult(aggregate);
         }
 
-        public Task SaveAsync<T>(T aggregate) where T : AggregateRoot, new()
+        public Task SaveAsync<T, TId>(T aggregate)
+            where T : AggregateRoot<TId>, new() where TId : notnull
         {
             SaveAttempts++;
 
@@ -152,11 +153,12 @@ public class ExecutionLifecycleWriterTests
             return Task.CompletedTask;
         }
 
-        public Task AppendEventAsync<T>(Guid aggregateId, IDomainEvent @event) where T : AggregateRoot, new()
+        public Task AppendEventAsync<T, TId>(TId aggregateId, IDomainEvent @event)
+            where T : AggregateRoot<TId>, new() where TId : notnull
             => throw new NotSupportedException();
 
-        public Task<bool> ExistsAsync<T>(Guid aggregateId, CancellationToken cancellationToken = default)
-            where T : AggregateRoot, new()
+        public Task<bool> ExistsAsync<T, TId>(TId aggregateId, CancellationToken cancellationToken = default)
+            where T : AggregateRoot<TId>, new() where TId : notnull
             => throw new NotSupportedException();
 
         public Task AppendToStreamAsync(string streamName, IDomainEvent @event)
@@ -168,8 +170,9 @@ public class ExecutionLifecycleWriterTests
         public Task DeleteStreamAsync(string streamName, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public IAsyncEnumerable<EventWithNumber> SubscribeToStream<T>(Guid aggregateId, long? afterPosition,
-            CancellationToken cancellationToken = default) where T : AggregateRoot, new()
+        public IAsyncEnumerable<EventWithNumber> SubscribeToStream<T, TId>(TId aggregateId, long? afterPosition,
+            CancellationToken cancellationToken = default)
+            where T : AggregateRoot<TId>, new() where TId : notnull
             => throw new NotSupportedException();
     }
 }

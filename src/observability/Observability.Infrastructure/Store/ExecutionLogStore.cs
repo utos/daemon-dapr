@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Common.SeedWork;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Observability.Domain;
@@ -7,18 +8,18 @@ namespace Observability.Infrastructure.Store;
 
 public class ExecutionLogStore : IExecutionLogStore
 {
-    private readonly ConcurrentDictionary<Guid, ExecutionLogBuffer> _buffers = new();
+    private readonly ConcurrentDictionary<ExecutionId, ExecutionLogBuffer> _buffers = new();
 
-    public void AddEntry(Guid executionId, ExecutionLogEntry entry)
+    public void AddEntry(ExecutionId executionId, ExecutionLogEntry entry)
         => _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer()).Add(new LogItem(entry));
 
-    public void Complete(Guid executionId)
+    public void Complete(ExecutionId executionId)
     {
         _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer()).Complete();
         ScheduleEviction(executionId);
     }
 
-    public void CompleteWith(Guid executionId, DateTime timestamp, ExecutionOutcome outcome, string? failureReason)
+    public void CompleteWith(ExecutionId executionId, DateTime timestamp, ExecutionOutcome outcome, string? failureReason)
     {
         var buffer = _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer());
         // The terminal frame must land in the stream before it closes, so add then complete.
@@ -27,12 +28,12 @@ public class ExecutionLogStore : IExecutionLogStore
         ScheduleEviction(executionId);
     }
 
-    private void ScheduleEviction(Guid executionId)
+    private void ScheduleEviction(ExecutionId executionId)
         => _ = Task.Delay(TimeSpan.FromMinutes(5))
                    .ContinueWith(t => _buffers.TryRemove(executionId, out _), TaskScheduler.Default);
 
     public async IAsyncEnumerable<ExecutionStreamItem> SubscribeAsync(
-        Guid executionId, int? after, int? tail, [EnumeratorCancellation] CancellationToken ct)
+        ExecutionId executionId, int? after, int? tail, [EnumeratorCancellation] CancellationToken ct)
     {
         var buffer = _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer());
         var (history, channel) = buffer.Subscribe();

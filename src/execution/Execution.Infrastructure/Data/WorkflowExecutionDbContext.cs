@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Common.Infrastructure.Serialization;
+using Common.SeedWork;
 using Common.Workflow;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -87,5 +88,11 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
 
         configurationBuilder.Properties<DateTime?>()
             .HaveConversion<UtcNullableDateTimeConverter>();
+
+        // Registered as a convention rather than per property, so every execution id — the read
+        // model's key, ParentExecutionId, and ExecutionContext's key — keeps the uniqueidentifier
+        // column it already had without each one restating the conversion.
+        configurationBuilder.Properties<ExecutionId>()
+            .HaveConversion<ExecutionIdValueConverter>();
     }
 }

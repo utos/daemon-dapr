@@ -7,12 +7,12 @@ namespace Execution.Infrastructure.ReadModels;
 /// Read model for workflow executions optimized for querying.
 /// Denormalized view projected from workflow execution events.
 /// </summary>
-public class WorkflowExecutionReadModel : Entity
+public class WorkflowExecutionReadModel : Entity<ExecutionId>
 {
     /// <summary>
     /// Parent execution ID for sub-workflow executions. Null for top-level executions.
     /// </summary>
-    public Guid? ParentExecutionId { get; set; }
+    public ExecutionId? ParentExecutionId { get; set; }
 
     /// <summary>
     /// Current execution status: INITIAL, SCHEDULED, ACTIVE, COMPLETED, FAILED

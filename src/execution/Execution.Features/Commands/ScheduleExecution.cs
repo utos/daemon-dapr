@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Common.Workflow;
 using Execution.Domain.Aggregates;
 using Mediator;
@@ -23,6 +24,6 @@ public record ScheduleExecutionCommand(
     // Caller-supplied execution id. Set by the detached sub-workflow path, which mints a
     // replay-safe id in the orchestrator so scheduling is idempotent across Dapr replays.
     // Null for the gRPC path, which lets the aggregate mint its own.
-    Guid? ExecutionId = null) : ICommand<ScheduleExecutionResult>;
+    ExecutionId? ExecutionId = null) : ICommand<ScheduleExecutionResult>;
 
-public record ScheduleExecutionResult(Guid Id, ExecutionStatus Status);
+public record ScheduleExecutionResult(ExecutionId Id, ExecutionStatus Status);

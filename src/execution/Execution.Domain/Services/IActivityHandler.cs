@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Common.Workflow;
 
 namespace Execution.Domain.Services;
@@ -11,8 +12,8 @@ public interface IActivityHandler
 }
 
 public record ActivityHandlerInput(
-    Guid ExecutionId,
-    Guid LogExecutionId,
+    ExecutionId ExecutionId,
+    ExecutionId LogExecutionId,
     string? Url,
     string? HttpMethod,
     string? Body,

@@ -12,8 +12,8 @@ using Common.Workflow;
 namespace Execution.Infrastructure.Dapr.Activities;
 
 public sealed record ScheduleDetachedExecutionInput(
-    Guid ParentExecutionId,
-    Guid ChildExecutionId,
+    ExecutionId ParentExecutionId,
+    ExecutionId ChildExecutionId,
     string SubWorkflowKey,
     string SubStartActivity,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
@@ -46,7 +46,7 @@ public class ScheduleDetachedExecutionActivity(
         // can be created between this check and the append below. The guarantee is that the
         // create expects StreamState.NoStream, so a lost race raises ConcurrencyException —
         // caught below and treated the same way.
-        if (await eventStore.ExistsAsync<WorkflowExecution>(input.ChildExecutionId))
+        if (await eventStore.ExistsAsync<WorkflowExecution, ExecutionId>(input.ChildExecutionId))
         {
             LogAlreadyStarted(input.ChildExecutionId);
             return new object();
@@ -100,7 +100,7 @@ public class ScheduleDetachedExecutionActivity(
         return new object();
     }
 
-    private void LogAlreadyStarted(Guid childExecutionId)
+    private void LogAlreadyStarted(ExecutionId childExecutionId)
     {
         logger.LogInformation(
             "Detached execution {WorkflowExecutionId} already exists — skipping (likely replay)",

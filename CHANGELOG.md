@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An execution is now identified by an `ExecutionId` rather than a raw `Guid`. The id appeared as
+  a bare `Guid` in 64 files — the aggregate, every lifecycle event, the Dapr activity inputs
+  (where an execution's own id and the id its logs are routed under sat side by side as two
+  interchangeable `Guid` parameters), the read model, and the log store — and was re-parsed from a
+  string at each of the three gRPC entry points. `AggregateRoot` and `Entity` became generic in
+  their identifier so the shared kernel does not have to assume one, and the duplicate stream-name
+  formatter in `EventStoreRepository` was folded into `StreamNames`. The gRPC contract is
+  unchanged (an id is still a GUID string on the wire) and so is the database schema: the id
+  keeps its `uniqueidentifier` columns through a single convention-registered value converter, and
+  its JSON converter writes the same bare GUID string a raw `Guid` did, so events already in the
+  stream and Dapr payloads already in flight keep deserializing. A new `EventJsonShapeTests`
+  asserts that shape as text, because the event store logs and drops an event it cannot
+  deserialize rather than failing — a changed shape would have truncated an aggregate's history
+  silently rather than erroring.
+
 - Workflow identity and semantic version are now types rather than static helpers over strings.
   `WorkflowIdentity` was a static class that could only *format* `[registry/][namespace/]name:version`,
   and semver was an `IComparer<string>` with its parser hidden in a private method — so a resolved

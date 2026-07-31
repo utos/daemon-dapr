@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Mediator;
 
 namespace Execution.Features.Commands;
@@ -7,6 +8,6 @@ namespace Execution.Features.Commands;
 /// with the records of its non-detached sub-workflow executions. Detached sub-workflows are
 /// independent top-level executions and are not affected.
 /// </summary>
-public record DeleteExecutionCommand(Guid ExecutionId) : ICommand<DeleteExecutionResult>;
+public record DeleteExecutionCommand(ExecutionId ExecutionId) : ICommand<DeleteExecutionResult>;
 
 public record DeleteExecutionResult;

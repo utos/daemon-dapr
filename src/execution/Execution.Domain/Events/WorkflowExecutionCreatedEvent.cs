@@ -5,7 +5,7 @@ using Common.Workflow;
 namespace Execution.Domain.Events;
 
 public record WorkflowExecutionCreatedEvent(
-    Guid ExecutionId,
+    ExecutionId ExecutionId,
     WorkflowBundle Bundle,
     Dictionary<string, object> Input,
     string StartActivity,

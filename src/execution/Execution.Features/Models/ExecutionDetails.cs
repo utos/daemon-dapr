@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Common.Workflow;
 using Execution.Domain.Aggregates;
 
@@ -9,7 +10,7 @@ namespace Execution.Features.Models;
 /// </summary>
 public class ExecutionDetails
 {
-    public Guid Id { get; set; }
+    public ExecutionId Id { get; set; }
     public ExecutionStatus Status { get; set; }
     public WorkflowIdentity Workflow { get; set; } = null!;
     public string? WorkflowDigest { get; set; }
