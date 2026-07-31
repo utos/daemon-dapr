@@ -20,6 +20,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The layers are now named for what they are — **Domain / Application / Infrastructure / Api** —
+  and every module has all four. "Features" previously meant three different things: in Execution
+  it was a real application layer (commands, queries, handlers) that *also* hosted the gRPC
+  service; in Observability it was an entire project containing one gRPC service and nothing else;
+  in Definition it did not exist, and the gRPC service sat in `Infrastructure`. The `Grpc.AspNetCore`
+  package followed whichever project the service had landed in, which is the tell that the split
+  described where a class happened to be rather than a rule.
+
+  `Execution.Features` is now `Execution.Application`; `Observability.Features` is now
+  `Observability.Application` and has real use cases instead of a service; and
+  `Definition.Application` is new. The three gRPC services move into new `Execution.Api`,
+  `Definition.Api` and `Observability.Api` projects, together with the proto mapping that
+  accompanies them, so **no project below `*.Api` references a `Utos.*` or `Grpc.*` package** —
+  the wire format now stops at the transport edge in the project graph, not just by convention.
+  `API.Main` composes the three `*.Api` projects and no longer references any `*.Infrastructure`
+  project.
+
+  Transport handlers became translate-and-delegate. `ScheduleExecution` no longer resolves the
+  definition itself — it reached across into another context's store from inside a gRPC method —
+  so `ScheduleExecutionCommand` now carries a `WorkflowReference` and its handler resolves it,
+  while the existing bundle-carrying command is renamed `StartExecutionCommand` and remains the
+  path the detached sub-workflow activity uses (it holds the parent's snapshotted bundle and never
+  consults the store). `WatchExecution`'s existence check, filtering and level mapping move into a
+  `WatchExecutionQuery` handler behind a narrow `IExecutionProbe` port, so the observability side
+  no longer needs `IEventStoreRepository` or knowledge of stream names. `DefinitionGrpcService`'s
+  four operations become commands and queries; the bundle digest is still computed at the edge,
+  on the wire form, because it is defined over the canonical serialization.
+
+  Mediator is now source-generated once in `API.Main`, the only project that sees every module's
+  handlers, and the shared `ValidationBehavior` moves to a new `Common.Application`. `AddGrpc()`
+  moves to the host too — it was called only by the execution module, which the other two silently
+  depended on. Behaviour, the gRPC contract, the database schema and the event-stream format are
+  all unchanged.
+
 - An execution is now identified by an `ExecutionId` rather than a raw `Guid`. The id appeared as
   a bare `Guid` in 64 files — the aggregate, every lifecycle event, the Dapr activity inputs
   (where an execution's own id and the id its logs are routed under sat side by side as two

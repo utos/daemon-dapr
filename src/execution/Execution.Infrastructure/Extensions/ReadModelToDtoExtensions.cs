@@ -1,10 +1,10 @@
 using System.Text.Json;
 using Common.Workflow;
 using Execution.Domain.Aggregates;
-using Execution.Features.Models;
+using Execution.Application.Models;
 using Execution.Infrastructure.ReadModels;
-using ExecutionDetails = Execution.Features.Models.ExecutionDetails;
-using ExecutionSummary = Execution.Features.Models.ExecutionSummary;
+using ExecutionDetails = Execution.Application.Models.ExecutionDetails;
+using ExecutionSummary = Execution.Application.Models.ExecutionSummary;
 
 namespace Execution.Infrastructure.Extensions;
 

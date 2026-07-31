@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Observability.Application/Observability.Application.csproj"/>
+        <ProjectReference Include="../Observability.Infrastructure/Observability.Infrastructure.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Utos.Daemon.Server" />
+        <PackageReference Include="Grpc.AspNetCore" />
+        <PackageReference Include="Mediator.Abstractions" />
+    </ItemGroup>
+
+</Project>

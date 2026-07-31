@@ -1,7 +1,7 @@
 using Common.Infrastructure.EventHandling;
 using Common.SeedWork;
 using Dapr.Workflow;
-using Execution.Features.Models;
+using Execution.Application.Models;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

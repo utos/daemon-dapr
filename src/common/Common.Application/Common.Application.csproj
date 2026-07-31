@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+      The application-layer kernel: cross-cutting pieces that are registered once for the whole
+      host and so cannot be owned by any single module.
+    -->
+    <ItemGroup>
+        <PackageReference Include="FluentValidation"/>
+        <PackageReference Include="Mediator.Abstractions" />
+    </ItemGroup>
+
+</Project>

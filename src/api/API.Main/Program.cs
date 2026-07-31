@@ -1,7 +1,9 @@
+using Common.Application.Behaviors;
 using Common.Constants;
-using Definition.Infrastructure.Extensions;
-using Execution.Infrastructure.Extensions;
-using Observability.Infrastructure.Extensions;
+using Definition.Api.Extensions;
+using Execution.Api.Extensions;
+using Mediator;
+using Observability.Api.Extensions;
 using Tools.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -9,26 +11,20 @@ var builder = WebApplication.CreateBuilder(args);
 // Enable Service Defaults
 builder.AddServiceDefaults();
 
+// Cross-cutting application plumbing. Mediator is source-generated here because this is the
+// only project that sees every module's handlers; the validation behaviour applies to all of
+// them, so no single module can own it either.
+builder.Services.AddMediator(options => { options.ServiceLifetime = ServiceLifetime.Scoped; });
+builder.Services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+
+// The one gRPC surface every module maps its service onto.
+builder.Services.AddGrpc();
+
 builder.AddExecutionModule(ServiceName.Database.WorkflowExecution, ServiceName.App.EventStore);
 builder.AddDefinitionModule();
 builder.AddObservabilityModule();
 
-// Add services to the container.
-// builder.Services.AddControllers();
-// builder.Services.AddEndpointsApiExplorer();
-// builder.Services.AddOpenApi();
-
 var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-// if (app.Environment.IsDevelopment())
-// {
-//     app.MapOpenApi();
-// }
-
-// app.UseHttpsRedirection();
-
-// app.MapControllers();
 
 app.UseExecutionModule();
 app.UseDefinitionModule();

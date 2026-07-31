@@ -3,14 +3,14 @@
     <ItemGroup>
         <ProjectReference Include="../../common/Common.Infrastructure/Common.Infrastructure.csproj"/>
         <ProjectReference Include="../Execution.Domain/Execution.Domain.csproj"/>
-        <ProjectReference Include="../Execution.Features/Execution.Features.csproj"/>
+        <ProjectReference Include="../Execution.Application/Execution.Application.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="Aspire.Microsoft.EntityFrameworkCore.SqlServer" />
         <PackageReference Include="Dapr.AspNetCore" />
         <PackageReference Include="Dapr.Workflow" />
-        <PackageReference Include="Mediator.SourceGenerator" PrivateAssets="all" />
+        <PackageReference Include="Mediator.Abstractions" />
         <PackageReference Include="Scriban" />
     </ItemGroup>
 
