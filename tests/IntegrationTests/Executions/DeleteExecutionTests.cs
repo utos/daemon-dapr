@@ -112,7 +112,7 @@ public class DeleteExecutionTests(DaemonTestFixture fixture)
     }
 
     [Fact]
-    public async Task DeleteExecution_WithNonDetachedChild_DeletesParentAndCascades()
+    public async Task DeleteExecution_WithNonDetachedChild_DeletesTheParent()
     {
         // Arrange — parent invokes a non-detached child; the whole run completes as one unit.
         fixture.WireMockServer
@@ -132,11 +132,9 @@ public class DeleteExecutionTests(DaemonTestFixture fixture)
         var scheduleResponse = await fixture.ScheduleAsync(request);
         await WaitForStatus(scheduleResponse.Id, ExecutionStatus.Completed, TimeSpan.FromSeconds(30));
 
-        // Act — deletes the parent and, per the cascade design, the non-detached child's
-        // read-model row and streams. The child's id is not exposed through the public API
-        // (non-detached children are hidden from ListExecutions and their activity output is
-        // the child result, not a handle), so this asserts the parent-facing outcome and that
-        // the cascade path runs without error.
+        // Act — there is nothing to cascade to: an awaited sub-workflow is a Dapr child
+        // orchestration, not an execution of its own, so it has no read-model row and no stream.
+        // Deleting the parent removes the one record the run produced.
         await fixture.DaemonClient.DeleteExecutionAsync(
             new DeleteExecutionRequest { ExecutionId = scheduleResponse.Id });
 

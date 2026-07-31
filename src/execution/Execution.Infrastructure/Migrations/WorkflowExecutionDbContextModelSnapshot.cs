@@ -52,41 +52,6 @@ namespace Execution.Infrastructure.Migrations
                     b.ToTable("ExecutionContexts", (string)null);
                 });
 
-            modelBuilder.Entity("Execution.Infrastructure.ReadModels.SubWorkflowCall", b =>
-                {
-                    b.Property<Guid>("ParentExecutionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ChildExecutionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ActivityName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("BranchName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("InvocationType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("PromiseMode")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.HasKey("ParentExecutionId", "ChildExecutionId");
-
-                    b.HasIndex("ChildExecutionId");
-
-                    b.HasIndex("ParentExecutionId", "ActivityName");
-
-                    b.ToTable("SubWorkflowCalls", (string)null);
-                });
-
             modelBuilder.Entity("Execution.Infrastructure.ReadModels.WorkflowExecutionReadModel", b =>
                 {
                     b.Property<Guid>("Id")

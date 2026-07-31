@@ -73,16 +73,6 @@ public class WorkflowExecutionRepository(WorkflowExecutionDbContext dbContext) :
             : ExecutionDeletionEligibility.NonTerminal;
     }
 
-    public async Task<IReadOnlyList<Guid>> GetChildExecutionIdsAsync(Guid parentExecutionId,
-        CancellationToken cancellationToken = default)
-    {
-        return await dbContext.WorkflowExecutions
-            .AsNoTracking()
-            .Where(e => e.ParentExecutionId == parentExecutionId)
-            .Select(e => e.Id)
-            .ToListAsync(cancellationToken);
-    }
-
     public async Task DeleteAsync(IReadOnlyCollection<Guid> executionIds,
         CancellationToken cancellationToken = default)
     {

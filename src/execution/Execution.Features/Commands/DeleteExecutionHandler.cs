@@ -6,7 +6,11 @@ using Mediator;
 namespace Execution.Features.Commands;
 
 /// <summary>
-/// Deletes a terminal execution and its non-detached children across both stores.
+/// Deletes a terminal execution across both stores.
+///
+/// There is nothing to cascade to: an awaited sub-workflow is a Dapr child orchestration, not an
+/// execution of its own — it has no event stream and no read-model row — and a detached one is an
+/// independent top-level execution that deliberately outlives its parent.
 ///
 /// Streams are deleted before read-model rows: if the process dies mid-delete, a leftover
 /// read-model row can be re-deleted on retry, whereas a stream left behind after its row was
@@ -30,19 +34,10 @@ public class DeleteExecutionHandler(
                 throw new ExecutionNotTerminalException(command.ExecutionId);
         }
 
-        // Discover children before deleting anything — the read-model rows are how we find them.
-        var childIds = await repository.GetChildExecutionIdsAsync(command.ExecutionId, ct);
-        var allIds = new List<Guid>(childIds.Count + 1) { command.ExecutionId };
-        allIds.AddRange(childIds);
+        // Stream first (see class remarks).
+        await eventStore.DeleteStreamAsync(StreamNames.Execution(command.ExecutionId), ct);
 
-        // Streams first (see class remarks). SubWorkflowCalls stream may not exist — delete is idempotent.
-        foreach (var id in allIds)
-        {
-            await eventStore.DeleteStreamAsync(StreamNames.Execution(id), ct);
-            await eventStore.DeleteStreamAsync(StreamNames.SubWorkflowCalls(id), ct);
-        }
-
-        await repository.DeleteAsync(allIds, ct);
+        await repository.DeleteAsync([command.ExecutionId], ct);
 
         return new DeleteExecutionResult();
     }

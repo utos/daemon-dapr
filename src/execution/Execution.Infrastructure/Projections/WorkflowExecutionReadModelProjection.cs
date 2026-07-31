@@ -25,7 +25,6 @@ public class WorkflowExecutionReadModelProjection(
     public override bool CanHandle(Type eventType)
     {
         return eventType == typeof(WorkflowExecutionCreatedEvent)
-               || eventType == typeof(SubWorkflowCreatedEvent)
                || eventType == typeof(WorkflowExecutionScheduledEvent)
                || eventType == typeof(WorkflowExecutionActiveEvent)
                || eventType == typeof(WorkflowExecutionCompletedEvent)
@@ -39,10 +38,6 @@ public class WorkflowExecutionReadModelProjection(
         {
             case WorkflowExecutionCreatedEvent e:
                 await HandleCreatedEvent(e, cancellationToken);
-                break;
-
-            case SubWorkflowCreatedEvent e:
-                await HandleSubWorkflowCreatedEvent(e, cancellationToken);
                 break;
 
             case WorkflowExecutionScheduledEvent e:
@@ -90,26 +85,6 @@ public class WorkflowExecutionReadModelProjection(
         dbContext.WorkflowExecutions.Add(readModel);
 
         logger.LogDebug("Created read model for execution {ExecutionId}", @event.ExecutionId);
-
-        return Task.CompletedTask;
-    }
-
-    private Task HandleSubWorkflowCreatedEvent(SubWorkflowCreatedEvent @event, CancellationToken _)
-    {
-        var readModel = new WorkflowExecutionReadModel
-        {
-            Id = @event.ExecutionId,
-            ParentExecutionId = @event.ParentExecutionId,
-            Status = ReadModelStatus.Active,
-            WorkflowName = @event.WorkflowName,
-            WorkflowVersion = @event.WorkflowVersion,
-            StartedAt = @event.DateOccurred
-        };
-
-        dbContext.WorkflowExecutions.Add(readModel);
-
-        logger.LogDebug("Created read model for sub-workflow execution {ExecutionId} (parent: {ParentId})",
-            @event.ExecutionId, @event.ParentExecutionId);
 
         return Task.CompletedTask;
     }

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Six sub-workflow and promise lifecycle event types (`SubWorkflowCreated/Started/Completed/Failed`,
+  `PromiseGroupStarted/Resolved`), the `SubWorkflowCalls` table and its projection, and the
+  `subworkflowcalls-{id}` stream. Nothing ever emitted these events, so the projections that
+  declared handlers for them could not fire, the table was always empty, and the stream was only
+  ever deleted and never written — but the wiring read as working behaviour. They belonged to a
+  design in which an awaited sub-workflow was an execution in its own right; the daemon instead
+  runs one as a Dapr child orchestration with no separate identity, while a detached sub-workflow
+  becomes a genuine top-level execution. No observable behaviour changes.
+
 ### Changed
 
 - The daemon now has its own workflow model instead of using the generated protobuf types as its
@@ -71,12 +82,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   created before this change have no stored digest/namespace/registry and are not matched by a filter
   that specifies one of those fields. Previously the request was ignored and every execution returned.
 - `ExecutionService.DeleteExecution` now deletes a terminal execution's record — both its read-model
-  row and its `workflowexecution-{id}` / `subworkflowcalls-{id}` event streams (soft delete), so a
-  projection rebuild cannot resurrect it. Deletion cascades to the execution's non-detached
-  sub-workflow records; detached sub-workflows are independent top-level executions and are left
-  untouched, continuing to run. A `SCHEDULED` or `ACTIVE` execution returns `FAILED_PRECONDITION`
-  (it must be cancelled first) and an unknown id returns `NOT_FOUND`. Previously the RPC was
-  unimplemented and returned `UNIMPLEMENTED`.
+  row and its `workflowexecution-{id}` event stream (soft delete), so a projection rebuild cannot
+  resurrect it. There is nothing to cascade to: an awaited sub-workflow is a Dapr child
+  orchestration rather than an execution of its own, so it has no record to delete, and a detached
+  sub-workflow is an independent top-level execution that is left untouched and continues to run.
+  A `SCHEDULED` or `ACTIVE` execution returns `FAILED_PRECONDITION` (it must be cancelled first)
+  and an unknown id returns `NOT_FOUND`. Previously the RPC was unimplemented and returned
+  `UNIMPLEMENTED`.
 - Detached (fire-and-forget) sub-workflows via `WorkflowActivityConfig.detached`. When set, the
   executor starts the sub-workflow as its own independent, top-level execution instead of awaiting
   it as a Dapr child: the parent transitions immediately with a `{ "execution_id": "<id>" }` handle

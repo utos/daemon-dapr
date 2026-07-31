@@ -114,7 +114,6 @@ public static class ExecutionExtensions
         // Projection engine and projections (idempotent read model updates)
         builder.Services.AddScoped<IProjectionEngine, ProjectionEngine>();
         builder.Services.AddScoped<IProjection, WorkflowExecutionReadModelProjection>();
-        builder.Services.AddScoped<IProjection, SubWorkflowCallProjection>();
 
         // Event handlers (side-effect-producing reactions)
         builder.Services.AddScoped<IEventHandler, WorkflowSchedulingProcessManager>();

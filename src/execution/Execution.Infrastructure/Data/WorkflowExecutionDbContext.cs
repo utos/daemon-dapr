@@ -18,7 +18,6 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
     };
 
     public DbSet<WorkflowExecutionReadModel> WorkflowExecutions => Set<WorkflowExecutionReadModel>();
-    public DbSet<SubWorkflowCall> SubWorkflowCalls => Set<SubWorkflowCall>();
     public DbSet<ExecutionContext> ExecutionContexts => Set<ExecutionContext>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
