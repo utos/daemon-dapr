@@ -6,7 +6,6 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="FluentValidation"/>
         <PackageReference Include="Mediator.Abstractions" />
     </ItemGroup>
 

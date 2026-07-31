@@ -1,8 +1,6 @@
-using Common.Workflow;
-using Execution.Domain.Interpreter;
 using FluentValidation;
 
-namespace Execution.Domain.Validation;
+namespace Common.Workflow.Validation;
 
 public class WorkflowActivityValidator : AbstractValidator<WorkflowActivity>
 {

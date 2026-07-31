@@ -1,4 +1,4 @@
-using Execution.Domain.Constants;
+using Common.Workflow;
 
 namespace Execution.Domain.Interpreter;
 

@@ -48,6 +48,25 @@ public class DefinitionServiceTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task LoadWorkflow_ThrowsInvalidArgument_WhenBundleIsInvalid()
+    {
+        // Arrange - an entry point that names no workflow in the bundle
+        var request = new TestWorkflowBuilder("def-invalid-test", fixture.MockBaseUrl)
+            .HttpGet("valid-activity", "/success")
+            .Build();
+        request.Bundle.EntryPoint = "absent:9.9.9";
+
+        // Act & Assert - the definition module runs the document's shape rules itself; before it
+        // registered them, this only worked because the execution module happened to be present.
+        var exception = await Assert.ThrowsAsync<RpcException>(() =>
+            fixture.DefinitionClient.LoadWorkflowAsync(
+                new LoadWorkflowRequest { Bundle = request.Bundle }).ResponseAsync);
+
+        Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
+        Assert.Contains("not found in bundle workflows", exception.Status.Detail);
+    }
+
+    [Fact]
     public async Task ListWorkflows_IncludesLoadedDefinition()
     {
         // Arrange

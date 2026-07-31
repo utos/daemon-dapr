@@ -1,4 +1,4 @@
-namespace Execution.Domain.Constants;
+namespace Common.Workflow;
 
 /// <summary>
 /// Reserved keywords that cannot be used as activity names.

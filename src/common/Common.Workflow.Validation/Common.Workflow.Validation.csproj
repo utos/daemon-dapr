@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+      The shape rules of a workflow document, layered over the model the same way
+      Common.Workflow.Proto layers the wire mapping over it. They live here rather than in a
+      module because both Definition (on load) and Execution (on start) run them, and neither
+      owns the model they validate.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="../Common.Workflow/Common.Workflow.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="FluentValidation"/>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+    </ItemGroup>
+
+</Project>

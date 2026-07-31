@@ -1,4 +1,4 @@
-namespace Execution.Domain.Validation;
+namespace Common.Workflow;
 
 /// <summary>
 /// Shape rules for HTTP activity URLs, applied at two points.

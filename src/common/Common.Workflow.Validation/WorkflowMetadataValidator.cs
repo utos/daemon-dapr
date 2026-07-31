@@ -1,8 +1,7 @@
 using System.Text.RegularExpressions;
-using Common.Workflow;
 using FluentValidation;
 
-namespace Execution.Domain.Validation;
+namespace Common.Workflow.Validation;
 
 public class WorkflowMetadataValidator : AbstractValidator<WorkflowMetadata>
 {

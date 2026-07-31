@@ -2,6 +2,7 @@ using Common.Workflow.Proto;
 using Definition.Application.Commands;
 using Definition.Application.Exceptions;
 using Definition.Application.Queries;
+using FluentValidation;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Mediator;
@@ -102,7 +103,7 @@ public class DefinitionGrpcService(IMediator mediator) : DefinitionService.Defin
         {
             return await send(context.CancellationToken);
         }
-        catch (WorkflowBundleInvalidException ex)
+        catch (ValidationException ex)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
         }

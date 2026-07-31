@@ -5,18 +5,13 @@ using Common.Infrastructure.Projections;
 using Common.Infrastructure.Serialization;
 using Common.SeedWork;
 using Dapr.Workflow;
-using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Common.Workflow;
-using Execution.Application.Commands;
 using Execution.Application.Models;
 using Execution.Application.Repositories;
-using Execution.Application.Validation;
-using Execution.Domain.Validation;
 using Execution.Domain.Interpreter;
 using Execution.Domain.Services;
 using Execution.Domain.Templating;
@@ -123,13 +118,6 @@ public static class ExecutionInfrastructureExtensions
         // Execution limits (loop ceiling, continue-as-new threshold)
         builder.Services.Configure<ExecutionLimitsOptions>(
             builder.Configuration.GetSection(ExecutionLimitsOptions.SectionName));
-
-        // Add validation
-        builder.Services.AddScoped<IValidator<WorkflowBundle>, WorkflowBundleValidator>();
-        builder.Services.AddScoped<IValidator<Workflow>, WorkflowValidator>();
-        builder.Services.AddScoped<IValidator<StartExecutionCommand>, StartExecutionCommandValidator>();
-        builder.Services.AddScoped<WorkflowActivityValidator>();
-        builder.Services.AddScoped<WorkflowMetadataValidator>();
 
         // Add Hosted Services
         builder.Services.AddHostedService<WorkflowExecutionEventProcessor>();

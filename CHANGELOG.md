@@ -20,6 +20,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Workflow-document validation moved out of the execution module into a new shared-kernel project,
+  `Common.Workflow.Validation`. `WorkflowBundleValidator` and the validators below it lived in
+  `Execution.Domain`, and the only registration of `IValidator<WorkflowBundle>` was in
+  `AddExecutionInfrastructure` — but `Definition.Application`'s `LoadWorkflowHandler` injected it.
+  Definition had no compile-time path to that type and worked only because `Program.cs` happened to
+  add the execution module first; `AddDefinitionModule` alone failed at resolve time, and no test
+  covered the definition side of validation. The rules describe the workflow *document*, so they now
+  sit beside the model in `common/` — the same split as `Common.Workflow.Proto` — and each module
+  asks for them itself via `AddWorkflowValidation()`. `ReservedKeywords`, `PromiseMode(s)` and
+  `HttpUrlRules` move to `Common.Workflow` for the same reason: they are the document's vocabulary,
+  not execution machinery.
+
+  Loading a definition now validates through the same pipeline as scheduling an execution: a
+  `LoadWorkflowCommandValidator` replaces the hand-rolled check in the handler, so
+  `WorkflowBundleInvalidException` is gone and `LoadWorkflow` reports an invalid bundle as
+  `InvalidArgument` from `ValidationException`, as `ScheduleExecution` already did. Three dead
+  registrations (`IValidator<Workflow>`, `WorkflowActivityValidator`, `WorkflowMetadataValidator` —
+  never injected, since their parents construct them directly) are removed.
+
 - The layers are now named for what they are — **Domain / Application / Infrastructure / Api** —
   and every module has all four. "Features" previously meant three different things: in Execution
   it was a real application layer (commands, queries, handlers) that *also* hosted the gRPC
