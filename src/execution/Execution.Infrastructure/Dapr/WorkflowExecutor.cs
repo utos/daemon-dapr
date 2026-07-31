@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
+using Execution.Domain.Aggregates;
 using Execution.Domain.Interpreter;
 using Execution.Infrastructure.Dapr.Activities;
 using Microsoft.Extensions.Logging;
@@ -60,7 +61,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
         if (!isChild && !isContinuation)
             await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
-                new WriteLifecycleEventInput(input.ExecutionId, "Active", null));
+                new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Active, null));
 
         if (!isContinuation)
             logger.LogInformation(
@@ -152,7 +153,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
-                    new WriteLifecycleEventInput(input.ExecutionId, "Completed", null));
+                    new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Completed, null));
 
             return workflowOutput;
         }
@@ -164,7 +165,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
-                    new WriteLifecycleEventInput(input.ExecutionId, "Failed", ex.Message));
+                    new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Failed, ex.Message));
 
             throw;
         }

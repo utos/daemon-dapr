@@ -5,16 +5,16 @@ using Execution.Features.Models;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Utos.Daemon.V1;
 using Execution.Domain.Events;
 using Execution.Domain.Services;
 using ExecutionContext = Execution.Domain.Services.ExecutionContext;
 using Execution.Infrastructure.Dapr;
+using Execution.Infrastructure.Persistence;
 
 namespace Execution.Infrastructure.EventHandling;
 
 public class WorkflowSchedulingProcessManager(
-    IEventStoreRepository eventStore,
+    ExecutionLifecycleWriter lifecycle,
     DaprWorkflowClient workflowClient,
     IExecutionContextStore contextStore,
     IOptions<ExecutionLimitsOptions> limits,
@@ -46,21 +46,10 @@ public class WorkflowSchedulingProcessManager(
 
         try
         {
-            // Step 1: Transition aggregate to Scheduled (idempotent — skip if already past Unspecified)
-            var workflowExecution =
-                await eventStore.LoadAsync<Domain.Aggregates.WorkflowExecution>(executionId, cancellationToken);
-
-            if (workflowExecution.Status == ExecutionStatus.Unspecified)
-            {
-                workflowExecution.Schedule();
-                await eventStore.SaveAsync(workflowExecution);
-            }
-            else
-            {
-                logger.LogInformation(
-                    "Already in status '{Status}', skipping Schedule() — likely replay (execution {WorkflowExecutionId})",
-                    workflowExecution.Status, executionId);
-            }
+            // Step 1: Transition aggregate to Scheduled. Idempotent in the aggregate — a
+            // redelivered Created event finds the run already past Unspecified and changes
+            // nothing.
+            await lifecycle.ApplyAsync(executionId, execution => execution.Schedule(), cancellationToken);
 
             logger.LogInformation(
                 "Execution created and scheduled (execution {WorkflowExecutionId})", executionId);
