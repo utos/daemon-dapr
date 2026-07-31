@@ -174,6 +174,20 @@ public class WorkflowMappingTests
     }
 
     [Fact]
+    public void A_timer_authored_without_a_duration_maps_rather_than_throwing()
+    {
+        // The wire format permits it, and the daemon has to reject it by name
+        // ("requires a duration") at validation. Throwing in the mapper instead would surface
+        // as an internal error with no useful diagnostic.
+        var timer = new Wire.WorkflowActivity { Timer = new Wire.TimerActivityConfig() };
+
+        var mapped = timer.ToDomain();
+
+        Assert.Null(Assert.IsType<TimerActivityConfig>(mapped.Config).Duration);
+        Assert.Equal(timer, mapped.ToProto());
+    }
+
+    [Fact]
     public void Whole_numbers_do_not_drift_to_floating_point()
     {
         // Proto carries every number as a double. If mapping left them that way, a counter

@@ -60,7 +60,12 @@ public sealed record HttpActivityConfig(
 }
 
 /// <summary>A durable delay.</summary>
-public sealed record TimerActivityConfig(TimeSpan Duration) : ActivityConfig
+/// <param name="Duration">
+/// Nullable because the wire format permits an activity authored with no duration at all, and
+/// that has to survive mapping long enough for validation to reject it by name. Non-null on
+/// anything that passed load-time validation.
+/// </param>
+public sealed record TimerActivityConfig(TimeSpan? Duration) : ActivityConfig
 {
     public override ActivityKind Kind => ActivityKind.Timer;
 }

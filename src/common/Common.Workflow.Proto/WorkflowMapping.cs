@@ -140,8 +140,11 @@ public static class WorkflowMapping
                     ? null
                     : source.Http.Headers.ToDictionary(header => header.Key, header => header.Value)),
 
+            // A timer authored with no duration maps to null rather than throwing here — the
+            // validator rejects it by name a moment later, which is a far better diagnostic
+            // than a mapping failure.
             Wire.WorkflowActivity.ConfigOneofCase.Timer =>
-                new Domain.TimerActivityConfig(source.Timer.Duration.ToTimeSpan()),
+                new Domain.TimerActivityConfig(source.Timer.Duration?.ToTimeSpan()),
 
             Wire.WorkflowActivity.ConfigOneofCase.Workflow => new Domain.SubWorkflowActivityConfig(
                 source.Workflow.Workflow,
@@ -173,7 +176,12 @@ public static class WorkflowMapping
     }
 
     private static Wire.TimerActivityConfig ToProto(this Domain.TimerActivityConfig source) =>
-        new() { Duration = Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(source.Duration) };
+        new()
+        {
+            Duration = source.Duration.HasValue
+                ? Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(source.Duration.Value)
+                : null
+        };
 
     private static Wire.WorkflowActivityConfig ToProto(this Domain.SubWorkflowActivityConfig source)
     {

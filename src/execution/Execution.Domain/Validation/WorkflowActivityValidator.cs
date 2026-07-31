@@ -43,10 +43,15 @@ public class TimerActivityConfigValidator : AbstractValidator<TimerActivityConfi
     public TimerActivityConfigValidator()
     {
         // There is no maximum — a long wait is legitimate, and Dapr splits long timers
-        // internally — but a non-positive duration is malformed and would otherwise only
-        // surface mid-run.
+        // internally — but an unset or non-positive duration is malformed and would otherwise
+        // only surface mid-run.
+        RuleFor(c => c.Duration)
+            .NotNull()
+            .WithMessage("Timer activity requires a duration");
+
         RuleFor(c => c.Duration)
             .Must(duration => duration > TimeSpan.Zero)
+            .When(c => c.Duration.HasValue)
             .WithMessage("Timer duration must be positive");
     }
 }

@@ -197,7 +197,10 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             case TimerActivityConfig timer:
             {
-                var delay = timer.Duration;
+                // Non-null on anything that passed load-time validation.
+                var delay = timer.Duration
+                            ?? throw new InvalidOperationException(
+                                $"Timer activity '{run.ActivityName}' has no duration.");
 
                 logger.LogInformation(
                     "Timer activity '{WorkflowActivity}' waiting {DelayMs}ms (execution {WorkflowExecutionId})",
