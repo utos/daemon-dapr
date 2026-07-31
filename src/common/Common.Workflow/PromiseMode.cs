@@ -1,4 +1,4 @@
-namespace Execution.Domain.Interpreter;
+namespace Common.Workflow;
 
 /// <summary>How a promise activity decides it is done.</summary>
 public enum PromiseMode

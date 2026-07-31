@@ -1,8 +1,6 @@
-using Common.Workflow;
-using Execution.Domain.Constants;
 using FluentValidation;
 
-namespace Execution.Domain.Validation;
+namespace Common.Workflow.Validation;
 
 public class WorkflowValidator : AbstractValidator<Workflow>
 {
@@ -27,7 +25,9 @@ public class WorkflowValidator : AbstractValidator<Workflow>
                     .Must(name => !string.IsNullOrWhiteSpace(name))
                     .WithMessage("Activity name cannot be empty")
                     .Must(name => !ReservedKeywords.IsReserved(name))
-                    .WithMessage(name => $"Activity name '{name}' is a reserved keyword and cannot be used")
+                    // Inside ChildRules the message lambda is handed the entry, not the key —
+                    // taking it as `name` would print the whole activity record back at the user.
+                    .WithMessage(entry => $"Activity name '{entry.Key}' is a reserved keyword and cannot be used")
                     .Must(name => name.Length > 0 && !char.IsWhiteSpace(name[0]))
                     .WithMessage("Activity name cannot start with whitespace")
                     .Must(name => name.Length > 0 && !char.IsWhiteSpace(name[^1]))

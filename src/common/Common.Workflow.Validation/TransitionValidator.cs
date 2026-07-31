@@ -1,7 +1,6 @@
-using Common.Workflow;
 using FluentValidation;
 
-namespace Execution.Domain.Validation;
+namespace Common.Workflow.Validation;
 
 public class TransitionRuleValidator : AbstractValidator<TransitionRule>
 {
