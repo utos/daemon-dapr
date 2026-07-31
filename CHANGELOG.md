@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A promise branch now inherits the run's ambient `env`, so `{{ env.x }}` resolves inside the
+  workflow a branch runs just as it does inside an awaited sub-workflow. Previously each branch's
+  execution context was built without the parent's env, so any activity in a branch that
+  referenced `env` failed with an undefined-variable error mid-run. Env used in a branch's own
+  input mapping was unaffected — the parent renders that before the branch starts — so this only
+  showed up once a branch's own activities reached for it.
+
 ### Added
 
 - `ObservabilityService.WatchExecution` now emits a structured terminal frame just before the

@@ -1,3 +1,4 @@
+using Execution.Domain.Interpreter;
 using FluentValidation;
 using Utos.Workflow.V1;
 
@@ -37,10 +38,10 @@ public class WorkflowActivityValidator : AbstractValidator<WorkflowActivity>
         {
             RuleFor(a => a.Promise.Mode)
                 .NotEmpty()
-                .Must(m => m is "all" or "any" or "race" or "count")
+                .Must(PromiseModes.IsKnown)
                 .WithMessage("Promise mode must be 'all', 'any', 'race', or 'count'");
 
-            When(a => a.Promise.Mode == "count", () =>
+            When(a => a.Promise.Mode == PromiseModes.Count, () =>
             {
                 RuleFor(a => a.Promise.RequiredCount)
                     .GreaterThan(0)

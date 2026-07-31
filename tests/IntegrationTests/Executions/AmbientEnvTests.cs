@@ -208,6 +208,42 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task Env_ShouldBeInheritedByPromiseBranch()
+    {
+        // Arrange - a promise branch is a child execution like any other, so the workflow it
+        // runs must see the parent's env. Note this is env used *inside* the branch, not in
+        // the branch's input mapping, which the parent renders before the branch starts.
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/env-branch/branch-value").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"status": "ok"}"""));
+
+        var request = new TestWorkflowBuilder("env-promise-parent", fixture.MockBaseUrl)
+            .WorkflowCall("call-branch-wf", "env-branch-child", "branch-step")
+            .Promise("fan-out", "all")
+            .Branch("only", "call-branch-wf")
+            .OnSuccess("end")
+            .AddDependentWorkflow("env-branch-child",
+                child => { child.HttpGet("branch-step", "/env-branch/{{ env.sharedKey }}"); })
+            .WithEnv("sharedKey", "branch-value")
+            .Build("fan-out");
+
+        // Act
+        var response = await fixture.ScheduleAsync(request);
+        await WatchToCompletion(response.Id);
+
+        // Assert - the branch resolved the parent's env
+        Assert.Contains(fixture.WireMockServer.LogEntries,
+            e => e.RequestMessage.Path == "/env-branch/branch-value");
+
+        var execution = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
+    }
+
+    [Fact]
     public async Task GetExecution_ShouldEchoBackEnv()
     {
         // Arrange

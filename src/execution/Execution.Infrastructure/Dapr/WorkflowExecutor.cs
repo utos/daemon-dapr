@@ -1,9 +1,9 @@
 using System.Text.Json.Serialization;
 using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
-using Microsoft.Extensions.Logging;
-using Execution.Domain.Constants;
+using Execution.Domain.Interpreter;
 using Execution.Infrastructure.Dapr.Activities;
+using Microsoft.Extensions.Logging;
 using Utos.Workflow.V1;
 
 namespace Execution.Infrastructure.Dapr;
@@ -38,6 +38,13 @@ public record WorkflowExecutorInput(
     int MaxLoopedTransitions = 10_000,
     int ContinueAsNewAfterTransitions = 100);
 
+/// <summary>
+/// The durable driver for a workflow execution. It owns nothing about what a workflow
+/// *means* — <see cref="WorkflowNavigator"/> decides where the execution goes and
+/// <see cref="PromiseResolver"/> decides when a fan-out is satisfied. What is left here is
+/// the part that genuinely needs a durable orchestration runtime: recording each side effect
+/// so it is performed once, waiting without holding a thread, and surviving a restart.
+/// </summary>
 public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 {
     public override async Task<object?> RunAsync(WorkflowContext context, WorkflowExecutorInput input)
@@ -66,309 +73,75 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             var workflowInfo = await context.CallActivityAsync<LoadWorkflowOutput>(
                 nameof(LoadWorkflowActivity),
                 new LoadWorkflowInput(input.ExecutionId, input.WorkflowKey));
-            var workflow = workflowInfo.Workflow;
+
+            var graph = new WorkflowGraph(workflowInfo.Workflow, input.WorkflowKey);
+            var limits = new ExecutionLimits(input.MaxLoopedTransitions, input.ContinueAsNewAfterTransitions);
+            var cursor = ExecutionCursor.Start(input.Visited, input.LoopedTransitions);
 
             var currentActivityName = input.StartActivity;
             var currentActivityInput = input.ActivityInput;
             object? workflowOutput = null;
 
-            // Ordinal to match how Spec.Activities (a protobuf MapField) is keyed below.
-            var visited = new HashSet<string>(input.Visited ?? [], StringComparer.Ordinal);
-            var loopedTransitions = input.LoopedTransitions;
-            var transitionsThisSegment = 0;
-            var loopDetected = input.Visited != null && input.LoopedTransitions > 0;
-
             while (currentActivityName != null)
             {
-                if (string.Equals(currentActivityName, ReservedKeywords.End, StringComparison.OrdinalIgnoreCase))
+                var step = WorkflowNavigator.Next(graph, currentActivityName, cursor, limits);
+
+                if (step is WorkflowStep.Complete)
                 {
                     logger.LogInformation("Workflow reached 'end' transition (execution {WorkflowExecutionId})", logExecutionId);
                     break;
                 }
 
-                if (string.Equals(currentActivityName, ReservedKeywords.Error, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("Workflow transitioned to 'error'");
+                if (step is WorkflowStep.Fail failure)
+                    throw new InvalidOperationException(failure.Reason);
 
-                if (!workflow.Spec.Activities.TryGetValue(currentActivityName, out var activity))
-                    throw new InvalidOperationException(
-                        $"Activity '{currentActivityName}' not found in workflow '{input.WorkflowKey}'");
-
-                // The executor walks a single path — promise branches and sub-workflows are
-                // separate child executions — so reaching an activity twice can only mean a
-                // back-edge.
-                if (!visited.Add(currentActivityName))
+                if (step is WorkflowStep.ContinueAsNew continuation)
                 {
-                    loopedTransitions++;
-
-                    if (!loopDetected)
-                    {
-                        loopDetected = true;
-                        logger.LogInformation(
-                            "Loop detected at activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
-                            currentActivityName, logExecutionId);
-                    }
-
-                    if (loopedTransitions >= input.MaxLoopedTransitions)
-                        throw new InvalidOperationException(
-                            $"Workflow exceeded the maximum of {input.MaxLoopedTransitions} looped activity " +
-                            $"executions; the loop re-enters activity '{currentActivityName}'. Either the " +
-                            $"loop has no reachable exit, or the limit is too low for this workflow.");
-                }
-
-                transitionsThisSegment++;
-
-                switch (activity.ConfigCase)
-                {
-                    case WorkflowActivity.ConfigOneofCase.Workflow:
-                    {
-                        logger.LogInformation(
-                            "Entering sub-workflow from activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
-                            currentActivityName, logExecutionId);
-
-                        // Resolve workflow call input via central template rendering
-                        var resolved = await context.CallActivityAsync<ResolveActivityInputOutput>(
-                            nameof(ResolveActivityInputActivity),
-                            new ResolveActivityInputInput(input.ExecutionId, input.WorkflowKey,
-                                currentActivityName, currentActivityInput));
-
-                        var childExecutionId = context.NewGuid();
-                        object? childOutput;
-
-                        if (resolved.Detached)
-                        {
-                            // Fire-and-forget: start the sub-workflow as its own independent,
-                            // top-level execution and do NOT await it. Only a failure to *start*
-                            // the child (the activity throwing) surfaces here; the child's own
-                            // runtime failures never do — it runs on its own. A start failure
-                            // fails this parent execution, same as any other activity failure
-                            // (on_failure routing is not yet implemented in the executor).
-                            await context.CallActivityAsync(nameof(ScheduleDetachedExecutionActivity),
-                                new ScheduleDetachedExecutionInput(input.ExecutionId, childExecutionId,
-                                    resolved.SubWorkflowKey!, resolved.SubStartActivity!,
-                                    resolved.WorkflowInput));
-
-                            // The activity output is a handle to the started run, not its result.
-                            childOutput = new Dictionary<string, object>
-                            {
-                                ["execution_id"] = childExecutionId.ToString()
-                            };
-                        }
-                        else
-                        {
-                            // Save child execution context (copies parent's bundle)
-                            await context.CallActivityAsync(nameof(SaveChildContextActivity),
-                                new SaveChildContextInput(input.ExecutionId, childExecutionId,
-                                    resolved.SubWorkflowKey!, resolved.WorkflowInput));
-
-                            // Launch and await child workflow via Dapr's native child workflow support
-                            // The child inherits the limits but starts with its own empty visited
-                            // set and budget — a sub-workflow invoked twice from a parent loop is
-                            // two separate executions, not a back-edge.
-                            childOutput = await context.CallChildWorkflowAsync<object?>(
-                                nameof(WorkflowExecutor),
-                                new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
-                                    resolved.SubStartActivity!, input.ExecutionId,
-                                    MaxLoopedTransitions: input.MaxLoopedTransitions,
-                                    ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
-                                new ChildWorkflowTaskOptions(childExecutionId.ToString()));
-                        }
-
-                        // Evaluate parent's transition with the child's output (or detached handle)
-                        var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
-                            nameof(EvaluateTransitionActivity),
-                            new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
-                                currentActivityName, currentActivityInput, childOutput));
-
-                        if (transition.ReturnValue != null)
-                        {
-                            workflowOutput = transition.ReturnValue;
-                            currentActivityName = null;
-                            break;
-                        }
-
-                        currentActivityName = transition.NextActivityName;
-                        currentActivityInput = transition.MappedInput;
-                        break;
-                    }
-
-                    case WorkflowActivity.ConfigOneofCase.Http:
-                    {
-                        logger.LogInformation(
-                            "Activity '{WorkflowActivity}' started (execution {WorkflowExecutionId})",
-                            currentActivityName, logExecutionId);
-
-                        var activityStartTime = context.CurrentUtcDateTime;
-
-                        // Resolve templates centrally
-                        var resolved = await context.CallActivityAsync<ResolveActivityInputOutput>(
-                            nameof(ResolveActivityInputActivity),
-                            new ResolveActivityInputInput(input.ExecutionId, input.WorkflowKey,
-                                currentActivityName, currentActivityInput));
-
-                        try
-                        {
-                            // TODO: Add retry policy wrapper here before executing activity
-                            // TODO: Add on-error handler support to catch and handle specific exceptions
-                            var result = await context.CallActivityAsync<ExecuteActivityOutput>(
-                                nameof(ExecuteActivity),
-                                new ExecuteActivityInput(input.ExecutionId, logExecutionId,
-                                    resolved.ConfigCase,
-                                    resolved.Url, resolved.HttpMethod, resolved.Body, resolved.Headers));
-
-                            var activityDuration = (context.CurrentUtcDateTime - activityStartTime).TotalMilliseconds;
-
-                            logger.LogInformation(
-                                "Activity '{WorkflowActivity}' completed in {DurationMs}ms (execution {WorkflowExecutionId})",
-                                currentActivityName, (long)activityDuration, logExecutionId);
-
-                            var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
-                                nameof(EvaluateTransitionActivity),
-                                new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
-                                    currentActivityName, currentActivityInput, result.Output));
-
-                            if (transition.ReturnValue != null)
-                            {
-                                workflowOutput = transition.ReturnValue;
-                                currentActivityName = null;
-                                break;
-                            }
-
-                            currentActivityName = transition.NextActivityName;
-                            currentActivityInput = transition.MappedInput;
-                        }
-                        catch (Exception activityEx)
-                        {
-                            logger.LogError(
-                                "Activity '{WorkflowActivity}' failed: {ErrorMessage} (execution {WorkflowExecutionId})",
-                                currentActivityName, activityEx.Message, logExecutionId);
-                            throw;
-                        }
-
-                        break;
-                    }
-
-                    case WorkflowActivity.ConfigOneofCase.Promise:
-                    {
-                        logger.LogInformation(
-                            "Entering promise activity '{WorkflowActivity}' (mode: {PromiseMode}) (execution {WorkflowExecutionId})",
-                            currentActivityName, activity.Promise.Mode, logExecutionId);
-
-                        // 1. Resolve branches (expand for_each, filter conditions, save child contexts)
-                        var resolved = await context.CallActivityAsync<ResolvePromiseOutput>(
-                            nameof(ResolvePromiseActivity),
-                            new ResolvePromiseInput(input.ExecutionId, input.WorkflowKey,
-                                currentActivityName, currentActivityInput));
-
-                        // 2. Fan out — launch all branches as child workflows
-                        var branchTasks = new Dictionary<string, Task<object?>>();
-                        foreach (var branch in resolved.Branches)
-                        {
-                            var task = context.CallChildWorkflowAsync<object?>(
-                                nameof(WorkflowExecutor),
-                                new WorkflowExecutorInput(branch.BranchExecutionId, branch.WorkflowKey,
-                                    branch.StartActivity, input.ExecutionId,
-                                    MaxLoopedTransitions: input.MaxLoopedTransitions,
-                                    ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
-                                new ChildWorkflowTaskOptions(branch.BranchExecutionId.ToString()));
-                            branchTasks[branch.BranchName] = task;
-                        }
-
-                        // 3. Resolve by mode
-                        var promiseOutput = await ResolveByMode(
-                            resolved.Mode, resolved.RequiredCount, branchTasks);
-
-                        logger.LogInformation(
-                            "Promise activity '{WorkflowActivity}' resolved ({PromiseMode} mode, {BranchCount} branches) (execution {WorkflowExecutionId})",
-                            currentActivityName, resolved.Mode, resolved.Branches.Count, logExecutionId);
-
-                        // 4. Evaluate transition with promise output
-                        var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
-                            nameof(EvaluateTransitionActivity),
-                            new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
-                                currentActivityName, currentActivityInput, promiseOutput));
-
-                        if (transition.ReturnValue != null)
-                        {
-                            workflowOutput = transition.ReturnValue;
-                            currentActivityName = null;
-                            break;
-                        }
-
-                        currentActivityName = transition.NextActivityName;
-                        currentActivityInput = transition.MappedInput;
-                        break;
-                    }
-
-                    case WorkflowActivity.ConfigOneofCase.Timer:
-                    {
-                        var delay = activity.Timer.Duration.ToTimeSpan();
-
-                        logger.LogInformation(
-                            "Timer activity '{WorkflowActivity}' waiting {DelayMs}ms (execution {WorkflowExecutionId})",
-                            currentActivityName, (long)delay.TotalMilliseconds, logExecutionId);
-
-                        // Created on the workflow context, not inside an activity: that is what
-                        // makes the delay durable, surviving a daemon restart and replaying
-                        // without re-waiting. CurrentUtcDateTime is the replay-safe clock, so
-                        // the deadline is deterministic.
-                        await context.CreateTimer(
-                            WholeSecondDeadline(context.CurrentUtcDateTime, delay),
-                            CancellationToken.None);
-
-                        // A timer performs no work, so it has no output of its own —
-                        // EvaluateTransitionActivity passes its input through instead.
-                        var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
-                            nameof(EvaluateTransitionActivity),
-                            new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
-                                currentActivityName, currentActivityInput, null));
-
-                        if (transition.ReturnValue != null)
-                        {
-                            workflowOutput = transition.ReturnValue;
-                            currentActivityName = null;
-                            break;
-                        }
-
-                        currentActivityName = transition.NextActivityName;
-                        currentActivityInput = transition.MappedInput;
-                        break;
-                    }
-
-                    default:
-                        throw new NotSupportedException(
-                            $"Unsupported activity config type '{activity.ConfigCase.ToString()}' for activity '{currentActivityName}'");
-                }
-
-                // Check if we broke out of the switch with a return value
-                if (workflowOutput != null)
-                    break;
-
-                // Dapr appends to instance history on every activity call, so a loop grows it
-                // without bound. Continuing as new resets that history while carrying the loop
-                // state forward. Only once looping: continuing as new discards history, which
-                // is destructive for a long non-looping run someone may be debugging.
-                if (loopDetected
-                    && currentActivityName != null
-                    && !ReservedKeywords.IsReserved(currentActivityName)
-                    && transitionsThisSegment >= input.ContinueAsNewAfterTransitions)
-                {
+                    // Dapr appends to instance history on every activity call, so a loop grows
+                    // it without bound. Continuing as new resets that history while carrying
+                    // the loop state forward.
                     logger.LogDebug(
                         "Continuing as new at activity '{WorkflowActivity}' after {TransitionCount} transitions (execution {WorkflowExecutionId})",
-                        currentActivityName, transitionsThisSegment, logExecutionId);
+                        currentActivityName, continuation.Cursor.TransitionsThisSegment, logExecutionId);
 
                     context.ContinueAsNew(
                         input with
                         {
                             StartActivity = currentActivityName,
                             ActivityInput = currentActivityInput,
-                            Visited = [..visited],
-                            LoopedTransitions = loopedTransitions,
+                            Visited = [..continuation.Cursor.Visited],
+                            LoopedTransitions = continuation.Cursor.LoopedTransitions,
                             StartedAt = startTime
                         },
                         preserveUnprocessedEvents: true);
 
                     return null;
                 }
+
+                var run = (WorkflowStep.Run)step;
+                cursor = run.Cursor;
+
+                if (run.LoopJustDetected)
+                    logger.LogInformation(
+                        "Loop detected at activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
+                        run.ActivityName, logExecutionId);
+
+                var activityOutput = await PerformAsync(
+                    context, logger, input, run, currentActivityInput, logExecutionId);
+
+                var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
+                    nameof(EvaluateTransitionActivity),
+                    new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
+                        run.ActivityName, currentActivityInput, activityOutput));
+
+                if (transition.ReturnValue != null)
+                {
+                    workflowOutput = transition.ReturnValue;
+                    break;
+                }
+
+                currentActivityName = transition.NextActivityName;
+                currentActivityInput = transition.MappedInput;
             }
 
             var totalDuration = (context.CurrentUtcDateTime - startTime).TotalMilliseconds;
@@ -398,97 +171,260 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
     }
 
     /// <summary>
-    /// The instant a timer of <paramref name="delay"/> started at <paramref name="from"/> may
-    /// resume, rounded up to a whole second.
-    ///
-    /// Dapr truncates a timer's fire time to whole seconds, so a deadline of 12:00:30.416
-    /// fires at 12:00:30.000 — up to 999ms early. That would make "wait 1 second" wait less
-    /// than a second, which is the one thing a delay must not do. Rounding the deadline up
-    /// means the truncated fire time always lands at or after the requested delay; the cost
-    /// is waiting up to a second longer, which is the safe direction to err.
-    ///
-    /// Measured over 14 samples: none resumed early, and the overshoot ranged 109-989ms. So a
-    /// 700ms timer waited 1.6s. Below roughly a second the wait is dominated by this rounding
-    /// rather than by the requested duration — sub-second precision is not achievable against
-    /// a one-second granularity, and a delay that is too short is the worse failure.
-    ///
-    /// Note when measuring this: elapsed time across an orchestrator await must come from
-    /// <c>WorkflowContext.CurrentUtcDateTime</c>. <c>DateTime.UtcNow</c> reads the same instant
-    /// on both sides, because the code either side of the await runs back-to-back on replay.
+    /// Performs the activity's work and returns its output, which the transition is then
+    /// evaluated against. Each arm is a different durable primitive; the decisions around
+    /// them have already been made.
     /// </summary>
-    private static DateTime WholeSecondDeadline(DateTime from, TimeSpan delay)
+    private async Task<object?> PerformAsync(
+        WorkflowContext context,
+        ILogger logger,
+        WorkflowExecutorInput input,
+        WorkflowStep.Run run,
+        Dictionary<string, object>? activityInput,
+        Guid logExecutionId)
     {
-        var deadline = from + delay;
-
-        if (deadline.Ticks % TimeSpan.TicksPerSecond == 0)
-            return deadline;
-
-        var roundedUp = (deadline.Ticks / TimeSpan.TicksPerSecond + 1) * TimeSpan.TicksPerSecond;
-        return new DateTime(roundedUp, deadline.Kind);
-    }
-
-    private static async Task<Dictionary<string, object?>> ResolveByMode(
-        string mode, int requiredCount,
-        Dictionary<string, Task<object?>> branchTasks)
-    {
-        switch (mode)
+        switch (run.Activity.ConfigCase)
         {
-            case "all":
+            case WorkflowActivity.ConfigOneofCase.Workflow:
+                return await CallSubWorkflowAsync(context, logger, input, run, activityInput, logExecutionId);
+
+            case WorkflowActivity.ConfigOneofCase.Http:
+                return await CallHttpAsync(context, logger, input, run, activityInput, logExecutionId);
+
+            case WorkflowActivity.ConfigOneofCase.Promise:
+                return await FanOutAsync(context, logger, input, run, activityInput, logExecutionId);
+
+            case WorkflowActivity.ConfigOneofCase.Timer:
             {
-                await Task.WhenAll(branchTasks.Values);
-                return branchTasks.ToDictionary(kv => kv.Key, kv => kv.Value.Result);
-            }
+                var delay = run.Activity.Timer.Duration.ToTimeSpan();
 
-            case "any":
-            {
-                var remaining = new Dictionary<string, Task<object?>>(branchTasks);
-                while (remaining.Count > 0)
-                {
-                    var completed = await Task.WhenAny(remaining.Values);
-                    var winner = remaining.First(kv => kv.Value == completed);
-                    remaining.Remove(winner.Key);
+                logger.LogInformation(
+                    "Timer activity '{WorkflowActivity}' waiting {DelayMs}ms (execution {WorkflowExecutionId})",
+                    run.ActivityName, (long)delay.TotalMilliseconds, logExecutionId);
 
-                    if (completed.IsCompletedSuccessfully)
-                        return new Dictionary<string, object?> { [winner.Key] = completed.Result };
-                }
+                // Created on the workflow context, not inside an activity: that is what
+                // makes the delay durable, surviving a daemon restart and replaying
+                // without re-waiting. CurrentUtcDateTime is the replay-safe clock, so
+                // the deadline is deterministic.
+                await context.CreateTimer(
+                    DaprTimerDeadline.WholeSecond(context.CurrentUtcDateTime, delay),
+                    CancellationToken.None);
 
-                throw new AggregateException("All branches failed (mode: any)");
-            }
-
-            case "race":
-            {
-                var completed = await Task.WhenAny(branchTasks.Values);
-                var winner = branchTasks.First(kv => kv.Value == completed);
-                return new Dictionary<string, object?> { [winner.Key] = await completed };
-            }
-
-            case "count":
-            {
-                var remaining = new Dictionary<string, Task<object?>>(branchTasks);
-                var results = new Dictionary<string, object?>();
-
-                while (results.Count < requiredCount && remaining.Count > 0)
-                {
-                    var completed = await Task.WhenAny(remaining.Values);
-                    var settled = remaining.First(kv => kv.Value == completed);
-                    remaining.Remove(settled.Key);
-
-                    if (completed.IsCompletedSuccessfully)
-                        results[settled.Key] = completed.Result;
-                    else if (remaining.Count + results.Count < requiredCount)
-                        throw new InvalidOperationException(
-                            $"Cannot reach required count {requiredCount} (mode: count)");
-                }
-
-                if (results.Count < requiredCount)
-                    throw new InvalidOperationException(
-                        $"Cannot reach required count {requiredCount} (mode: count)");
-
-                return results;
+                // A timer performs no work, so it has no output of its own — the interpreter
+                // passes its input through instead.
+                return null;
             }
 
             default:
-                throw new NotSupportedException($"Unsupported promise mode: {mode}");
+                throw new NotSupportedException(
+                    $"Unsupported activity config type '{run.Activity.ConfigCase.ToString()}' for activity '{run.ActivityName}'");
+        }
+    }
+
+    private static async Task<object?> CallHttpAsync(
+        WorkflowContext context,
+        ILogger logger,
+        WorkflowExecutorInput input,
+        WorkflowStep.Run run,
+        Dictionary<string, object>? activityInput,
+        Guid logExecutionId)
+    {
+        logger.LogInformation(
+            "Activity '{WorkflowActivity}' started (execution {WorkflowExecutionId})",
+            run.ActivityName, logExecutionId);
+
+        var activityStartTime = context.CurrentUtcDateTime;
+
+        // Resolve templates centrally
+        var resolved = await context.CallActivityAsync<ResolveActivityInputOutput>(
+            nameof(ResolveActivityInputActivity),
+            new ResolveActivityInputInput(input.ExecutionId, input.WorkflowKey,
+                run.ActivityName, activityInput));
+
+        try
+        {
+            // TODO: Add retry policy wrapper here before executing activity
+            // TODO: Add on-error handler support to catch and handle specific exceptions
+            var result = await context.CallActivityAsync<ExecuteActivityOutput>(
+                nameof(ExecuteActivity),
+                new ExecuteActivityInput(input.ExecutionId, logExecutionId,
+                    resolved.ConfigCase,
+                    resolved.Url, resolved.HttpMethod, resolved.Body, resolved.Headers));
+
+            var activityDuration = (context.CurrentUtcDateTime - activityStartTime).TotalMilliseconds;
+
+            logger.LogInformation(
+                "Activity '{WorkflowActivity}' completed in {DurationMs}ms (execution {WorkflowExecutionId})",
+                run.ActivityName, (long)activityDuration, logExecutionId);
+
+            return result.Output;
+        }
+        catch (Exception activityEx)
+        {
+            logger.LogError(
+                "Activity '{WorkflowActivity}' failed: {ErrorMessage} (execution {WorkflowExecutionId})",
+                run.ActivityName, activityEx.Message, logExecutionId);
+            throw;
+        }
+    }
+
+    private static async Task<object?> CallSubWorkflowAsync(
+        WorkflowContext context,
+        ILogger logger,
+        WorkflowExecutorInput input,
+        WorkflowStep.Run run,
+        Dictionary<string, object>? activityInput,
+        Guid logExecutionId)
+    {
+        logger.LogInformation(
+            "Entering sub-workflow from activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
+            run.ActivityName, logExecutionId);
+
+        // Resolve workflow call input via central template rendering
+        var resolved = await context.CallActivityAsync<ResolveActivityInputOutput>(
+            nameof(ResolveActivityInputActivity),
+            new ResolveActivityInputInput(input.ExecutionId, input.WorkflowKey,
+                run.ActivityName, activityInput));
+
+        var childExecutionId = context.NewGuid();
+
+        if (resolved.Detached)
+        {
+            // Fire-and-forget: start the sub-workflow as its own independent, top-level
+            // execution and do NOT await it. Only a failure to *start* the child (the
+            // activity throwing) surfaces here; the child's own runtime failures never do —
+            // it runs on its own. A start failure fails this parent execution, same as any
+            // other activity failure (on_failure routing is not yet implemented).
+            await context.CallActivityAsync(nameof(ScheduleDetachedExecutionActivity),
+                new ScheduleDetachedExecutionInput(input.ExecutionId, childExecutionId,
+                    resolved.SubWorkflowKey!, resolved.SubStartActivity!,
+                    resolved.WorkflowInput));
+
+            // The activity output is a handle to the started run, not its result.
+            return new Dictionary<string, object>
+            {
+                ["execution_id"] = childExecutionId.ToString()
+            };
+        }
+
+        // Save child execution context (copies parent's bundle)
+        await context.CallActivityAsync(nameof(SaveChildContextActivity),
+            new SaveChildContextInput(input.ExecutionId,
+                [new ChildContextSpec(childExecutionId, resolved.SubWorkflowKey!, resolved.WorkflowInput)]));
+
+        // Launch and await child workflow via Dapr's native child workflow support.
+        // The child inherits the limits but starts with its own empty visited set and
+        // budget — a sub-workflow invoked twice from a parent loop is two separate
+        // executions, not a back-edge.
+        return await context.CallChildWorkflowAsync<object?>(
+            nameof(WorkflowExecutor),
+            new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
+                resolved.SubStartActivity!, input.ExecutionId,
+                MaxLoopedTransitions: input.MaxLoopedTransitions,
+                ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
+            new ChildWorkflowTaskOptions(childExecutionId.ToString()));
+    }
+
+    private static async Task<object?> FanOutAsync(
+        WorkflowContext context,
+        ILogger logger,
+        WorkflowExecutorInput input,
+        WorkflowStep.Run run,
+        Dictionary<string, object>? activityInput,
+        Guid logExecutionId)
+    {
+        logger.LogInformation(
+            "Entering promise activity '{WorkflowActivity}' (mode: {PromiseMode}) (execution {WorkflowExecutionId})",
+            run.ActivityName, run.Activity.Promise.Mode, logExecutionId);
+
+        // 1. Expand branches (apply conditions, expand for_each, render inputs)
+        var resolved = await context.CallActivityAsync<ResolvePromiseOutput>(
+            nameof(ResolvePromiseActivity),
+            new ResolvePromiseInput(input.ExecutionId, input.WorkflowKey,
+                run.ActivityName, activityInput));
+
+        // 2. Assign each branch an execution id. Minted here rather than during expansion
+        //    because NewGuid is the replay-safe source — the same ids come back on replay.
+        var branches = resolved.Branches
+            .Select(branch => (Branch: branch, ExecutionId: context.NewGuid()))
+            .ToList();
+
+        // 3. Persist every branch context in one call, so each branch inherits the parent's
+        //    bundle and ambient env before it starts.
+        if (branches.Count > 0)
+            await context.CallActivityAsync(nameof(SaveChildContextActivity),
+                new SaveChildContextInput(input.ExecutionId,
+                    branches
+                        .Select(b => new ChildContextSpec(b.ExecutionId, b.Branch.WorkflowKey, b.Branch.Input))
+                        .ToList()));
+
+        // 4. Fan out — launch all branches as child workflows
+        var branchTasks = new Dictionary<string, Task<object?>>(StringComparer.Ordinal);
+        foreach (var (branch, branchExecutionId) in branches)
+            branchTasks[branch.BranchName] = context.CallChildWorkflowAsync<object?>(
+                nameof(WorkflowExecutor),
+                new WorkflowExecutorInput(branchExecutionId, branch.WorkflowKey,
+                    branch.StartActivity, input.ExecutionId,
+                    MaxLoopedTransitions: input.MaxLoopedTransitions,
+                    ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
+                new ChildWorkflowTaskOptions(branchExecutionId.ToString()));
+
+        // 5. Settle by mode
+        var promiseOutput = await SettleAsync(resolved.Mode, resolved.RequiredCount, branchTasks);
+
+        logger.LogInformation(
+            "Promise activity '{WorkflowActivity}' resolved ({PromiseMode} mode, {BranchCount} branches) (execution {WorkflowExecutionId})",
+            run.ActivityName, run.Activity.Promise.Mode, resolved.Branches.Count, logExecutionId);
+
+        return promiseOutput;
+    }
+
+    /// <summary>
+    /// Awaits branches one settlement at a time, letting <see cref="PromiseResolver"/> say
+    /// when the mode is satisfied. The awaiting is this layer's; which branches decide the
+    /// outcome is not.
+    /// </summary>
+    private static async Task<Dictionary<string, object?>> SettleAsync(
+        PromiseMode mode,
+        int requiredCount,
+        Dictionary<string, Task<object?>> branchTasks)
+    {
+        var resolver = new PromiseResolver(mode, requiredCount, branchTasks.Count);
+        var progress = resolver.Start();
+
+        var remaining = new Dictionary<string, Task<object?>>(branchTasks, StringComparer.Ordinal);
+
+        while (progress is PromiseProgress.Pending && remaining.Count > 0)
+        {
+            var completed = await Task.WhenAny(remaining.Values);
+            var settled = remaining.First(kv => kv.Value == completed);
+            remaining.Remove(settled.Key);
+
+            var outcome = completed.IsCompletedSuccessfully
+                ? new BranchOutcome(true, completed.Result)
+                : new BranchOutcome(false, null);
+
+            progress = resolver.Observe(settled.Key, outcome);
+        }
+
+        switch (progress)
+        {
+            case PromiseProgress.Resolved resolved:
+                return resolved.Results;
+
+            case PromiseProgress.BranchFailed branchFailed:
+                // The branch's own error is the useful one, so re-await it to rethrow rather
+                // than reporting something invented here.
+                await branchTasks[branchFailed.BranchName];
+                throw new InvalidOperationException(
+                    $"Promise branch '{branchFailed.BranchName}' failed");
+
+            case PromiseProgress.Failed failed:
+                throw new InvalidOperationException(failed.Reason);
+
+            default:
+                throw new InvalidOperationException(
+                    $"Promise did not settle (mode: {mode}, {branchTasks.Count} branches)");
         }
     }
 }

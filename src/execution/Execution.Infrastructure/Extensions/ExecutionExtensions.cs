@@ -20,7 +20,9 @@ using Execution.Features.Models;
 using Execution.Features.Services;
 using Execution.Features.Validation;
 using Mediator;
+using Execution.Domain.Interpreter;
 using Execution.Domain.Services;
+using Execution.Domain.Templating;
 using Execution.Infrastructure.Context;
 using Execution.Infrastructure.Dapr;
 using Execution.Infrastructure.Dapr.Activities;
@@ -77,6 +79,10 @@ public static class ExecutionExtensions
 
         // Add Templating engine
         builder.Services.AddSingleton<ITemplateEngine, ScribanTemplateEngine>();
+
+        // Add the workflow interpreter (pure decision logic, no Dapr/EF)
+        builder.Services.AddSingleton<StructRenderer>();
+        builder.Services.AddSingleton<WorkflowInterpreter>();
 
         // Add Execution Context Store
         builder.Services.AddScoped<IExecutionContextStore, EfCoreExecutionContextStore>();

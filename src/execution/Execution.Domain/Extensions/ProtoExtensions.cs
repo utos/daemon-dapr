@@ -1,7 +1,7 @@
 using Google.Protobuf.Collections;
 using Google.Protobuf.WellKnownTypes;
 
-namespace Execution.Infrastructure.Extensions;
+namespace Execution.Domain.Extensions;
 
 /// <summary>
 /// Extension methods for working with protobuf-generated types.
