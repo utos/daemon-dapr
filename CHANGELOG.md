@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An execution's full lifecycle is now written through the `WorkflowExecution` aggregate, which is
+  the only writer to its event stream, and appends are guarded by the stream revision the aggregate
+  was loaded at. This fixes three defects. An execution that received a duplicate `Scheduled` event
+  could no longer be loaded at all — the invariant guarding that transition ran during replay as
+  well as on the command, so the aggregate rejected its own history. A duplicate or late terminal
+  write could record both `Completed` and `Failed` on one execution, reachable whenever a terminal
+  write succeeded but its acknowledgement was lost and the retry surfaced as a failure; the first
+  terminal state now wins and later transitions are ignored. And a failure reported without a
+  reason produced a null `WorkflowError.message`, which now reads as an explicit "failed without a
+  reported reason". Lifecycle event types and payloads are unchanged, so read models, the
+  `WatchExecution` terminal frame, and `DeleteExecution`'s terminal-state precondition all behave
+  as before.
 - A promise branch now inherits the run's ambient `env`, so `{{ env.x }}` resolves inside the
   workflow a branch runs just as it does inside an awaited sub-workflow. Previously each branch's
   execution context was built without the parent's env, so any activity in a branch that
