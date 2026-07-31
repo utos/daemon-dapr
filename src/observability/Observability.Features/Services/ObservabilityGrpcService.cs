@@ -1,10 +1,12 @@
 using System.Reflection;
 using Common.SeedWork;
 using Grpc.Core;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Observability.Domain;
 using Utos.Daemon.V1;
 using DaemonLogLevel = Utos.Daemon.V1.LogLevel;
+using GrpcWorkflowError = Utos.Workflow.V1.WorkflowError;
 
 namespace Observability.Features.Services;
 
@@ -32,20 +34,23 @@ public class ObservabilityGrpcService(
             int? after = request.HasAfter ? request.After : null;
             int? tail = request.HasTail ? request.Tail : null;
 
-            await foreach (var entry in logStore.SubscribeAsync(executionId, after, tail, context.CancellationToken))
+            await foreach (var item in logStore.SubscribeAsync(executionId, after, tail, context.CancellationToken))
             {
-                if (!ShouldIncludeEntry(entry, request))
+                // Terminal frames carry the same level/source/category as a log line and go
+                // through the same filter: a COMPLETED frame (Info, source "system") is excluded
+                // by an activity/error filter, while a FAILED frame (Error) still passes a
+                // level>=Error filter. An unfiltered watcher sees every terminal frame.
+                var response = item switch
+                {
+                    LogItem log => BuildLogResponse(log.Entry),
+                    TerminalItem terminal => BuildTerminalResponse(terminal),
+                    _ => null
+                };
+
+                if (response is null || !ShouldInclude(response, request))
                     continue;
 
-                await responseStream.WriteAsync(new WatchExecutionResponse
-                {
-                    Source = entry.Source,
-                    Category = entry.Category,
-                    Level = MapLogLevel(entry.Level),
-                    Message = entry.Message,
-                    Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(
-                        entry.Timestamp.ToUniversalTime())
-                });
+                await responseStream.WriteAsync(response);
             }
         }
         catch (OperationCanceledException)
@@ -69,13 +74,51 @@ public class ObservabilityGrpcService(
         });
     }
 
-    private static bool ShouldIncludeEntry(ExecutionLogEntry entry, WatchExecutionRequest request)
+    /// <summary>
+    /// Coarse failure code carried on the streamed <see cref="GrpcWorkflowError"/>. Mirrors the
+    /// query-side constant in <c>DtoToGrpcExtensions.ExecutionFailedCode</c> until the execution
+    /// pipeline records structured failure causes of its own.
+    /// </summary>
+    private const string ExecutionFailedCode = "EXECUTION_FAILED";
+
+    private static WatchExecutionResponse BuildLogResponse(ExecutionLogEntry entry) => new()
     {
-        if (request.HasLevel && MapLogLevel(entry.Level) < request.Level)
+        Source = entry.Source,
+        Category = entry.Category,
+        Level = MapLogLevel(entry.Level),
+        Message = entry.Message,
+        Timestamp = Timestamp.FromDateTime(entry.Timestamp.ToUniversalTime())
+    };
+
+    private static WatchExecutionResponse BuildTerminalResponse(TerminalItem terminal)
+    {
+        var failed = terminal.Outcome == ExecutionOutcome.Failed;
+        var response = new WatchExecutionResponse
+        {
+            Source = "system",
+            Level = failed ? DaemonLogLevel.Error : DaemonLogLevel.Info,
+            Message = failed ? "Execution failed" : "Execution completed",
+            Timestamp = Timestamp.FromDateTime(terminal.Timestamp.ToUniversalTime()),
+            Status = failed ? ExecutionStatus.Failed : ExecutionStatus.Completed
+        };
+
+        if (failed)
+            response.Error = new GrpcWorkflowError
+            {
+                Code = ExecutionFailedCode,
+                Message = terminal.FailureReason ?? string.Empty
+            };
+
+        return response;
+    }
+
+    private static bool ShouldInclude(WatchExecutionResponse response, WatchExecutionRequest request)
+    {
+        if (request.HasLevel && response.Level < request.Level)
             return false;
-        if (request.HasSource && entry.Source != request.Source)
+        if (request.HasSource && response.Source != request.Source)
             return false;
-        if (request.HasCategory && entry.Category != request.Category)
+        if (request.HasCategory && response.Category != request.Category)
             return false;
         return true;
     }

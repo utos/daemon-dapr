@@ -43,6 +43,13 @@ public class ExecutionFailureTests(DaemonTestFixture fixture)
             e.Message.Contains("Workflow execution failed"));
         Assert.NotNull(failureLog);
 
+        // Should have received a structured terminal frame carrying the failed status and error
+        var terminal = events.FirstOrDefault(e => e.Status == ExecutionStatus.Failed);
+        Assert.NotNull(terminal);
+        Assert.NotNull(terminal.Error);
+        Assert.Equal("EXECUTION_FAILED", terminal.Error.Code);
+        Assert.False(string.IsNullOrEmpty(terminal.Error.Message));
+
         // Verify the failing activity was actually called
         var logEntries = fixture.WireMockServer.LogEntries;
         var failedCalls = logEntries.Where(e => e.RequestMessage.Path == "/fail").ToList();

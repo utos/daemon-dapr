@@ -12,10 +12,10 @@ public class ExecutionLogStreamCompletionHandler(IExecutionLogStore store) : IEv
         switch (@event)
         {
             case WorkflowExecutionCompletedEvent e:
-                store.Complete(e.ExecutionId);
+                store.CompleteWith(e.ExecutionId, e.DateOccurred, ExecutionOutcome.Completed, null);
                 break;
             case WorkflowExecutionFailedEvent e:
-                store.Complete(e.ExecutionId);
+                store.CompleteWith(e.ExecutionId, e.DateOccurred, ExecutionOutcome.Failed, e.Reason);
                 break;
         }
         return Task.CompletedTask;

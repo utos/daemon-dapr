@@ -40,6 +40,29 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task WhenExecutionSucceeds_ShouldEmitCompletedTerminalFrame()
+    {
+        // Arrange
+        var request = new TestWorkflowBuilder("terminal-success-workflow", fixture.MockBaseUrl)
+            .HttpGet("stream-activity", "/success")
+            .Build();
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
+
+        // Act
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = executionId
+        });
+
+        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(1000));
+
+        // Assert - a structured terminal frame with COMPLETED status and no error
+        var terminal = events.FirstOrDefault(e => e.Status == ExecutionStatus.Completed);
+        Assert.NotNull(terminal);
+        Assert.Null(terminal.Error);
+    }
+
+    [Fact]
     public async Task WithNonExistentExecutionId_ShouldThrowNotFound()
     {
         // Arrange

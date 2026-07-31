@@ -10,16 +10,28 @@ public class ExecutionLogStore : IExecutionLogStore
     private readonly ConcurrentDictionary<Guid, ExecutionLogBuffer> _buffers = new();
 
     public void AddEntry(Guid executionId, ExecutionLogEntry entry)
-        => _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer()).Add(entry);
+        => _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer()).Add(new LogItem(entry));
 
     public void Complete(Guid executionId)
     {
         _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer()).Complete();
-        _ = Task.Delay(TimeSpan.FromMinutes(5))
-                .ContinueWith(t => _buffers.TryRemove(executionId, out _), TaskScheduler.Default);
+        ScheduleEviction(executionId);
     }
 
-    public async IAsyncEnumerable<ExecutionLogEntry> SubscribeAsync(
+    public void CompleteWith(Guid executionId, DateTime timestamp, ExecutionOutcome outcome, string? failureReason)
+    {
+        var buffer = _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer());
+        // The terminal frame must land in the stream before it closes, so add then complete.
+        buffer.Add(new TerminalItem(timestamp, outcome, failureReason));
+        buffer.Complete();
+        ScheduleEviction(executionId);
+    }
+
+    private void ScheduleEviction(Guid executionId)
+        => _ = Task.Delay(TimeSpan.FromMinutes(5))
+                   .ContinueWith(t => _buffers.TryRemove(executionId, out _), TaskScheduler.Default);
+
+    public async IAsyncEnumerable<ExecutionStreamItem> SubscribeAsync(
         Guid executionId, int? after, int? tail, [EnumeratorCancellation] CancellationToken ct)
     {
         var buffer = _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer());
@@ -36,24 +48,24 @@ public class ExecutionLogStore : IExecutionLogStore
         for (var i = skip; i < history.Count; i++)
             yield return history[i];
 
-        await foreach (var entry in channel.Reader.ReadAllAsync(ct))
-            yield return entry;
+        await foreach (var item in channel.Reader.ReadAllAsync(ct))
+            yield return item;
     }
 
     private sealed class ExecutionLogBuffer
     {
         private readonly object _lock = new();
-        private readonly List<ExecutionLogEntry> _history = [];
-        private readonly List<Channel<ExecutionLogEntry>> _subscribers = [];
+        private readonly List<ExecutionStreamItem> _history = [];
+        private readonly List<Channel<ExecutionStreamItem>> _subscribers = [];
         private bool _completed;
 
-        public void Add(ExecutionLogEntry entry)
+        public void Add(ExecutionStreamItem item)
         {
             lock (_lock)
             {
-                _history.Add(entry);
+                _history.Add(item);
                 foreach (var ch in _subscribers)
-                    ch.Writer.TryWrite(entry);
+                    ch.Writer.TryWrite(item);
             }
         }
 
@@ -68,11 +80,11 @@ public class ExecutionLogStore : IExecutionLogStore
             }
         }
 
-        public (IReadOnlyList<ExecutionLogEntry> history, Channel<ExecutionLogEntry> channel) Subscribe()
+        public (IReadOnlyList<ExecutionStreamItem> history, Channel<ExecutionStreamItem> channel) Subscribe()
         {
             lock (_lock)
             {
-                var channel = Channel.CreateUnbounded<ExecutionLogEntry>();
+                var channel = Channel.CreateUnbounded<ExecutionStreamItem>();
                 if (_completed)
                     channel.Writer.TryComplete();
                 else
