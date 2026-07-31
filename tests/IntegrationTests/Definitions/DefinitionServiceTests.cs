@@ -209,16 +209,21 @@ public class DefinitionServiceTests(DaemonTestFixture fixture)
             .Build();
         var scheduled = await fixture.ScheduleAsync(request);
 
+        // Unloaded without waiting, so the definition goes away while the run is still in
+        // flight — that is the case worth guarding.
         await fixture.DefinitionClient.UnloadWorkflowAsync(new UnloadWorkflowRequest
         {
             Reference = new WorkflowReference { Name = "def-unload-safe-test" }
         });
 
-        // Act
+        // Act - the run finishes despite its definition having been removed mid-flight.
+        await fixture.WatchToCompletionAsync(scheduled.Id);
+
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduled.Id });
 
         // Assert - the execution snapshotted its own bundle at schedule time
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
         Assert.Equal(scheduled.Id, details.Summary.Id);
         Assert.NotNull(details.Bundle);
         Assert.True(details.Bundle.Workflows[details.Bundle.EntryPoint]

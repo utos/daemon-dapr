@@ -34,7 +34,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         // Assert
         Assert.Contains(fixture.WireMockServer.LogEntries,
@@ -64,7 +64,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         // Assert
         var call = fixture.WireMockServer.LogEntries
@@ -104,7 +104,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         // Assert
         Assert.Contains(fixture.WireMockServer.LogEntries,
@@ -134,7 +134,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         // Assert - the env-gated branch ran and the fallback did not
         var paths = fixture.WireMockServer.LogEntries
@@ -172,7 +172,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         // Assert - both branches expanded and ran
         Assert.Equal(2, fixture.WireMockServer.LogEntries
@@ -200,7 +200,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         // Assert - the child resolved the parent's env
         Assert.Contains(fixture.WireMockServer.LogEntries,
@@ -232,7 +232,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         // Assert - the branch resolved the parent's env
         Assert.Contains(fixture.WireMockServer.LogEntries,
@@ -255,7 +255,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         var execution = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = response.Id });
@@ -278,7 +278,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         // Assert
         var execution = await fixture.DaemonClient.GetExecutionAsync(
@@ -304,7 +304,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         // Act - schedule succeeds; the failure surfaces during execution
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
+        await fixture.WatchToCompletionAsync(response.Id);
 
         // Assert
         var execution = await fixture.DaemonClient.GetExecutionAsync(
@@ -318,13 +318,4 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
         Assert.Contains("fetch", message); // names the offending activity
     }
 
-    private async Task WatchToCompletion(string executionId)
-    {
-        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
-        {
-            ExecutionId = executionId
-        });
-
-        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
-    }
 }
