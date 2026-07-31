@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
+using Common.Workflow;
 using FluentValidation;
-using Utos.Workflow.V1;
 
 namespace Execution.Domain.Validation;
 

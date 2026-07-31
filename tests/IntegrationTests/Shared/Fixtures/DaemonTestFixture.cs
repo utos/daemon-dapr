@@ -95,6 +95,27 @@ public class DaemonTestFixture : IAsyncLifetime
         return await DaemonClient.ScheduleExecutionAsync(scheduleRequest);
     }
 
+    /// <summary>
+    /// Waits for a run to finish, by subscribing rather than polling.
+    ///
+    /// <see cref="ScheduleAsync"/> returns as soon as the creation event is appended, while
+    /// <c>GetExecution</c> and <c>ListExecutions</c> read a projection the event subscription
+    /// populates afterwards — so querying straight after scheduling races that projection and
+    /// fails intermittently with <c>NOT_FOUND</c>.
+    ///
+    /// <c>WatchExecution</c>'s stream is closed by an event handler on the terminal event, and
+    /// the processor awaits every projection before it runs any handler. The read model is
+    /// therefore already current when this returns, which is what makes it a synchronisation
+    /// point and not just a wait.
+    /// </summary>
+    public async Task WatchToCompletionAsync(string executionId, TimeSpan? timeout = null)
+    {
+        var call = ObservabilityClient.WatchExecution(
+            new WatchExecutionRequest { ExecutionId = executionId });
+
+        await call.CollectUntilCompletion(timeout ?? TimeSpan.FromSeconds(30));
+    }
+
     public async Task DisposeAsync()
     {
         WireMockServer.Stop();

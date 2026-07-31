@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
+using Common.Workflow;
 using Microsoft.Extensions.Logging;
-using Utos.Workflow.V1;
 using Execution.Domain.Services;
 
 namespace Execution.Infrastructure.Dapr.ActivityHandlers;
@@ -11,7 +11,7 @@ public class HttpActivityHandler(
     ILogger<HttpActivityHandler> logger)
     : IActivityHandler
 {
-    public WorkflowActivity.ConfigOneofCase ConfigCase => WorkflowActivity.ConfigOneofCase.Http;
+    public ActivityKind Kind => ActivityKind.Http;
 
     public async Task<ActivityHandlerResult> ExecuteAsync(ActivityHandlerInput input, CancellationToken ct = default)
     {

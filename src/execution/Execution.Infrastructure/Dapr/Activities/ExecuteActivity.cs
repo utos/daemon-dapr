@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
 using Execution.Domain.Services;
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Execution.Infrastructure.Dapr.Activities;
 
@@ -12,9 +12,9 @@ public class ExecuteActivity(IEnumerable<IActivityHandler> handlers)
     public override async Task<ExecuteActivityOutput> RunAsync(
         WorkflowActivityContext context, ExecuteActivityInput input)
     {
-        var handler = handlers.FirstOrDefault(h => h.ConfigCase == input.ConfigCase)
+        var handler = handlers.FirstOrDefault(h => h.Kind == input.Kind)
                       ?? throw new NotSupportedException(
-                          $"No handler registered for activity config type '{input.ConfigCase}'");
+                          $"No handler registered for activity config type '{input.Kind}'");
 
         var result = await handler.ExecuteAsync(
             new ActivityHandlerInput(
@@ -32,7 +32,7 @@ public class ExecuteActivity(IEnumerable<IActivityHandler> handlers)
 public sealed record ExecuteActivityInput(
     Guid ExecutionId,
     Guid LogExecutionId,
-    WorkflowActivity.ConfigOneofCase ConfigCase,
+    ActivityKind Kind,
     string? Url,
     string? HttpMethod,
     string? Body,

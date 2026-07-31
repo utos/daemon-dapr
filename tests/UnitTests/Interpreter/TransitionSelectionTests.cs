@@ -1,3 +1,4 @@
+using Common.Workflow;
 using Execution.Domain.Interpreter;
 using UnitTests.Support;
 
@@ -168,8 +169,7 @@ public class TransitionSelectionTests
     [Fact]
     public void A_rule_with_no_action_is_rejected()
     {
-        var activity = Wf.Http("https://example.com");
-        activity.OnSuccess.Add(new Utos.Workflow.V1.TransitionRule());
+        var activity = Wf.Http("https://example.com", onSuccess: [new TransitionRule()]);
 
         var session = Wf.Session(Wf.Graph(("a", activity)));
 

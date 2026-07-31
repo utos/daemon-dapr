@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Utos.Workflow.V1;
+using Common.Workflow;
 using Execution.Features.Repositories;
 using Execution.Domain.Validation;
 using Execution.Features.Behaviors;
@@ -114,7 +114,6 @@ public static class ExecutionExtensions
         // Projection engine and projections (idempotent read model updates)
         builder.Services.AddScoped<IProjectionEngine, ProjectionEngine>();
         builder.Services.AddScoped<IProjection, WorkflowExecutionReadModelProjection>();
-        builder.Services.AddScoped<IProjection, SubWorkflowCallProjection>();
 
         // Event handlers (side-effect-producing reactions)
         builder.Services.AddScoped<IEventHandler, WorkflowSchedulingProcessManager>();

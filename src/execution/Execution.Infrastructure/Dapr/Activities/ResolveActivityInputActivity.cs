@@ -3,7 +3,7 @@ using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
 using Execution.Domain.Interpreter;
 using Execution.Domain.Services;
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Execution.Infrastructure.Dapr.Activities;
 
@@ -15,7 +15,7 @@ public sealed record ResolveActivityInputInput(
     Dictionary<string, object>? ActivityInput);
 
 public sealed record ResolveActivityInputOutput(
-    WorkflowActivity.ConfigOneofCase ConfigCase,
+    ActivityKind Kind,
     // HTTP fields (null when not HTTP)
     string? Url,
     string? HttpMethod,
@@ -50,12 +50,12 @@ public class ResolveActivityInputActivity(
         return resolved switch
         {
             ResolvedActivityInput.Http http => new ResolveActivityInputOutput(
-                WorkflowActivity.ConfigOneofCase.Http,
+                ActivityKind.Http,
                 http.Url, http.Method, http.Body, http.Headers,
                 null, null, null),
 
             ResolvedActivityInput.SubWorkflow sub => new ResolveActivityInputOutput(
-                WorkflowActivity.ConfigOneofCase.Workflow,
+                ActivityKind.Workflow,
                 null, null, null, null,
                 sub.WorkflowKey, sub.StartActivity, sub.Input, sub.Detached),
 

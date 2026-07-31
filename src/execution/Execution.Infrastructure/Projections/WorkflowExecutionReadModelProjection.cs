@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Common.Infrastructure.Projections;
 using Common.SeedWork;
-using Google.Protobuf;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Execution.Domain.Events;
@@ -15,7 +14,7 @@ public class WorkflowExecutionReadModelProjection(
     ILogger<WorkflowExecutionReadModelProjection> logger)
     : DbProjection(dbContext, logger)
 {
-    private static readonly JsonFormatter Formatter = new(JsonFormatter.Settings.Default);
+    // Persisted as the domain model's own JSON, matching what ReadModelToDtoExtensions reads back.
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -26,7 +25,6 @@ public class WorkflowExecutionReadModelProjection(
     public override bool CanHandle(Type eventType)
     {
         return eventType == typeof(WorkflowExecutionCreatedEvent)
-               || eventType == typeof(SubWorkflowCreatedEvent)
                || eventType == typeof(WorkflowExecutionScheduledEvent)
                || eventType == typeof(WorkflowExecutionActiveEvent)
                || eventType == typeof(WorkflowExecutionCompletedEvent)
@@ -40,10 +38,6 @@ public class WorkflowExecutionReadModelProjection(
         {
             case WorkflowExecutionCreatedEvent e:
                 await HandleCreatedEvent(e, cancellationToken);
-                break;
-
-            case SubWorkflowCreatedEvent e:
-                await HandleSubWorkflowCreatedEvent(e, cancellationToken);
                 break;
 
             case WorkflowExecutionScheduledEvent e:
@@ -83,7 +77,7 @@ public class WorkflowExecutionReadModelProjection(
             WorkflowNamespace = NullIfEmpty(entryWorkflow.Metadata.Namespace),
             WorkflowRegistry = NullIfEmpty(entryWorkflow.Metadata.Registry),
             WorkflowDigest = NullIfEmpty(@event.Digest),
-            WorkflowDefinitionJson = Formatter.Format(@event.Bundle),
+            WorkflowDefinitionJson = JsonSerializer.Serialize(@event.Bundle),
             InputJson = @event.Input.Count > 0 ? JsonSerializer.Serialize(@event.Input, JsonOptions) : null,
             EnvJson = @event.Env.Count > 0 ? JsonSerializer.Serialize(@event.Env) : null
         };
@@ -91,26 +85,6 @@ public class WorkflowExecutionReadModelProjection(
         dbContext.WorkflowExecutions.Add(readModel);
 
         logger.LogDebug("Created read model for execution {ExecutionId}", @event.ExecutionId);
-
-        return Task.CompletedTask;
-    }
-
-    private Task HandleSubWorkflowCreatedEvent(SubWorkflowCreatedEvent @event, CancellationToken _)
-    {
-        var readModel = new WorkflowExecutionReadModel
-        {
-            Id = @event.ExecutionId,
-            ParentExecutionId = @event.ParentExecutionId,
-            Status = ReadModelStatus.Active,
-            WorkflowName = @event.WorkflowName,
-            WorkflowVersion = @event.WorkflowVersion,
-            StartedAt = @event.DateOccurred
-        };
-
-        dbContext.WorkflowExecutions.Add(readModel);
-
-        logger.LogDebug("Created read model for sub-workflow execution {ExecutionId} (parent: {ParentId})",
-            @event.ExecutionId, @event.ParentExecutionId);
 
         return Task.CompletedTask;
     }

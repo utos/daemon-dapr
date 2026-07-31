@@ -1,11 +1,10 @@
-using FluentValidation;
-using Utos.Workflow.V1;
+using Common.Workflow;
 using Execution.Domain.Constants;
-using ProtoWorkflow = Utos.Workflow.V1.Workflow;
+using FluentValidation;
 
 namespace Execution.Domain.Validation;
 
-public class WorkflowValidator : AbstractValidator<ProtoWorkflow>
+public class WorkflowValidator : AbstractValidator<Workflow>
 {
     public WorkflowValidator()
     {
@@ -58,14 +57,14 @@ public class WorkflowValidator : AbstractValidator<ProtoWorkflow>
             .WithMessage(w => GetInvalidTransitionTargetsMessage(w));
     }
 
-    private static bool HaveValidTransitionTargets(ProtoWorkflow workflow)
+    private static bool HaveValidTransitionTargets(Workflow workflow)
     {
         var activityNames = workflow.Spec.Activities.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var activity in workflow.Spec.Activities.Values)
         foreach (var rule in activity.OnSuccess)
         {
-            if (rule.ActionCase != TransitionRule.ActionOneofCase.Transition)
+            if (rule.Transition is null)
                 continue;
 
             var targetName = rule.Transition.Name;
@@ -77,7 +76,7 @@ public class WorkflowValidator : AbstractValidator<ProtoWorkflow>
         return true;
     }
 
-    private static string GetInvalidTransitionTargetsMessage(ProtoWorkflow workflow)
+    private static string GetInvalidTransitionTargetsMessage(Workflow workflow)
     {
         var activityNames = workflow.Spec.Activities.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var invalidTargets = new List<string>();
@@ -85,7 +84,7 @@ public class WorkflowValidator : AbstractValidator<ProtoWorkflow>
         foreach (var (activityName, activity) in workflow.Spec.Activities)
         foreach (var rule in activity.OnSuccess)
         {
-            if (rule.ActionCase != TransitionRule.ActionOneofCase.Transition)
+            if (rule.Transition is null)
                 continue;
 
             var targetName = rule.Transition.Name;

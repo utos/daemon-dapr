@@ -1,10 +1,11 @@
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Execution.Domain.Services;
 
 public interface IActivityHandler
 {
-    WorkflowActivity.ConfigOneofCase ConfigCase { get; }
+    /// <summary>Which kind of activity this handler runs. The executor dispatches on it.</summary>
+    ActivityKind Kind { get; }
 
     Task<ActivityHandlerResult> ExecuteAsync(ActivityHandlerInput input, CancellationToken ct = default);
 }

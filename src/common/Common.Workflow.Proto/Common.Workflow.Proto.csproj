@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <ProjectReference Include="../Common.Workflow/Common.Workflow.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Utos.Workflow" />
+        <PackageReference Include="Utos.Daemon.Server" />
+    </ItemGroup>
+
+</Project>

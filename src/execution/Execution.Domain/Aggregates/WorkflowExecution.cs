@@ -1,6 +1,5 @@
 using Common.SeedWork;
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Common.Workflow;
 using Execution.Domain.Events;
 
 namespace Execution.Domain.Aggregates;

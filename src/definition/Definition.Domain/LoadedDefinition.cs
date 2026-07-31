@@ -1,5 +1,4 @@
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Definition.Domain;
 
@@ -17,8 +16,7 @@ public sealed record LoadedDefinition(
 {
     /// <summary>Human-readable description from the entry-point workflow's metadata.</summary>
     public string? Description =>
-        Bundle.Workflows.TryGetValue(Bundle.EntryPoint, out var workflow)
-        && !string.IsNullOrEmpty(workflow.Metadata?.Description)
-            ? workflow.Metadata.Description
-            : null;
+        string.IsNullOrEmpty(Bundle.Entry?.Metadata.Description)
+            ? null
+            : Bundle.Entry.Metadata.Description;
 }

@@ -1,20 +1,19 @@
-using Execution.Domain.Extensions;
+using Common.Workflow;
 using Execution.Domain.Templating;
-using Google.Protobuf.WellKnownTypes;
 
 namespace Execution.Domain.Interpreter;
 
 /// <summary>
-/// Renders the template expressions inside a protobuf <see cref="Struct"/> — the shape every
-/// authored transform uses — into plain CLR values.
+/// Renders the template expressions inside a <see cref="ValueMap"/> — the shape every authored
+/// transform uses — into plain CLR values.
 /// </summary>
 public sealed class StructRenderer(ITemplateEngine templateEngine)
 {
-    public Dictionary<string, object> Render(Struct protoStruct, TemplateScope scope)
+    public Dictionary<string, object> Render(ValueMap source, TemplateScope scope)
     {
         var result = new Dictionary<string, object>();
 
-        foreach (var (key, value) in protoStruct.Fields)
+        foreach (var (key, value) in source.Fields)
         {
             var rendered = RenderValue(value, scope);
             if (rendered != null)
@@ -24,16 +23,16 @@ public sealed class StructRenderer(ITemplateEngine templateEngine)
         return result;
     }
 
-    private object? RenderValue(Value value, TemplateScope scope)
+    private object? RenderValue(object? value, TemplateScope scope)
     {
-        return value.KindCase switch
+        return value switch
         {
-            Value.KindOneofCase.StringValue => templateEngine.RenderTyped(value.StringValue, scope),
-            Value.KindOneofCase.StructValue => Render(value.StructValue, scope),
-            Value.KindOneofCase.ListValue => value.ListValue.Values
-                .Select(v => RenderValue(v, scope))
-                .ToList(),
-            _ => value.ToObject()
+            // Only strings carry templates; everything else is already a literal.
+            string template => templateEngine.RenderTyped(template, scope),
+            ValueMap nested => Render(nested, scope),
+            IReadOnlyDictionary<string, object?> nested => Render(new ValueMap(nested), scope),
+            IEnumerable<object?> items => items.Select(item => RenderValue(item, scope)).ToList(),
+            _ => value
         };
     }
 }

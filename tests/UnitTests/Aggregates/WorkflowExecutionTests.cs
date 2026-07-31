@@ -1,8 +1,7 @@
 using Common.SeedWork;
 using Execution.Domain.Aggregates;
 using Execution.Domain.Events;
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace UnitTests.Aggregates;
 
@@ -13,7 +12,7 @@ public class WorkflowExecutionTests
     private static WorkflowExecution Created()
     {
         return new WorkflowExecution(
-            new WorkflowBundle { EntryPoint = "test:1.0.0" },
+            new WorkflowBundle("test:1.0.0", new Dictionary<string, Workflow>()),
             new Dictionary<string, object>(),
             "start",
             executionId: Id);
@@ -31,7 +30,7 @@ public class WorkflowExecutionTests
     {
         return new WorkflowExecutionCreatedEvent(
             Id,
-            new WorkflowBundle { EntryPoint = "test:1.0.0" },
+            new WorkflowBundle("test:1.0.0", new Dictionary<string, Workflow>()),
             new Dictionary<string, object>(),
             "start",
             DateTime.UtcNow);

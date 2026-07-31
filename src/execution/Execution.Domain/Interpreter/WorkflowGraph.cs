@@ -1,4 +1,4 @@
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Execution.Domain.Interpreter;
 

@@ -4,7 +4,7 @@ using Execution.Features.Models;
 using Execution.Features.Repositories;
 using Execution.Infrastructure.Data;
 using Execution.Infrastructure.ReadModels;
-using WorkflowReference = Utos.Daemon.V1.WorkflowReference;
+using Common.Workflow;
 
 namespace Execution.Infrastructure.Repositories;
 
@@ -33,7 +33,7 @@ public class WorkflowExecutionRepository(WorkflowExecutionDbContext dbContext) :
         if (workflow is not null)
         {
             // name selects the workflow; each other populated field narrows further.
-            // An empty/unset field imposes no constraint (proto: "omitted matches all").
+            // An unset field imposes no constraint — an omitted version matches all of them.
             query = query.Where(e => e.WorkflowName == workflow.Name);
 
             if (!string.IsNullOrEmpty(workflow.Version))
@@ -71,16 +71,6 @@ public class WorkflowExecutionRepository(WorkflowExecutionDbContext dbContext) :
         return status is ReadModelStatus.Completed or ReadModelStatus.Failed
             ? ExecutionDeletionEligibility.Terminal
             : ExecutionDeletionEligibility.NonTerminal;
-    }
-
-    public async Task<IReadOnlyList<Guid>> GetChildExecutionIdsAsync(Guid parentExecutionId,
-        CancellationToken cancellationToken = default)
-    {
-        return await dbContext.WorkflowExecutions
-            .AsNoTracking()
-            .Where(e => e.ParentExecutionId == parentExecutionId)
-            .Select(e => e.Id)
-            .ToListAsync(cancellationToken);
     }
 
     public async Task DeleteAsync(IReadOnlyCollection<Guid> executionIds,

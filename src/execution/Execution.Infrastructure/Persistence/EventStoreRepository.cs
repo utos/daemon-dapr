@@ -186,8 +186,8 @@ public class EventStoreRepository(
         }
         // Deleting an absent stream with StreamState.Any surfaces as WrongExpectedVersion
         // (expected Any, actual NoStream), not StreamNotFound. Since Any is our only version
-        // constraint, this can only mean the stream does not exist — an idempotent no-op
-        // (e.g. a run with no sub-workflow calls has no subworkflowcalls-{id} stream).
+        // constraint, this can only mean the stream does not exist — an idempotent no-op, which
+        // is what makes a delete retried after a partial failure safe.
         catch (WrongExpectedVersionException)
         {
             logger.LogDebug("Stream {StreamName} does not exist; nothing to delete", streamName);

@@ -48,7 +48,7 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
 
         // Act
         var scheduleResponse = await fixture.ScheduleAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
@@ -78,7 +78,7 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
 
         // Act
         var scheduleResponse = await fixture.ScheduleAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
@@ -111,7 +111,7 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
 
         // Act
         var scheduleResponse = await fixture.ScheduleAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
@@ -152,7 +152,7 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
 
         // Act
         var scheduleResponse = await fixture.ScheduleAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
@@ -194,7 +194,7 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
 
         // Act
         var scheduleResponse = await fixture.ScheduleAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
@@ -213,7 +213,7 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
 
         // Act
         var scheduleResponse = await fixture.ScheduleAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
@@ -421,28 +421,6 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
         for (var i = 1; i < statuses.Count; i++)
             Assert.True((int)statuses[i] > (int)statuses[i - 1],
                 $"Status should only progress forward. Previous: {statuses[i - 1]}, Current: {statuses[i]}");
-    }
-
-    /// <summary>
-    /// Helper to wait for an execution to exist in the read model
-    /// </summary>
-    private async Task<bool> WaitForExecutionToExist(string executionId, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-
-        while (DateTime.UtcNow < deadline)
-            try
-            {
-                await fixture.DaemonClient.GetExecutionAsync(
-                    new GetExecutionRequest { ExecutionId = executionId });
-                return true;
-            }
-            catch (Grpc.Core.RpcException ex) when (ex.StatusCode == Grpc.Core.StatusCode.NotFound)
-            {
-                await Task.Delay(100);
-            }
-
-        return false;
     }
 
     /// <summary>

@@ -7,8 +7,7 @@ using Microsoft.Extensions.Logging;
 using Execution.Domain.Aggregates;
 using Execution.Domain.Services;
 using Execution.Features.Commands;
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Execution.Infrastructure.Dapr.Activities;
 
@@ -63,15 +62,10 @@ public class ScheduleDetachedExecutionActivity(
         // The detached run reuses the parent's resolved workflows but points the entry point at
         // the sub-workflow, so WorkflowSchedulingProcessManager schedules and lists it as its own
         // top-level execution.
-        var detachedBundle = new WorkflowBundle { EntryPoint = input.SubWorkflowKey };
-        detachedBundle.Workflows.Add(parentContext.Bundle.Workflows);
+        var detachedBundle = new WorkflowBundle(input.SubWorkflowKey, parentContext.Bundle.Workflows);
 
         var metadata = detachedBundle.Workflows[input.SubWorkflowKey].Metadata;
-        var reference = new WorkflowReference
-        {
-            Name = metadata.Name,
-            Version = metadata.Version
-        };
+        var reference = new WorkflowReference(metadata.Name, metadata.Version);
 
         try
         {
