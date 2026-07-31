@@ -39,9 +39,12 @@ public class DefinitionGrpcService(
         var definition = store.Load(bundle, digest);
 
         logger.LogInformation("Loaded workflow definition {WorkflowIdentity} ({WorkflowDigest})",
-            WorkflowIdentity.Key(definition.Reference), definition.Reference.Digest);
+            definition.Identity, definition.Digest);
 
-        return Task.FromResult(new LoadWorkflowResponse { Reference = definition.Reference.ToProto() });
+        return Task.FromResult(new LoadWorkflowResponse
+        {
+            Reference = definition.Identity.ToProto(definition.Digest)
+        });
     }
 
     public override Task<ListWorkflowsResponse> ListWorkflows(
@@ -53,7 +56,7 @@ public class DefinitionGrpcService(
         {
             var summary = new WorkflowDefinitionSummary
             {
-                Reference = definition.Reference.ToProto(),
+                Reference = definition.Identity.ToProto(definition.Digest),
                 LoadedAt = Timestamp.FromDateTime(definition.LoadedAt.ToUniversalTime())
             };
 
@@ -73,7 +76,7 @@ public class DefinitionGrpcService(
 
         return Task.FromResult(new GetWorkflowResponse
         {
-            Reference = definition.Reference.ToProto(),
+            Reference = definition.Identity.ToProto(definition.Digest),
             Bundle = definition.Bundle.ToProto(),
             LoadedAt = Timestamp.FromDateTime(definition.LoadedAt.ToUniversalTime())
         });
@@ -102,6 +105,6 @@ public class DefinitionGrpcService(
 
         return store.Resolve(resolved)
                ?? throw new RpcException(new Status(StatusCode.NotFound,
-                   $"Workflow definition '{WorkflowIdentity.Key(resolved)}' not found"));
+                   $"Workflow definition '{resolved}' not found"));
     }
 }

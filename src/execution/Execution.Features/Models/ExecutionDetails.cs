@@ -11,10 +11,7 @@ public class ExecutionDetails
 {
     public Guid Id { get; set; }
     public ExecutionStatus Status { get; set; }
-    public string WorkflowName { get; set; } = null!;
-    public string WorkflowVersion { get; set; } = null!;
-    public string? WorkflowNamespace { get; set; }
-    public string? WorkflowRegistry { get; set; }
+    public WorkflowIdentity Workflow { get; set; } = null!;
     public string? WorkflowDigest { get; set; }
     public WorkflowBundle Bundle { get; set; } = null!;
     public Dictionary<string, object> Input { get; set; } = new();

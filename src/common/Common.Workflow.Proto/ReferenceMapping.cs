@@ -37,4 +37,30 @@ public static class ReferenceMapping
 
         return result;
     }
+
+    /// <summary>
+    /// Renders a resolved identity as a wire reference. Every caller that has to answer "which
+    /// workflow did this run" goes through here, so the "leave optional fields unset rather than
+    /// empty" rule is stated once instead of being re-derived per response type.
+    /// </summary>
+    public static Wire.WorkflowReference ToProto(this Domain.WorkflowIdentity source,
+        string? digest = null)
+    {
+        var result = new Wire.WorkflowReference
+        {
+            Name = source.Name,
+            Version = source.Version.ToString()
+        };
+
+        if (source.Namespace != null)
+            result.Namespace = source.Namespace;
+
+        if (source.Registry != null)
+            result.Registry = source.Registry;
+
+        if (!string.IsNullOrEmpty(digest))
+            result.Digest = digest;
+
+        return result;
+    }
 }

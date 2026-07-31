@@ -108,24 +108,6 @@ namespace Execution.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<string>("WorkflowName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("WorkflowNamespace")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("WorkflowRegistry")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("WorkflowVersion")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt");
@@ -136,9 +118,51 @@ namespace Execution.Infrastructure.Migrations
 
                     b.HasIndex("WorkflowDigest");
 
-                    b.HasIndex("WorkflowName", "WorkflowVersion");
-
                     b.ToTable("WorkflowExecutions", (string)null);
+                });
+
+            modelBuilder.Entity("Execution.Infrastructure.ReadModels.WorkflowExecutionReadModel", b =>
+                {
+                    b.OwnsOne("Common.Workflow.WorkflowIdentity", "Identity", b1 =>
+                        {
+                            b1.Property<Guid>("WorkflowExecutionReadModelId")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<string>("Name")
+                                .IsRequired()
+                                .HasMaxLength(200)
+                                .HasColumnType("nvarchar(200)")
+                                .HasColumnName("WorkflowName");
+
+                            b1.Property<string>("Namespace")
+                                .HasMaxLength(200)
+                                .HasColumnType("nvarchar(200)")
+                                .HasColumnName("WorkflowNamespace");
+
+                            b1.Property<string>("Registry")
+                                .HasMaxLength(200)
+                                .HasColumnType("nvarchar(200)")
+                                .HasColumnName("WorkflowRegistry");
+
+                            b1.Property<string>("Version")
+                                .IsRequired()
+                                .HasMaxLength(50)
+                                .HasColumnType("nvarchar(50)")
+                                .HasColumnName("WorkflowVersion");
+
+                            b1.HasKey("WorkflowExecutionReadModelId");
+
+                            b1.HasIndex("Name", "Version");
+
+                            b1.ToTable("WorkflowExecutions");
+
+                            b1.WithOwner()
+                                .HasForeignKey("WorkflowExecutionReadModelId");
+                        });
+
+                    b.Navigation("Identity")
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

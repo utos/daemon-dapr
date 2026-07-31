@@ -57,4 +57,31 @@ public sealed record WorkflowReference(
     string? Version = null,
     string? Namespace = null,
     string? Registry = null,
-    string? Digest = null);
+    string? Digest = null)
+{
+    /// <summary>
+    /// Renders the reference the way it was asked for, omitting the segments it does not carry.
+    /// A partial reference reads as "send-email", not "send-email:" — these strings end up in
+    /// "definition not found" messages, where a dangling separator looks like a daemon bug.
+    /// </summary>
+    public override string ToString()
+    {
+        var text = string.Empty;
+
+        if (!string.IsNullOrEmpty(Registry))
+            text += Registry + "/";
+
+        if (!string.IsNullOrEmpty(Namespace))
+            text += Namespace + "/";
+
+        text += Name;
+
+        if (!string.IsNullOrEmpty(Version))
+            text += ":" + Version;
+
+        if (!string.IsNullOrEmpty(Digest))
+            text += "@" + Digest;
+
+        return text;
+    }
+}

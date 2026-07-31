@@ -34,16 +34,23 @@ public class WorkflowExecutionRepository(WorkflowExecutionDbContext dbContext) :
         {
             // name selects the workflow; each other populated field narrows further.
             // An unset field imposes no constraint — an omitted version matches all of them.
-            query = query.Where(e => e.WorkflowName == workflow.Name);
+            query = query.Where(e => e.Identity.Name == workflow.Name);
 
             if (!string.IsNullOrEmpty(workflow.Version))
-                query = query.Where(e => e.WorkflowVersion == workflow.Version);
+            {
+                // A version the daemon cannot parse names no execution, since every projected
+                // row was written from a validated definition.
+                if (!SemanticVersion.TryParse(workflow.Version, out var version))
+                    return [];
+
+                query = query.Where(e => e.Identity.Version == version);
+            }
 
             if (!string.IsNullOrEmpty(workflow.Namespace))
-                query = query.Where(e => e.WorkflowNamespace == workflow.Namespace);
+                query = query.Where(e => e.Identity.Namespace == workflow.Namespace);
 
             if (!string.IsNullOrEmpty(workflow.Registry))
-                query = query.Where(e => e.WorkflowRegistry == workflow.Registry);
+                query = query.Where(e => e.Identity.Registry == workflow.Registry);
 
             if (!string.IsNullOrEmpty(workflow.Digest))
                 query = query.Where(e => e.WorkflowDigest == workflow.Digest);

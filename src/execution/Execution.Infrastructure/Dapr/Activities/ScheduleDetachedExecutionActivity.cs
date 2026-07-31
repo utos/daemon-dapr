@@ -65,13 +65,18 @@ public class ScheduleDetachedExecutionActivity(
         var detachedBundle = new WorkflowBundle(input.SubWorkflowKey, parentContext.Bundle.Workflows);
 
         var metadata = detachedBundle.Workflows[input.SubWorkflowKey].Metadata;
-        var reference = new WorkflowReference(metadata.Name, metadata.Version);
+
+        // The parent's bundle was validated when it was loaded, so its sub-workflows carry a
+        // parseable version. A detached run is its own top-level execution, so it records the
+        // sub-workflow's full identity rather than the parent's.
+        var identity = WorkflowIdentity.From(metadata);
 
         try
         {
             // A detached run inherits the parent's ambient env, matching an awaited sub-workflow.
             await mediator.Send(new ScheduleExecutionCommand(
-                reference,
+                identity,
+                null,
                 detachedBundle,
                 input.Input ?? new Dictionary<string, object>(),
                 input.SubStartActivity,

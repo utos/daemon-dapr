@@ -21,10 +21,7 @@ public static class ReadModelToDtoExtensions
         {
             Id = readModel.Id,
             Status = ParseStatus(readModel.Status),
-            WorkflowName = readModel.WorkflowName,
-            WorkflowVersion = readModel.WorkflowVersion,
-            WorkflowNamespace = readModel.WorkflowNamespace,
-            WorkflowRegistry = readModel.WorkflowRegistry,
+            Workflow = readModel.Identity,
             WorkflowDigest = readModel.WorkflowDigest,
             CreatedAt = readModel.CreatedAt,
             ScheduledAt = readModel.ScheduledAt,
@@ -78,10 +75,7 @@ public static class ReadModelToDtoExtensions
         {
             Id = readModel.Id,
             Status = ParseStatus(readModel.Status),
-            WorkflowName = readModel.WorkflowName,
-            WorkflowVersion = readModel.WorkflowVersion,
-            WorkflowNamespace = readModel.WorkflowNamespace,
-            WorkflowRegistry = readModel.WorkflowRegistry,
+            Workflow = readModel.Identity,
             WorkflowDigest = readModel.WorkflowDigest,
             Bundle = bundle ??
                      throw new InvalidOperationException($"Workflow bundle is missing for execution {readModel.Id}"),

@@ -25,12 +25,13 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
 
         var definition = definitionStore.Resolve(requested)
                          ?? throw new RpcException(new Status(StatusCode.NotFound,
-                             $"Workflow definition '{WorkflowIdentity.Key(requested)}' not found"));
+                             $"Workflow definition '{requested}' not found"));
 
         try
         {
             var command = new ScheduleExecutionCommand(
-                definition.Reference,
+                definition.Identity,
+                definition.Digest,
                 definition.Bundle,
                 request.Input.ToDictionary(),
                 request.StartActivity,
