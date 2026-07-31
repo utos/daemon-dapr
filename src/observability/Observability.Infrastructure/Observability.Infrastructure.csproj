@@ -6,7 +6,7 @@
 
     <ItemGroup>
         <ProjectReference Include="../Observability.Domain/Observability.Domain.csproj"/>
-        <ProjectReference Include="../Observability.Features/Observability.Features.csproj"/>
+        <ProjectReference Include="../Observability.Application/Observability.Application.csproj"/>
         <ProjectReference Include="../../execution/Execution.Domain/Execution.Domain.csproj"/>
         <ProjectReference Include="../../common/Common.Infrastructure/Common.Infrastructure.csproj"/>
     </ItemGroup>

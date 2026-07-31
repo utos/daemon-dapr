@@ -6,7 +6,7 @@ using Mediator;
 using Microsoft.Extensions.Logging;
 using Execution.Domain.Aggregates;
 using Execution.Domain.Services;
-using Execution.Features.Commands;
+using Execution.Application.Commands;
 using Common.Workflow;
 
 namespace Execution.Infrastructure.Dapr.Activities;
@@ -74,7 +74,7 @@ public class ScheduleDetachedExecutionActivity(
         try
         {
             // A detached run inherits the parent's ambient env, matching an awaited sub-workflow.
-            await mediator.Send(new ScheduleExecutionCommand(
+            await mediator.Send(new StartExecutionCommand(
                 identity,
                 null,
                 detachedBundle,

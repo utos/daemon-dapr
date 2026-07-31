@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- No Utos.*, no Grpc.*: the wire format stops at Execution.Api. -->
+    <ItemGroup>
+        <PackageReference Include="FluentValidation"/>
+        <PackageReference Include="Mediator.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Execution.Domain/Execution.Domain.csproj"/>
+        <ProjectReference Include="../../definition/Definition.Domain/Definition.Domain.csproj"/>
+    </ItemGroup>
+
+</Project>

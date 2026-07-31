@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Execution.Infrastructure.Extensions;
-using Execution.Features.Models;
-using Execution.Features.Repositories;
+using Execution.Application.Models;
+using Execution.Application.Repositories;
 using Execution.Infrastructure.Data;
 using Execution.Infrastructure.ReadModels;
 using Common.SeedWork;

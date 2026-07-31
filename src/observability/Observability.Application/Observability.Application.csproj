@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- No Utos.*, no Grpc.*: the wire format stops at Observability.Api. -->
+    <ItemGroup>
+        <PackageReference Include="Mediator.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Observability.Domain/Observability.Domain.csproj"/>
+        <ProjectReference Include="../../common/Common.SeedWork/Common.SeedWork.csproj"/>
+    </ItemGroup>
+
+</Project>
