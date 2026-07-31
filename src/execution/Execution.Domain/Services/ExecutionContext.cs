@@ -1,10 +1,11 @@
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Execution.Domain.Services;
 
 /// <summary>
 /// Immutable execution context entity. Write-once at schedule, read-many by activities.
-/// Stored in EF Core to keep protobuf/gRPC types out of Dapr persistence.
+/// Stored in EF Core rather than passed through Dapr, so a bundle of any size crosses an
+/// activity boundary as an id.
 /// </summary>
 public sealed class ExecutionContext
 {

@@ -1,3 +1,4 @@
+using Common.Workflow.Proto;
 using Definition.Domain;
 using Execution.Features.Extensions;
 using Execution.Features.Commands;
@@ -20,9 +21,11 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Workflow name is required"));
 
         // Resolve against the local store, then snapshot the content into the execution.
-        var definition = definitionStore.Resolve(request.Workflow)
+        var requested = request.Workflow.ToDomain();
+
+        var definition = definitionStore.Resolve(requested)
                          ?? throw new RpcException(new Status(StatusCode.NotFound,
-                             $"Workflow definition '{WorkflowIdentity.Key(request.Workflow)}' not found"));
+                             $"Workflow definition '{WorkflowIdentity.Key(requested)}' not found"));
 
         try
         {
@@ -38,7 +41,7 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
             return new ScheduleExecutionResponse
             {
                 Id = result.Id.ToString(),
-                Status = result.Status
+                Status = result.Status.ToGrpc()
             };
         }
         catch (ValidationException ex)
@@ -71,7 +74,7 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
                 "workflow.name is required when a workflow filter is set"));
 
         var summaries = await mediator.Send(
-            new ListExecutionsQuery(request.Workflow), context.CancellationToken);
+            new ListExecutionsQuery(request.Workflow?.ToDomain()), context.CancellationToken);
 
         var response = new ListExecutionsResponse();
         response.Executions.AddRange(summaries.Select(s => s.ToGrpc()));

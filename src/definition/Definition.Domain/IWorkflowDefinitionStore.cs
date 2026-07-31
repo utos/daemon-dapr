@@ -1,5 +1,4 @@
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Definition.Domain;
 
@@ -14,7 +13,12 @@ public interface IWorkflowDefinitionStore
     /// Stores a fully-resolved bundle under the identity derived from its entry-point
     /// workflow metadata. Re-loading an existing identity replaces it.
     /// </summary>
-    LoadedDefinition Load(WorkflowBundle bundle);
+    /// <param name="digest">
+    /// Content digest of the bundle. Passed in rather than computed here: it is defined over the
+    /// canonical wire serialization, so it is the transport edge — where the bundle still exists
+    /// in that form — that can compute a value matching what the CLI and registry compute.
+    /// </param>
+    LoadedDefinition Load(WorkflowBundle bundle, string digest);
 
     /// <summary>
     /// Resolves a reference to a loaded definition. An omitted version means "latest

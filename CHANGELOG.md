@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The daemon now has its own workflow model instead of using the generated protobuf types as its
+  domain model. `Utos.Workflow.V1` / `Utos.Daemon.V1` types previously reached every layer: the
+  `WorkflowExecution` aggregate's status *was* the wire enum, `WorkflowExecutionCreatedEvent`
+  embedded a whole `WorkflowBundle` proto and persisted it into the event stream, and a transport
+  `WorkflowReference` was a repository query parameter. That coupled both the domain model and the
+  durable event history to the wire contract, so a spec version bump could break event
+  deserialization. The new `Common.Workflow` model is plain C# and serializes with
+  `System.Text.Json` directly, replacing the proto `JsonFormatter` round-trip the daemon needed in
+  three separate places (the event stream, `ExecutionContexts.BundleJson`, and the read model's
+  `WorkflowDefinitionJson`). Protobuf is now confined to the transport edge — the gRPC services and
+  a single mapping layer, `Common.Workflow.Proto` — and neither `Execution.Domain` nor
+  `Definition.Domain` references a `Utos.*` package at all. The gRPC contract is unchanged: the
+  mapping is lossless in both directions, including proto3 optional unset-vs-empty and spec
+  dependencies, so a bundle read back through `GetWorkflow` or `GetExecutionDetails` is identical
+  to the one loaded.
+
+  **This is a breaking change to persisted state.** Bundles were previously written as protobuf
+  JSON and are now written as the domain model's own JSON, so existing `workflowexecution-{id}`
+  event streams cannot be replayed and existing execution rows cannot be read. Drop the KurrentDB
+  volume and the SQL database before running this version. There is no upcaster; the daemon is
+  pre-1.0 and the read model was already rebuilt from scratch on startup.
+
 ### Fixed
 
 - An execution's full lifecycle is now written through the `WorkflowExecution` aggregate, which is

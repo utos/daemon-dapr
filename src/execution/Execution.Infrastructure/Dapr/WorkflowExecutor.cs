@@ -5,7 +5,7 @@ using Execution.Domain.Aggregates;
 using Execution.Domain.Interpreter;
 using Execution.Infrastructure.Dapr.Activities;
 using Microsoft.Extensions.Logging;
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Execution.Infrastructure.Dapr;
 
@@ -184,20 +184,20 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         Dictionary<string, object>? activityInput,
         Guid logExecutionId)
     {
-        switch (run.Activity.ConfigCase)
+        switch (run.Activity.Config)
         {
-            case WorkflowActivity.ConfigOneofCase.Workflow:
+            case SubWorkflowActivityConfig:
                 return await CallSubWorkflowAsync(context, logger, input, run, activityInput, logExecutionId);
 
-            case WorkflowActivity.ConfigOneofCase.Http:
+            case HttpActivityConfig:
                 return await CallHttpAsync(context, logger, input, run, activityInput, logExecutionId);
 
-            case WorkflowActivity.ConfigOneofCase.Promise:
+            case PromiseActivityConfig:
                 return await FanOutAsync(context, logger, input, run, activityInput, logExecutionId);
 
-            case WorkflowActivity.ConfigOneofCase.Timer:
+            case TimerActivityConfig timer:
             {
-                var delay = run.Activity.Timer.Duration.ToTimeSpan();
+                var delay = timer.Duration;
 
                 logger.LogInformation(
                     "Timer activity '{WorkflowActivity}' waiting {DelayMs}ms (execution {WorkflowExecutionId})",
@@ -218,7 +218,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             default:
                 throw new NotSupportedException(
-                    $"Unsupported activity config type '{run.Activity.ConfigCase.ToString()}' for activity '{run.ActivityName}'");
+                    $"Unsupported activity config type '{run.Activity.Kind}' for activity '{run.ActivityName}'");
         }
     }
 
@@ -249,7 +249,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             var result = await context.CallActivityAsync<ExecuteActivityOutput>(
                 nameof(ExecuteActivity),
                 new ExecuteActivityInput(input.ExecutionId, logExecutionId,
-                    resolved.ConfigCase,
+                    resolved.Kind,
                     resolved.Url, resolved.HttpMethod, resolved.Body, resolved.Headers));
 
             var activityDuration = (context.CurrentUtcDateTime - activityStartTime).TotalMilliseconds;
@@ -336,7 +336,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
     {
         logger.LogInformation(
             "Entering promise activity '{WorkflowActivity}' (mode: {PromiseMode}) (execution {WorkflowExecutionId})",
-            run.ActivityName, run.Activity.Promise.Mode, logExecutionId);
+            run.ActivityName, ((PromiseActivityConfig)run.Activity.Config).Mode, logExecutionId);
 
         // 1. Expand branches (apply conditions, expand for_each, render inputs)
         var resolved = await context.CallActivityAsync<ResolvePromiseOutput>(
@@ -375,7 +375,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
         logger.LogInformation(
             "Promise activity '{WorkflowActivity}' resolved ({PromiseMode} mode, {BranchCount} branches) (execution {WorkflowExecutionId})",
-            run.ActivityName, run.Activity.Promise.Mode, resolved.Branches.Count, logExecutionId);
+            run.ActivityName, ((PromiseActivityConfig)run.Activity.Config).Mode, resolved.Branches.Count, logExecutionId);
 
         return promiseOutput;
     }

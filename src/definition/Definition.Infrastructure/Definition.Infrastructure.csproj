@@ -6,6 +6,7 @@
 
     <ItemGroup>
         <ProjectReference Include="../Definition.Domain/Definition.Domain.csproj"/>
+        <ProjectReference Include="../../common/Common.Workflow.Proto/Common.Workflow.Proto.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

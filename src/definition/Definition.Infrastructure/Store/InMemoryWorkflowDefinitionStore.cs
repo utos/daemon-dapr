@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
+using Common.Workflow;
 using Definition.Domain;
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
 
 namespace Definition.Infrastructure.Store;
 
@@ -15,13 +14,12 @@ public sealed class InMemoryWorkflowDefinitionStore : IWorkflowDefinitionStore
 {
     private readonly ConcurrentDictionary<string, LoadedDefinition> _definitions = new();
 
-    public LoadedDefinition Load(WorkflowBundle bundle)
+    public LoadedDefinition Load(WorkflowBundle bundle, string digest)
     {
         if (!bundle.Workflows.TryGetValue(bundle.EntryPoint, out var entryWorkflow))
             throw new ArgumentException(
                 $"Entry point '{bundle.EntryPoint}' not found in bundle workflows.", nameof(bundle));
 
-        var digest = bundle.ComputeContentDigest();
         var reference = WorkflowIdentity.ReferenceFor(entryWorkflow.Metadata, digest);
         var definition = new LoadedDefinition(reference, bundle, DateTime.UtcNow);
 

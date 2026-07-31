@@ -1,10 +1,9 @@
 using System.Text.Json;
 using Common.Infrastructure.Serialization;
-using Google.Protobuf;
+using Common.Workflow;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using Utos.Workflow.V1;
 using Execution.Infrastructure.ReadModels;
 using ExecutionContext = Execution.Domain.Services.ExecutionContext;
 
@@ -12,8 +11,6 @@ namespace Execution.Infrastructure.Data;
 
 public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbContext> options) : DbContext(options)
 {
-    private static readonly JsonParser ProtoParser = new(JsonParser.Settings.Default);
-    private static readonly JsonFormatter ProtoFormatter = new(JsonFormatter.Settings.Default);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -47,8 +44,8 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
                 .HasColumnType("nvarchar(max)")
                 .IsRequired()
                 .HasConversion(new ValueConverter<WorkflowBundle, string>(
-                    v => ProtoFormatter.Format(v),
-                    v => ProtoParser.Parse<WorkflowBundle>(v)));
+                    v => JsonSerializer.Serialize(v, JsonOptions),
+                    v => JsonSerializer.Deserialize<WorkflowBundle>(v, JsonOptions)!));
 
             b.Property(e => e.Env)
                 .HasColumnName("EnvJson")

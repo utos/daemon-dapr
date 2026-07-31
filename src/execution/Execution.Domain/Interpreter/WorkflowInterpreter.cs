@@ -1,6 +1,6 @@
+using Common.Workflow;
 using Execution.Domain.Templating;
 using Execution.Domain.Validation;
-using Utos.Workflow.V1;
 
 namespace Execution.Domain.Interpreter;
 
@@ -33,7 +33,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         // state across the wait. Derived from the activity definition rather than taken
         // from the caller so the two cannot disagree, and so a timer used as the start
         // activity picks up the run-input fallback above.
-        var output = activity.ConfigCase == WorkflowActivity.ConfigOneofCase.Timer
+        var output = activity.Kind == ActivityKind.Timer
             ? input
             : activityOutput;
 
@@ -49,7 +49,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         foreach (var rule in activity.OnSuccess)
         {
             // Check condition first — skip this rule if condition doesn't match
-            if (rule.HasCondition && !string.IsNullOrEmpty(rule.Condition))
+            if (!string.IsNullOrEmpty(rule.Condition))
             {
                 var shouldTransition = templateEngine.Evaluate<bool>(rule.Condition, scope);
                 if (!shouldTransition)
@@ -57,11 +57,11 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             }
 
             // Condition matched (or no condition) — execute the action
-            return rule.ActionCase switch
+            return rule switch
             {
-                TransitionRule.ActionOneofCase.Transition => Goto(rule.Transition, scope, output),
+                { Transition: not null } => Goto(rule.Transition, scope, output),
 
-                TransitionRule.ActionOneofCase.Result =>
+                { Result: not null } =>
                     new TransitionDecision.Return(structRenderer.Render(rule.Result, scope)),
 
                 _ => throw new InvalidOperationException(
@@ -88,15 +88,15 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             .WithInput(input)
             .WithEnv(session.Env);
 
-        return activity.ConfigCase switch
+        return activity.Config switch
         {
-            WorkflowActivity.ConfigOneofCase.Http => ResolveHttp(activity.Http, scope, activityName),
+            HttpActivityConfig http => ResolveHttp(http, scope, activityName),
 
-            WorkflowActivity.ConfigOneofCase.Workflow =>
-                ResolveSubWorkflow(activity.Workflow, scope, activityInput),
+            SubWorkflowActivityConfig subWorkflow =>
+                ResolveSubWorkflow(subWorkflow, scope, activityInput),
 
             _ => throw new NotSupportedException(
-                $"Unsupported activity config type '{activity.ConfigCase}' for activity '{activityName}'")
+                $"Unsupported activity config type '{activity.Kind}' for activity '{activityName}'")
         };
     }
 
@@ -110,7 +110,11 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         IReadOnlyDictionary<string, object>? activityInput)
     {
         var activity = Require(session, activityName);
-        var promise = activity.Promise;
+
+        if (activity.Config is not PromiseActivityConfig promise)
+            throw new InvalidOperationException(
+                $"Activity '{activityName}' is not a promise activity.");
+
         var input = session.InputFor(activityInput);
 
         var scope = new TemplateScope()
@@ -122,7 +126,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         foreach (var branch in promise.Branches)
         {
             // Evaluate condition if set — skip branch if false
-            if (branch.HasCondition && !string.IsNullOrEmpty(branch.Condition))
+            if (!string.IsNullOrEmpty(branch.Condition))
             {
                 var shouldInclude = templateEngine.Evaluate<bool>(branch.Condition, scope);
                 if (!shouldInclude)
@@ -196,18 +200,18 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
                 $"{HttpUrlRules.GetError(url)}");
 
         var headers = new Dictionary<string, string>();
-        foreach (var (key, valueTemplate) in httpConfig.Headers)
+        foreach (var (key, valueTemplate) in httpConfig.HeaderMap)
             headers[key] = templateEngine.RenderToString(valueTemplate, scope);
 
         string? body = null;
-        if (httpConfig.Method is "POST" or "PUT" && httpConfig.HasBody)
+        if (httpConfig.Method is "POST" or "PUT" && httpConfig.Body != null)
             body = templateEngine.RenderToString(httpConfig.Body, scope);
 
         return new ResolvedActivityInput.Http(url, httpConfig.Method, body, headers);
     }
 
     private ResolvedActivityInput ResolveSubWorkflow(
-        WorkflowActivityConfig config,
+        SubWorkflowActivityConfig config,
         TemplateScope scope,
         IReadOnlyDictionary<string, object>? rawActivityInput)
     {
@@ -232,11 +236,9 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
                              ?? throw new InvalidOperationException(
                                  $"Branch target activity '{target.Name}' not found in workflow");
 
-        if (targetActivity.ConfigCase != WorkflowActivity.ConfigOneofCase.Workflow)
+        if (targetActivity.Config is not SubWorkflowActivityConfig config)
             throw new InvalidOperationException(
                 $"Branch target activity '{target.Name}' must be a workflow-type activity");
-
-        var config = targetActivity.Workflow;
 
         // Render branch input from target.Input if set, otherwise pass through activity input
         var branchInput = target.Input != null

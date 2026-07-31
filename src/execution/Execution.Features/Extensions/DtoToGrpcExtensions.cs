@@ -1,6 +1,9 @@
 using Google.Protobuf.WellKnownTypes;
 using System.Text.Json;
+using Common.Workflow;
+using Common.Workflow.Proto;
 using Execution.Features.Models;
+using DomainExecutionStatus = Execution.Domain.Aggregates.ExecutionStatus;
 using GrpcExecution = Utos.Daemon.V1.ScheduleExecutionResponse;
 using GrpcExecutionSummary = Utos.Daemon.V1.ExecutionSummary;
 using GrpcExecutionDetails = Utos.Daemon.V1.GetExecutionResponse;
@@ -27,6 +30,23 @@ public static class DtoToGrpcExtensions
     /// records structured failure causes of its own.
     /// </summary>
     private const string ExecutionFailedCode = "EXECUTION_FAILED";
+
+    /// <summary>
+    /// Maps the daemon's own lifecycle state onto the wire enum. The two are deliberately
+    /// separate types: the domain one is durable aggregate state and must not shift because a
+    /// transport contract was renumbered.
+    /// </summary>
+    public static GrpcExecutionStatus ToGrpc(this DomainExecutionStatus status)
+    {
+        return status switch
+        {
+            DomainExecutionStatus.Scheduled => GrpcExecutionStatus.Scheduled,
+            DomainExecutionStatus.Active => GrpcExecutionStatus.Active,
+            DomainExecutionStatus.Completed => GrpcExecutionStatus.Completed,
+            DomainExecutionStatus.Failed => GrpcExecutionStatus.Failed,
+            _ => GrpcExecutionStatus.Unspecified
+        };
+    }
 
     /// <summary>
     /// Builds a <see cref="GrpcWorkflowReference"/> from the stored identity, leaving the
@@ -59,7 +79,7 @@ public static class DtoToGrpcExtensions
         var grpc = new GrpcExecutionSummary
         {
             Id = dto.Id.ToString(),
-            Status = dto.Status,
+            Status = dto.Status.ToGrpc(),
             Workflow = BuildReference(dto.WorkflowName, dto.WorkflowVersion,
                 dto.WorkflowNamespace, dto.WorkflowRegistry, dto.WorkflowDigest),
             CreatedAt = Timestamp.FromDateTime(dto.CreatedAt.ToUniversalTime())
@@ -91,7 +111,7 @@ public static class DtoToGrpcExtensions
         var summary = new GrpcExecutionSummary
         {
             Id = dto.Id.ToString(),
-            Status = dto.Status,
+            Status = dto.Status.ToGrpc(),
             Workflow = BuildReference(dto.WorkflowName, dto.WorkflowVersion,
                 dto.WorkflowNamespace, dto.WorkflowRegistry, dto.WorkflowDigest),
             CreatedAt = Timestamp.FromDateTime(dto.CreatedAt.ToUniversalTime())
@@ -118,7 +138,7 @@ public static class DtoToGrpcExtensions
         var grpc = new GrpcExecutionDetails
         {
             Summary = summary,
-            Bundle = dto.Bundle
+            Bundle = dto.Bundle.ToProto()
         };
 
         if (dto.Input.Count > 0)
@@ -187,6 +207,7 @@ public static class DtoToGrpcExtensions
             double d => Value.ForNumber(d),
             float f => Value.ForNumber(f),
             decimal dec => Value.ForNumber((double)dec),
+            ValueMap map => Value.ForStruct(map.ToProto()),
             IDictionary<string, object?> dict => Value.ForStruct(new Struct
             {
                 Fields = { dict.ToDictionary(kvp => kvp.Key, kvp => ConvertToProtobufValue(kvp.Value)) }

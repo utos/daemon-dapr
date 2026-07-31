@@ -1,7 +1,6 @@
 using System.Text.Json;
-using Google.Protobuf;
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Common.Workflow;
+using Execution.Domain.Aggregates;
 using Execution.Features.Models;
 using Execution.Infrastructure.ReadModels;
 using ExecutionDetails = Execution.Features.Models.ExecutionDetails;
@@ -14,7 +13,7 @@ namespace Execution.Infrastructure.Extensions;
 /// </summary>
 public static class ReadModelToDtoExtensions
 {
-    private static readonly JsonParser Parser = new(JsonParser.Settings.Default);
+    // The bundle is stored as the domain model's own JSON — no proto formatter involved.
 
     public static ExecutionSummary ToSummaryDto(this WorkflowExecutionReadModel readModel)
     {
@@ -43,7 +42,7 @@ public static class ReadModelToDtoExtensions
         if (!string.IsNullOrEmpty(readModel.WorkflowDefinitionJson))
             try
             {
-                bundle = Parser.Parse<WorkflowBundle>(readModel.WorkflowDefinitionJson);
+                bundle = JsonSerializer.Deserialize<WorkflowBundle>(readModel.WorkflowDefinitionJson);
             }
             catch (Exception ex)
             {

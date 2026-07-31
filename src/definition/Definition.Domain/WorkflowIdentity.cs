@@ -1,5 +1,4 @@
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Common.Workflow;
 
 namespace Definition.Domain;
 
@@ -12,7 +11,7 @@ public static class WorkflowIdentity
     /// <summary>
     /// Builds the full identity key, e.g. "registry.example.com/acme/send-email:1.0.0".
     /// </summary>
-    public static string Key(string? registry, string? @namespace, string name, string version)
+    public static string Key(string? registry, string? @namespace, string name, string? version)
     {
         var prefix = string.Empty;
 
@@ -58,21 +57,10 @@ public static class WorkflowIdentity
     /// Builds a resolved reference (version and digest always populated) from a bundle's
     /// entry-point metadata.
     /// </summary>
-    public static WorkflowReference ReferenceFor(WorkflowMetadata metadata, string digest)
-    {
-        var reference = new WorkflowReference
-        {
-            Name = metadata.Name,
-            Version = metadata.Version,
-            Digest = digest
-        };
-
-        if (!string.IsNullOrEmpty(metadata.Registry))
-            reference.Registry = metadata.Registry;
-
-        if (!string.IsNullOrEmpty(metadata.Namespace))
-            reference.Namespace = metadata.Namespace;
-
-        return reference;
-    }
+    public static WorkflowReference ReferenceFor(WorkflowMetadata metadata, string digest) =>
+        new(metadata.Name,
+            metadata.Version,
+            string.IsNullOrEmpty(metadata.Namespace) ? null : metadata.Namespace,
+            string.IsNullOrEmpty(metadata.Registry) ? null : metadata.Registry,
+            digest);
 }

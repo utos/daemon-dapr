@@ -1,3 +1,4 @@
+using Common.Workflow;
 using Execution.Domain.Interpreter;
 using UnitTests.Support;
 
@@ -7,7 +8,7 @@ public class PromiseExpansionTests
 {
     private readonly WorkflowInterpreter _interpreter = Wf.Interpreter();
 
-    private static WorkflowGraph GraphWith(params Utos.Workflow.V1.PromiseBranch[] branches)
+    private static WorkflowGraph GraphWith(params PromiseBranch[] branches)
     {
         return Wf.Graph(
             ("fan", Wf.Promise("all", 0, branches)),

@@ -1,5 +1,5 @@
 using Execution.Features.Models;
-using WorkflowReference = Utos.Daemon.V1.WorkflowReference;
+using Common.Workflow;
 
 namespace Execution.Features.Repositories;
 

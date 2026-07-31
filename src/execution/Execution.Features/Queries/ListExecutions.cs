@@ -1,6 +1,6 @@
 using Execution.Features.Models;
 using Mediator;
-using WorkflowReference = Utos.Daemon.V1.WorkflowReference;
+using Common.Workflow;
 
 namespace Execution.Features.Queries;
 

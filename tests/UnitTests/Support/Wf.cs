@@ -1,30 +1,24 @@
+using Common.Constants;
+using Common.Workflow;
 using Execution.Domain.Interpreter;
 using Execution.Infrastructure.Templating;
-using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging.Abstractions;
-using Utos.Workflow.V1;
-using Struct = Google.Protobuf.WellKnownTypes.Struct;
 
 namespace UnitTests.Support;
 
 /// <summary>
-/// Terse builders for the protobuf shapes the interpreter reads. Kept minimal on purpose —
-/// a test should read as the workflow it describes, not as protobuf assembly.
+/// Terse builders for the shapes the interpreter reads. Kept minimal on purpose — a test
+/// should read as the workflow it describes, not as model assembly.
 /// </summary>
 internal static class Wf
 {
     public static WorkflowGraph Graph(params (string Name, WorkflowActivity Activity)[] activities)
     {
-        var workflow = new Workflow
-        {
-            ApiVersion = "utos.dev/v1",
-            Kind = "Workflow",
-            Metadata = new WorkflowMetadata { Name = "test", Version = "1.0.0" },
-            Spec = new WorkflowSpec()
-        };
-
-        foreach (var (name, activity) in activities)
-            workflow.Spec.Activities[name] = activity;
+        var workflow = new Workflow(
+            WorkflowDocument.ApiVersion,
+            WorkflowDocument.Kind,
+            new WorkflowMetadata("test", "1.0.0"),
+            new WorkflowSpec(activities.ToDictionary(a => a.Name, a => a.Activity)));
 
         return new WorkflowGraph(workflow, "test:1.0.0");
     }
@@ -65,43 +59,30 @@ internal static class Wf
         IDictionary<string, string>? headers = null,
         params TransitionRule[] onSuccess)
     {
-        var config = new HttpActivityConfig { Method = method, Url = url };
-
-        if (body != null)
-            config.Body = body;
-
-        if (headers != null)
-            foreach (var (key, value) in headers)
-                config.Headers[key] = value;
-
-        return Activity(new WorkflowActivity { Http = config }, onSuccess);
+        return new WorkflowActivity(
+            new HttpActivityConfig(
+                method,
+                url,
+                body,
+                headers == null ? null : new Dictionary<string, string>(headers)),
+            onSuccess);
     }
 
     public static WorkflowActivity Timer(TimeSpan duration, params TransitionRule[] onSuccess)
     {
-        return Activity(
-            new WorkflowActivity { Timer = new TimerActivityConfig { Duration = Duration.FromTimeSpan(duration) } },
-            onSuccess);
+        return new WorkflowActivity(new TimerActivityConfig(duration), onSuccess);
     }
 
     public static WorkflowActivity SubWorkflow(
         string workflowKey,
         string startActivity,
-        Struct? input = null,
+        ValueMap? input = null,
         bool detached = false,
         params TransitionRule[] onSuccess)
     {
-        var config = new WorkflowActivityConfig
-        {
-            Workflow = workflowKey,
-            StartActivity = startActivity,
-            Detached = detached
-        };
-
-        if (input != null)
-            config.Input = input;
-
-        return Activity(new WorkflowActivity { Workflow = config }, onSuccess);
+        return new WorkflowActivity(
+            new SubWorkflowActivityConfig(workflowKey, startActivity, input, detached),
+            onSuccess);
     }
 
     public static WorkflowActivity Promise(
@@ -110,93 +91,57 @@ internal static class Wf
         PromiseBranch[] branches,
         params TransitionRule[] onSuccess)
     {
-        var config = new PromiseActivityConfig { Mode = mode, RequiredCount = requiredCount };
-        config.Branches.AddRange(branches);
-
-        return Activity(new WorkflowActivity { Promise = config }, onSuccess);
+        return new WorkflowActivity(
+            new PromiseActivityConfig(mode, requiredCount, branches),
+            onSuccess);
     }
 
     public static PromiseBranch Branch(
         string name,
         string targetActivity,
-        Struct? input = null,
+        ValueMap? input = null,
         string? condition = null,
         string? forEachCollection = null,
         string forEachAlias = "item")
     {
-        var target = new TransitionTarget { Name = targetActivity };
-
-        if (input != null)
-            target.Input = input;
-
-        var branch = new PromiseBranch { Name = name, Target = target };
-
-        if (condition != null)
-            branch.Condition = condition;
-
-        if (forEachCollection != null)
-            branch.ForEach = new ForEachConfig { Collection = forEachCollection, Alias = forEachAlias };
-
-        return branch;
+        return new PromiseBranch(
+            name,
+            new TransitionTarget(targetActivity, input),
+            condition,
+            forEachCollection == null ? null : new ForEachConfig(forEachCollection, forEachAlias));
     }
 
     // ---- transitions ---------------------------------------------------
 
-    public static TransitionRule Goto(string target, Struct? input = null, string? condition = null)
+    public static TransitionRule Goto(string target, ValueMap? input = null, string? condition = null)
     {
-        var transitionTarget = new TransitionTarget { Name = target };
-
-        if (input != null)
-            transitionTarget.Input = input;
-
-        var rule = new TransitionRule { Transition = transitionTarget };
-
-        if (condition != null)
-            rule.Condition = condition;
-
-        return rule;
+        return TransitionRule.Goto(target, input, condition);
     }
 
-    public static TransitionRule Result(Struct value, string? condition = null)
+    public static TransitionRule Result(ValueMap value, string? condition = null)
     {
-        var rule = new TransitionRule { Result = value };
-
-        if (condition != null)
-            rule.Condition = condition;
-
-        return rule;
+        return TransitionRule.Returns(value, condition);
     }
 
     // ---- values --------------------------------------------------------
 
-    public static Struct Fields(params (string Key, object? Value)[] fields)
+    public static ValueMap Fields(params (string Key, object? Value)[] fields)
     {
-        var result = new Struct();
-
-        foreach (var (key, value) in fields)
-            result.Fields[key] = ToValue(value);
-
-        return result;
+        return new ValueMap(fields.ToDictionary(f => f.Key, f => ToValue(f.Value)));
     }
 
-    public static Value ToValue(object? value)
+    /// <summary>
+    /// Normalizes a literal into the model's own value shape. Nested maps arrive as
+    /// <see cref="ValueMap"/> so tests build the same thing mapping from the wire produces.
+    /// </summary>
+    public static object? ToValue(object? value)
     {
         return value switch
         {
-            null => Value.ForNull(),
-            string s => Value.ForString(s),
-            bool b => Value.ForBool(b),
-            int i => Value.ForNumber(i),
-            double d => Value.ForNumber(d),
-            Struct s => Value.ForStruct(s),
-            object[] items => Value.ForList(items.Select(ToValue).ToArray()),
-            _ => throw new NotSupportedException($"No Value mapping for {value.GetType().Name}")
+            null => null,
+            ValueMap map => map,
+            object[] items => items.Select(ToValue).ToList(),
+            _ => value
         };
-    }
-
-    private static WorkflowActivity Activity(WorkflowActivity activity, TransitionRule[] onSuccess)
-    {
-        activity.OnSuccess.AddRange(onSuccess);
-        return activity;
     }
 }

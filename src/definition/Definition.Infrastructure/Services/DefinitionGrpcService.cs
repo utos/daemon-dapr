@@ -1,9 +1,11 @@
+using Common.Workflow.Proto;
 using Definition.Domain;
 using FluentValidation;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Utos.Daemon.V1;
+using Utos.Workflow.V1;
 
 namespace Definition.Infrastructure.Services;
 
@@ -14,7 +16,7 @@ namespace Definition.Infrastructure.Services;
 /// </summary>
 public class DefinitionGrpcService(
     IWorkflowDefinitionStore store,
-    IValidator<Utos.Workflow.V1.WorkflowBundle> bundleValidator,
+    IValidator<Common.Workflow.WorkflowBundle> bundleValidator,
     ILogger<DefinitionGrpcService> logger)
     : DefinitionService.DefinitionServiceBase
 {
@@ -24,16 +26,22 @@ public class DefinitionGrpcService(
         if (request.Bundle is null)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Bundle is required"));
 
-        var validation = bundleValidator.Validate(request.Bundle);
+        // Computed here, while the bundle is still in its wire form: the digest is defined over
+        // the canonical serialization, and must match what the CLI and registry computed for the
+        // same content.
+        var digest = request.Bundle.ComputeContentDigest();
+        var bundle = request.Bundle.ToDomain();
+
+        var validation = bundleValidator.Validate(bundle);
         if (!validation.IsValid)
             throw new RpcException(new Status(StatusCode.InvalidArgument, validation.ToString()));
 
-        var definition = store.Load(request.Bundle);
+        var definition = store.Load(bundle, digest);
 
         logger.LogInformation("Loaded workflow definition {WorkflowIdentity} ({WorkflowDigest})",
             WorkflowIdentity.Key(definition.Reference), definition.Reference.Digest);
 
-        return Task.FromResult(new LoadWorkflowResponse { Reference = definition.Reference });
+        return Task.FromResult(new LoadWorkflowResponse { Reference = definition.Reference.ToProto() });
     }
 
     public override Task<ListWorkflowsResponse> ListWorkflows(
@@ -45,7 +53,7 @@ public class DefinitionGrpcService(
         {
             var summary = new WorkflowDefinitionSummary
             {
-                Reference = definition.Reference,
+                Reference = definition.Reference.ToProto(),
                 LoadedAt = Timestamp.FromDateTime(definition.LoadedAt.ToUniversalTime())
             };
 
@@ -65,8 +73,8 @@ public class DefinitionGrpcService(
 
         return Task.FromResult(new GetWorkflowResponse
         {
-            Reference = definition.Reference,
-            Bundle = definition.Bundle,
+            Reference = definition.Reference.ToProto(),
+            Bundle = definition.Bundle.ToProto(),
             LoadedAt = Timestamp.FromDateTime(definition.LoadedAt.ToUniversalTime())
         });
     }
@@ -77,7 +85,7 @@ public class DefinitionGrpcService(
         if (string.IsNullOrEmpty(request.Reference?.Name))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Workflow name is required"));
 
-        var removed = store.Remove(request.Reference);
+        var removed = store.Remove(request.Reference.ToDomain());
 
         logger.LogInformation("Unloaded {RemovedCount} workflow definition(s) for '{WorkflowName}'",
             removed, request.Reference.Name);
@@ -90,8 +98,10 @@ public class DefinitionGrpcService(
         if (string.IsNullOrEmpty(reference?.Name))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Workflow name is required"));
 
-        return store.Resolve(reference)
+        var resolved = reference.ToDomain();
+
+        return store.Resolve(resolved)
                ?? throw new RpcException(new Status(StatusCode.NotFound,
-                   $"Workflow definition '{WorkflowIdentity.Key(reference)}' not found"));
+                   $"Workflow definition '{WorkflowIdentity.Key(resolved)}' not found"));
     }
 }

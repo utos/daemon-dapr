@@ -1,5 +1,5 @@
+using Common.Workflow;
 using FluentValidation;
-using Utos.Workflow.V1;
 
 namespace Execution.Domain.Validation;
 
@@ -7,23 +7,14 @@ public class TransitionRuleValidator : AbstractValidator<TransitionRule>
 {
     public TransitionRuleValidator()
     {
-        RuleFor(t => t.ActionCase)
-            .NotEqual(TransitionRule.ActionOneofCase.None)
+        RuleFor(t => t.HasAction)
+            .Equal(true)
             .WithMessage("Transition rule must have an action (transition or result)");
 
-        When(t => t.ActionCase == TransitionRule.ActionOneofCase.Transition, () =>
+        When(t => t.Transition != null, () =>
         {
-            RuleFor(t => t.Transition)
-                .NotNull()
-                .WithMessage("Transition target cannot be null")
+            RuleFor(t => t.Transition!)
                 .SetValidator(new TransitionTargetValidator());
-        });
-
-        When(t => t.ActionCase == TransitionRule.ActionOneofCase.Result, () =>
-        {
-            RuleFor(t => t.Result)
-                .NotNull()
-                .WithMessage("Result value cannot be null");
         });
     }
 }

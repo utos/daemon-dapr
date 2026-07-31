@@ -2,11 +2,10 @@
 
     <ItemGroup>
         <ProjectReference Include="../../common/Common.SeedWork/Common.SeedWork.csproj"/>
+        <ProjectReference Include="../../common/Common.Workflow/Common.Workflow.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Utos.Workflow" />
-        <PackageReference Include="Utos.Daemon.Server" />
         <PackageReference Include="FluentValidation"/>
         <PackageReference Include="Mediator.Abstractions" />
     </ItemGroup>
