@@ -1,0 +1,203 @@
+using Execution.Domain.Interpreter;
+using UnitTests.Support;
+
+namespace UnitTests.Interpreter;
+
+public class WorkflowNavigatorTests
+{
+    private static ExecutionCursor Fresh()
+    {
+        return ExecutionCursor.Start(null, 0);
+    }
+
+    [Theory]
+    [InlineData("end")]
+    [InlineData("END")]
+    [InlineData("End")]
+    public void End_keyword_completes_the_execution(string keyword)
+    {
+        var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
+
+        var step = WorkflowNavigator.Next(graph, keyword, Fresh(), Wf.Limits());
+
+        Assert.IsType<WorkflowStep.Complete>(step);
+    }
+
+    [Theory]
+    [InlineData("error")]
+    [InlineData("ERROR")]
+    public void Error_keyword_fails_the_execution(string keyword)
+    {
+        var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
+
+        var step = WorkflowNavigator.Next(graph, keyword, Fresh(), Wf.Limits());
+
+        var fail = Assert.IsType<WorkflowStep.Fail>(step);
+        Assert.Equal("Workflow transitioned to 'error'", fail.Reason);
+    }
+
+    [Fact]
+    public void Unknown_activity_fails_naming_the_workflow()
+    {
+        var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
+
+        var step = WorkflowNavigator.Next(graph, "nope", Fresh(), Wf.Limits());
+
+        var fail = Assert.IsType<WorkflowStep.Fail>(step);
+        Assert.Equal("Activity 'nope' not found in workflow 'test:1.0.0'", fail.Reason);
+    }
+
+    [Fact]
+    public void First_visit_runs_the_activity_without_detecting_a_loop()
+    {
+        var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
+
+        var step = WorkflowNavigator.Next(graph, "a", Fresh(), Wf.Limits());
+
+        var run = Assert.IsType<WorkflowStep.Run>(step);
+        Assert.Equal("a", run.ActivityName);
+        Assert.False(run.LoopJustDetected);
+        Assert.False(run.Cursor.LoopDetected);
+        Assert.Equal(0, run.Cursor.LoopedTransitions);
+        Assert.Equal(1, run.Cursor.TransitionsThisSegment);
+        Assert.Contains("a", run.Cursor.Visited);
+    }
+
+    [Fact]
+    public void Revisiting_an_activity_detects_a_loop_exactly_once()
+    {
+        var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
+        var limits = Wf.Limits();
+
+        var first = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", Fresh(), limits);
+        var second = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", first.Cursor, limits);
+        var third = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", second.Cursor, limits);
+
+        Assert.True(second.LoopJustDetected);
+        Assert.Equal(1, second.Cursor.LoopedTransitions);
+
+        // Already reported — the driver should not log the discovery again.
+        Assert.False(third.LoopJustDetected);
+        Assert.True(third.Cursor.LoopDetected);
+        Assert.Equal(2, third.Cursor.LoopedTransitions);
+    }
+
+    [Fact]
+    public void A_long_linear_path_never_counts_as_looping()
+    {
+        var graph = Wf.Graph(
+            ("a", Wf.Http("https://example.com")),
+            ("b", Wf.Http("https://example.com")),
+            ("c", Wf.Http("https://example.com")));
+
+        // A ceiling of 1 would fail immediately if linear steps were charged to it.
+        var limits = Wf.Limits(maxLooped: 1);
+        var cursor = Fresh();
+
+        foreach (var name in new[] { "a", "b", "c" })
+        {
+            var run = Assert.IsType<WorkflowStep.Run>(WorkflowNavigator.Next(graph, name, cursor, limits));
+            cursor = run.Cursor;
+        }
+
+        Assert.False(cursor.LoopDetected);
+        Assert.Equal(0, cursor.LoopedTransitions);
+        Assert.Equal(3, cursor.TransitionsThisSegment);
+    }
+
+    [Fact]
+    public void Exceeding_the_loop_ceiling_fails_and_names_the_re_entered_activity()
+    {
+        var graph = Wf.Graph(("poll", Wf.Http("https://example.com")));
+        var limits = Wf.Limits(maxLooped: 3, continueAsNewAfter: int.MaxValue);
+
+        var cursor = Fresh();
+        WorkflowStep step;
+
+        // Lap 1 is the first visit; laps 2-4 are back-edges, so the third one hits the ceiling.
+        do
+        {
+            step = WorkflowNavigator.Next(graph, "poll", cursor, limits);
+            if (step is WorkflowStep.Run run)
+                cursor = run.Cursor;
+        } while (step is WorkflowStep.Run);
+
+        var fail = Assert.IsType<WorkflowStep.Fail>(step);
+        Assert.Equal(
+            "Workflow exceeded the maximum of 3 looped activity executions; the loop re-enters " +
+            "activity 'poll'. Either the loop has no reachable exit, or the limit is too low " +
+            "for this workflow.",
+            fail.Reason);
+    }
+
+    [Fact]
+    public void A_segment_continues_as_new_once_it_is_looping_and_has_done_enough_work()
+    {
+        var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
+        var limits = Wf.Limits(continueAsNewAfter: 2);
+
+        var first = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", Fresh(), limits);
+        var second = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", first.Cursor, limits);
+
+        var step = WorkflowNavigator.Next(graph, "a", second.Cursor, limits);
+
+        var continuation = Assert.IsType<WorkflowStep.ContinueAsNew>(step);
+        Assert.Equal(2, continuation.Cursor.TransitionsThisSegment);
+        Assert.Equal(1, continuation.Cursor.LoopedTransitions);
+        Assert.Contains("a", continuation.Cursor.Visited);
+    }
+
+    [Fact]
+    public void A_non_looping_segment_never_continues_as_new()
+    {
+        var graph = Wf.Graph(
+            ("a", Wf.Http("https://example.com")),
+            ("b", Wf.Http("https://example.com")),
+            ("c", Wf.Http("https://example.com")));
+
+        var limits = Wf.Limits(continueAsNewAfter: 1);
+        var cursor = Fresh();
+
+        foreach (var name in new[] { "a", "b", "c" })
+        {
+            var step = WorkflowNavigator.Next(graph, name, cursor, limits);
+            cursor = Assert.IsType<WorkflowStep.Run>(step).Cursor;
+        }
+
+        Assert.Equal(3, cursor.TransitionsThisSegment);
+    }
+
+    [Fact]
+    public void Reaching_end_never_continues_as_new()
+    {
+        var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
+        var limits = Wf.Limits(continueAsNewAfter: 1);
+
+        var first = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", Fresh(), limits);
+        var looping = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", first.Cursor, limits);
+
+        // The cursor is well past the threshold, but 'end' outranks it.
+        Assert.IsType<WorkflowStep.Complete>(WorkflowNavigator.Next(graph, "end", looping.Cursor, limits));
+    }
+
+    [Fact]
+    public void A_resumed_segment_carries_its_loop_state_and_resets_the_segment_count()
+    {
+        var cursor = ExecutionCursor.Start(["a", "b"], 7);
+
+        Assert.True(cursor.LoopDetected);
+        Assert.Equal(7, cursor.LoopedTransitions);
+        Assert.Equal(0, cursor.TransitionsThisSegment);
+        Assert.Contains("a", cursor.Visited);
+        Assert.Contains("b", cursor.Visited);
+    }
+
+    [Fact]
+    public void A_fresh_segment_is_not_looping_even_with_an_empty_visited_set()
+    {
+        Assert.False(ExecutionCursor.Start(null, 0).LoopDetected);
+
+        // Continued before any back-edge was charged: still not looping.
+        Assert.False(ExecutionCursor.Start([], 0).LoopDetected);
+    }
+}

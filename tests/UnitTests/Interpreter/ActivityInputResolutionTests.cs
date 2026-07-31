@@ -1,0 +1,125 @@
+using Execution.Domain.Interpreter;
+using UnitTests.Support;
+
+namespace UnitTests.Interpreter;
+
+public class ActivityInputResolutionTests
+{
+    private readonly WorkflowInterpreter _interpreter = Wf.Interpreter();
+
+    [Fact]
+    public void An_http_url_is_rendered_from_input_and_env()
+    {
+        var graph = Wf.Graph(("a", Wf.Http("{{ env.base }}/users/{{ input.id }}")));
+        var session = Wf.Session(graph, env: new Dictionary<string, string> { ["base"] = "https://api.example.com" });
+
+        var resolved = (ResolvedActivityInput.Http)_interpreter.ResolveInput(
+            session, "a", new Dictionary<string, object> { ["id"] = 42 });
+
+        Assert.Equal("https://api.example.com/users/42", resolved.Url);
+        Assert.Equal("GET", resolved.Method);
+    }
+
+    [Fact]
+    public void Headers_are_rendered()
+    {
+        var graph = Wf.Graph(("a", Wf.Http(
+            "https://example.com",
+            headers: new Dictionary<string, string> { ["Authorization"] = "Bearer {{ env.token }}" })));
+
+        var session = Wf.Session(graph, env: new Dictionary<string, string> { ["token"] = "s3cret" });
+
+        var resolved = (ResolvedActivityInput.Http)_interpreter.ResolveInput(session, "a", null);
+
+        Assert.Equal("Bearer s3cret", resolved.Headers["Authorization"]);
+    }
+
+    [Theory]
+    [InlineData("POST")]
+    [InlineData("PUT")]
+    public void A_body_is_rendered_for_methods_that_carry_one(string method)
+    {
+        var graph = Wf.Graph(("a", Wf.Http("https://example.com", method, body: "{\"id\":{{ input.id }}}")));
+        var session = Wf.Session(graph);
+
+        var resolved = (ResolvedActivityInput.Http)_interpreter.ResolveInput(
+            session, "a", new Dictionary<string, object> { ["id"] = 7 });
+
+        Assert.Equal("{\"id\":7}", resolved.Body);
+    }
+
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("DELETE")]
+    public void A_body_is_dropped_for_methods_that_do_not(string method)
+    {
+        var graph = Wf.Graph(("a", Wf.Http("https://example.com", method, body: "ignored")));
+
+        var resolved = (ResolvedActivityInput.Http)_interpreter.ResolveInput(Wf.Session(graph), "a", null);
+
+        Assert.Null(resolved.Body);
+    }
+
+    [Fact]
+    public void A_url_that_renders_into_something_unusable_is_rejected_by_name()
+    {
+        // Passes the load-time check because the scheme comes from env; fails once rendered.
+        var graph = Wf.Graph(("fetch-user", Wf.Http("{{ env.base }}/users")));
+        var session = Wf.Session(graph, env: new Dictionary<string, string> { ["base"] = "not a url" });
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => _interpreter.ResolveInput(session, "fetch-user", null));
+
+        Assert.StartsWith("Activity 'fetch-user' resolved to an unusable URL 'not a url/users'", ex.Message);
+    }
+
+    [Fact]
+    public void A_sub_workflow_call_without_a_transform_passes_its_input_through()
+    {
+        var graph = Wf.Graph(("call", Wf.SubWorkflow("emailer:1.0.0", "send")));
+        var input = new Dictionary<string, object> { ["to"] = "a@example.com" };
+
+        var resolved = (ResolvedActivityInput.SubWorkflow)_interpreter.ResolveInput(
+            Wf.Session(graph), "call", input);
+
+        Assert.Equal("emailer:1.0.0", resolved.WorkflowKey);
+        Assert.Equal("send", resolved.StartActivity);
+        Assert.Same(input, resolved.Input);
+        Assert.False(resolved.Detached);
+    }
+
+    [Fact]
+    public void A_sub_workflow_call_with_a_transform_renders_it()
+    {
+        var graph = Wf.Graph(("call", Wf.SubWorkflow(
+            "emailer:1.0.0", "send", Wf.Fields(("recipient", "{{ input.to }}")))));
+
+        var resolved = (ResolvedActivityInput.SubWorkflow)_interpreter.ResolveInput(
+            Wf.Session(graph), "call", new Dictionary<string, object> { ["to"] = "a@example.com" });
+
+        Assert.NotNull(resolved.Input);
+        Assert.Equal("a@example.com", resolved.Input["recipient"]);
+    }
+
+    [Fact]
+    public void A_detached_sub_workflow_call_is_marked_as_such()
+    {
+        var graph = Wf.Graph(("call", Wf.SubWorkflow("emailer:1.0.0", "send", detached: true)));
+
+        var resolved = (ResolvedActivityInput.SubWorkflow)_interpreter.ResolveInput(
+            Wf.Session(graph), "call", null);
+
+        Assert.True(resolved.Detached);
+    }
+
+    [Fact]
+    public void An_activity_kind_with_nothing_to_resolve_is_rejected()
+    {
+        var graph = Wf.Graph(("wait", Wf.Timer(TimeSpan.FromSeconds(1))));
+
+        var ex = Assert.Throws<NotSupportedException>(
+            () => _interpreter.ResolveInput(Wf.Session(graph), "wait", null));
+
+        Assert.Equal("Unsupported activity config type 'Timer' for activity 'wait'", ex.Message);
+    }
+}
