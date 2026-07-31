@@ -7,7 +7,7 @@ namespace UnitTests.Aggregates;
 
 public class WorkflowExecutionTests
 {
-    private static readonly Guid Id = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly ExecutionId Id = new(Guid.Parse("11111111-1111-1111-1111-111111111111"));
 
     private static WorkflowExecution Created()
     {
@@ -246,10 +246,10 @@ public class WorkflowExecutionTests
     [Fact]
     public void A_fresh_aggregate_expects_no_stream()
     {
-        Assert.Equal(AggregateRoot.NoStream, new WorkflowExecution().Version);
+        Assert.Equal(AggregateRoot<ExecutionId>.NoStream, new WorkflowExecution().Version);
 
         // Uncommitted events do not advance the version — nothing is on the stream yet.
-        Assert.Equal(AggregateRoot.NoStream, Created().Version);
+        Assert.Equal(AggregateRoot<ExecutionId>.NoStream, Created().Version);
     }
 
     [Fact]

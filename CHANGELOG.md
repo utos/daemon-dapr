@@ -20,6 +20,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An execution is now identified by an `ExecutionId` rather than a raw `Guid`. The id appeared as
+  a bare `Guid` in 64 files — the aggregate, every lifecycle event, the Dapr activity inputs
+  (where an execution's own id and the id its logs are routed under sat side by side as two
+  interchangeable `Guid` parameters), the read model, and the log store — and was re-parsed from a
+  string at each of the three gRPC entry points. `AggregateRoot` and `Entity` became generic in
+  their identifier so the shared kernel does not have to assume one, and the duplicate stream-name
+  formatter in `EventStoreRepository` was folded into `StreamNames`. The gRPC contract is
+  unchanged (an id is still a GUID string on the wire) and so is the database schema: the id
+  keeps its `uniqueidentifier` columns through a single convention-registered value converter, and
+  its JSON converter writes the same bare GUID string a raw `Guid` did, so events already in the
+  stream and Dapr payloads already in flight keep deserializing. A new `EventJsonShapeTests`
+  asserts that shape as text, because the event store logs and drops an event it cannot
+  deserialize rather than failing — a changed shape would have truncated an aggregate's history
+  silently rather than erroring.
+
+- Workflow identity and semantic version are now types rather than static helpers over strings.
+  `WorkflowIdentity` was a static class that could only *format* `[registry/][namespace/]name:version`,
+  and semver was an `IComparer<string>` with its parser hidden in a private method — so a resolved
+  definition was carried around as a `WorkflowReference` whose version and digest were both
+  nullable, with a doc comment asserting the invariant the type did not enforce. Both are now real
+  value objects in `Common.Workflow`, with parsing, comparison and equality, so the definition
+  store keys on the identity itself instead of on a formatted string. Two duplicate encodings of
+  the semver grammar collapse into one (a regex in `WorkflowMetadataValidator` and a hand parser
+  in `SemanticVersionComparer`, in projects that did not reference each other), as do the five
+  copies of the "leave optional reference fields unset rather than empty" rule. `WorkflowReference`
+  remains a separate type for a partial *request*, where an omitted version still means "latest".
+  The gRPC contract, the database schema and the event-stream format are all unchanged.
+
 - The daemon now has its own workflow model instead of using the generated protobuf types as its
   domain model. `Utos.Workflow.V1` / `Utos.Daemon.V1` types previously reached every layer: the
   `WorkflowExecution` aggregate's status *was* the wire enum, `WorkflowExecutionCreatedEvent`
@@ -44,6 +72,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A "workflow definition not found" error for a reference without a version no longer renders a
+  dangling separator. Asking for `send-email` with no version reported `Workflow definition
+  'send-email:' not found`, which reads as a daemon defect rather than as "that workflow isn't
+  loaded"; a reference now renders only the segments it carries.
+- A detached sub-workflow now records its own namespace and registry. Its top-level execution row
+  was built from a reference constructed with just name and version, so `ListExecutions` could not
+  be filtered by namespace or registry for detached runs, and the reference echoed back omitted
+  both.
 - An execution's full lifecycle is now written through the `WorkflowExecution` aggregate, which is
   the only writer to its event stream, and appends are guarded by the stream revision the aggregate
   was loaded at. This fixes three defects. An execution that received a duplicate `Scheduled` event

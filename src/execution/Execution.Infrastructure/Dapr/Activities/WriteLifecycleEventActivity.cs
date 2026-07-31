@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Dapr.Workflow;
 using Execution.Domain.Aggregates;
 using Execution.Domain.Services;
@@ -6,7 +7,7 @@ using Execution.Infrastructure.Persistence;
 namespace Execution.Infrastructure.Dapr.Activities;
 
 public sealed record WriteLifecycleEventInput(
-    Guid ExecutionId,
+    ExecutionId ExecutionId,
     ExecutionLifecycleTransition Transition,
     string? FailureReason);
 

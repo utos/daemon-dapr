@@ -12,8 +12,8 @@ public class ScheduleExecutionHandler(IEventStoreRepository eventStore)
     {
         var workflowExecution = new WorkflowExecution(
             command.Bundle, command.Input, command.StartActivity, command.Env, command.ExecutionId,
-            command.Workflow.Digest);
-        await eventStore.SaveAsync(workflowExecution);
+            command.Digest);
+        await eventStore.SaveAsync<WorkflowExecution, ExecutionId>(workflowExecution);
         return new ScheduleExecutionResult(workflowExecution.Id, workflowExecution.Status);
     }
 }

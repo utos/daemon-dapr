@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Common.Workflow;
 
 namespace Execution.Domain.Services;
@@ -9,7 +10,7 @@ namespace Execution.Domain.Services;
 /// </summary>
 public sealed class ExecutionContext
 {
-    public Guid ExecutionId { get; init; }
+    public ExecutionId ExecutionId { get; init; }
     public WorkflowBundle Bundle { get; init; } = null!;
     public string EntryPoint { get; init; } = null!;
     public Dictionary<string, object> Input { get; init; } = new();

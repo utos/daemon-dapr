@@ -1,11 +1,13 @@
 using Common.Infrastructure.Data;
+using Common.SeedWork;
+using Common.Workflow;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Execution.Infrastructure.ReadModels;
 
 namespace Execution.Infrastructure.Data.Configurations;
 
-public class WorkflowExecutionReadModelConfiguration : BaseConfiguration<WorkflowExecutionReadModel>
+public class WorkflowExecutionReadModelConfiguration : BaseConfiguration<WorkflowExecutionReadModel, ExecutionId>
 {
     public override void Configure(EntityTypeBuilder<WorkflowExecutionReadModel> builder)
     {
@@ -24,22 +26,37 @@ public class WorkflowExecutionReadModelConfiguration : BaseConfiguration<Workflo
 
         builder.HasIndex(e => e.Status); // Index for filtering by status
 
-        // Workflow identification
-        builder.Property(e => e.WorkflowName)
-            .HasMaxLength(200)
-            .IsRequired();
+        // Workflow identification. Owned rather than a JSON blob or a formatted string: the
+        // segments stay first-class columns, so the existing indexes and the ListExecutions
+        // filter keep working. Column names are pinned to what they were before the identity
+        // became a type, so this mapping needs no migration.
+        builder.OwnsOne(e => e.Identity, identity =>
+        {
+            identity.Property(i => i.Name)
+                .HasColumnName("WorkflowName")
+                .HasMaxLength(200)
+                .IsRequired();
 
-        builder.Property(e => e.WorkflowVersion)
-            .HasMaxLength(50)
-            .IsRequired();
+            identity.Property(i => i.Version)
+                .HasColumnName("WorkflowVersion")
+                .HasMaxLength(50)
+                .HasConversion(
+                    version => version.ToString(),
+                    text => SemanticVersion.Parse(text))
+                .IsRequired();
 
-        builder.HasIndex(e => new { e.WorkflowName, e.WorkflowVersion }); // Composite index
+            identity.Property(i => i.Namespace)
+                .HasColumnName("WorkflowNamespace")
+                .HasMaxLength(200);
 
-        builder.Property(e => e.WorkflowNamespace)
-            .HasMaxLength(200);
+            identity.Property(i => i.Registry)
+                .HasColumnName("WorkflowRegistry")
+                .HasMaxLength(200);
 
-        builder.Property(e => e.WorkflowRegistry)
-            .HasMaxLength(200);
+            identity.HasIndex(i => new { i.Name, i.Version }); // Composite index
+        });
+
+        builder.Navigation(e => e.Identity).IsRequired();
 
         builder.Property(e => e.WorkflowDigest)
             .HasMaxLength(100);

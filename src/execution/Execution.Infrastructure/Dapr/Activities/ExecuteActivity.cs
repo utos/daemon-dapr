@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using System.Text.Json.Serialization;
 using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
@@ -30,8 +31,8 @@ public class ExecuteActivity(IEnumerable<IActivityHandler> handlers)
 }
 
 public sealed record ExecuteActivityInput(
-    Guid ExecutionId,
-    Guid LogExecutionId,
+    ExecutionId ExecutionId,
+    ExecutionId LogExecutionId,
     ActivityKind Kind,
     string? Url,
     string? HttpMethod,

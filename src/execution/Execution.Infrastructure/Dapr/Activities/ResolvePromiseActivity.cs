@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using System.Text.Json.Serialization;
 using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
@@ -7,7 +8,7 @@ using Execution.Domain.Services;
 namespace Execution.Infrastructure.Dapr.Activities;
 
 public sealed record ResolvePromiseInput(
-    Guid ExecutionId,
+    ExecutionId ExecutionId,
     string WorkflowKey,
     string ActivityName,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]

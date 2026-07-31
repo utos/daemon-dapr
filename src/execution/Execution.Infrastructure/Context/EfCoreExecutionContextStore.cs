@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Microsoft.EntityFrameworkCore;
 using Execution.Domain.Services;
 using Execution.Infrastructure.Data;
@@ -20,13 +21,13 @@ public class EfCoreExecutionContextStore(WorkflowExecutionDbContext db) : IExecu
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<ExecutionContext> LoadContextAsync(Guid executionId, CancellationToken ct = default)
+    public async Task<ExecutionContext> LoadContextAsync(ExecutionId executionId, CancellationToken ct = default)
     {
         return await db.ExecutionContexts.FindAsync([executionId], ct)
                ?? throw new InvalidOperationException($"Execution context not found for {executionId}");
     }
 
-    public async Task DeleteAllAsync(Guid executionId, CancellationToken ct = default)
+    public async Task DeleteAllAsync(ExecutionId executionId, CancellationToken ct = default)
     {
         var context = await db.ExecutionContexts.FindAsync([executionId], ct);
         if (context != null)

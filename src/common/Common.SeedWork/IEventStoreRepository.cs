@@ -2,15 +2,16 @@ namespace Common.SeedWork;
 
 public interface IEventStoreRepository
 {
-    Task<T> LoadAsync<T>(Guid aggregateId, CancellationToken cancellationToken = default)
-        where T : AggregateRoot, new();
+    Task<T> LoadAsync<T, TId>(TId aggregateId, CancellationToken cancellationToken = default)
+        where T : AggregateRoot<TId>, new() where TId : notnull;
 
-    Task SaveAsync<T>(T aggregate) where T : AggregateRoot, new();
+    Task SaveAsync<T, TId>(T aggregate) where T : AggregateRoot<TId>, new() where TId : notnull;
 
-    Task AppendEventAsync<T>(Guid aggregateId, IDomainEvent @event) where T : AggregateRoot, new();
+    Task AppendEventAsync<T, TId>(TId aggregateId, IDomainEvent @event)
+        where T : AggregateRoot<TId>, new() where TId : notnull;
 
-    Task<bool> ExistsAsync<T>(Guid aggregateId, CancellationToken cancellationToken = default)
-        where T : AggregateRoot, new();
+    Task<bool> ExistsAsync<T, TId>(TId aggregateId, CancellationToken cancellationToken = default)
+        where T : AggregateRoot<TId>, new() where TId : notnull;
 
     Task AppendToStreamAsync(string streamName, IDomainEvent @event);
 
@@ -21,6 +22,7 @@ public interface IEventStoreRepository
     /// </summary>
     Task DeleteStreamAsync(string streamName, CancellationToken cancellationToken = default);
 
-    IAsyncEnumerable<EventWithNumber> SubscribeToStream<T>(Guid aggregateId, long? afterPosition,
-        CancellationToken cancellationToken = default) where T : AggregateRoot, new();
+    IAsyncEnumerable<EventWithNumber> SubscribeToStream<T, TId>(TId aggregateId, long? afterPosition,
+        CancellationToken cancellationToken = default)
+        where T : AggregateRoot<TId>, new() where TId : notnull;
 }

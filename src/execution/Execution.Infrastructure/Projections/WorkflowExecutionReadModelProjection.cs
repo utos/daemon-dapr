@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Common.Infrastructure.Projections;
 using Common.SeedWork;
+using Common.Workflow;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Execution.Domain.Events;
@@ -70,12 +71,9 @@ public class WorkflowExecutionReadModelProjection(
             Id = @event.ExecutionId,
             ParentExecutionId = null,
             Status = ReadModelStatus.Unspecified,
-            WorkflowName = entryWorkflow.Metadata.Name,
-            WorkflowVersion = entryWorkflow.Metadata.Version,
-            // Store empty proto strings as null so "no namespace/registry" is a single
-            // representation for both querying and response mapping.
-            WorkflowNamespace = NullIfEmpty(entryWorkflow.Metadata.Namespace),
-            WorkflowRegistry = NullIfEmpty(entryWorkflow.Metadata.Registry),
+            // WorkflowIdentity normalises absent-vs-empty for namespace and registry, so "no
+            // namespace" has a single representation for both querying and response mapping.
+            Identity = WorkflowIdentity.From(entryWorkflow.Metadata),
             WorkflowDigest = NullIfEmpty(@event.Digest),
             WorkflowDefinitionJson = JsonSerializer.Serialize(@event.Bundle),
             InputJson = @event.Input.Count > 0 ? JsonSerializer.Serialize(@event.Input, JsonOptions) : null,

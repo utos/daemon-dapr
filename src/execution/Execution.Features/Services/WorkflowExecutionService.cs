@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Common.Workflow.Proto;
 using Definition.Domain;
 using Execution.Features.Extensions;
@@ -25,12 +26,13 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
 
         var definition = definitionStore.Resolve(requested)
                          ?? throw new RpcException(new Status(StatusCode.NotFound,
-                             $"Workflow definition '{WorkflowIdentity.Key(requested)}' not found"));
+                             $"Workflow definition '{requested}' not found"));
 
         try
         {
             var command = new ScheduleExecutionCommand(
-                definition.Reference,
+                definition.Identity,
+                definition.Digest,
                 definition.Bundle,
                 request.Input.ToDictionary(),
                 request.StartActivity,
@@ -53,7 +55,7 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
     public override async Task<GetExecutionResponse> GetExecution(
         GetExecutionRequest request, ServerCallContext context)
     {
-        if (!Guid.TryParse(request.ExecutionId, out var executionId))
+        if (!ExecutionId.TryParse(request.ExecutionId, out var executionId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid execution ID format"));
 
         var details = await mediator.Send(
@@ -85,7 +87,7 @@ public class ExecutionGrpcService(IMediator mediator, IWorkflowDefinitionStore d
     public override async Task<DeleteExecutionResponse> DeleteExecution(
         DeleteExecutionRequest request, ServerCallContext context)
     {
-        if (!Guid.TryParse(request.ExecutionId, out var executionId))
+        if (!ExecutionId.TryParse(request.ExecutionId, out var executionId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid execution ID format"));
 
         try

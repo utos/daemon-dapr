@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using System.Text.Json.Serialization;
 using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
@@ -12,11 +13,11 @@ namespace Execution.Infrastructure.Dapr.Activities;
 /// entry in the orchestration history.
 /// </param>
 public sealed record SaveChildContextInput(
-    Guid ParentExecutionId,
+    ExecutionId ParentExecutionId,
     List<ChildContextSpec> Children);
 
 public sealed record ChildContextSpec(
-    Guid ChildExecutionId,
+    ExecutionId ChildExecutionId,
     string WorkflowKey,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? Input);

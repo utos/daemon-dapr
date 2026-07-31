@@ -1,11 +1,15 @@
 namespace Common.SeedWork;
 
-public abstract class AggregateRoot
+/// <summary>
+/// Generic in its identifier so the kernel stays free of any one aggregate's concepts: an
+/// aggregate brings its own id type rather than every aggregate sharing a bare <see cref="Guid"/>.
+/// </summary>
+public abstract class AggregateRoot<TId> where TId : notnull
 {
     /// <summary>Version of an aggregate whose stream does not exist yet.</summary>
     public const long NoStream = -1;
 
-    public Guid Id { get; protected set; }
+    public TId Id { get; protected set; } = default!;
 
     public DateTime CreatedAt { get; protected set; }
 

@@ -1,4 +1,5 @@
 using Common.SeedWork;
+using Common.Workflow;
 
 namespace Execution.Infrastructure.ReadModels;
 
@@ -6,12 +7,12 @@ namespace Execution.Infrastructure.ReadModels;
 /// Read model for workflow executions optimized for querying.
 /// Denormalized view projected from workflow execution events.
 /// </summary>
-public class WorkflowExecutionReadModel : Entity
+public class WorkflowExecutionReadModel : Entity<ExecutionId>
 {
     /// <summary>
     /// Parent execution ID for sub-workflow executions. Null for top-level executions.
     /// </summary>
-    public Guid? ParentExecutionId { get; set; }
+    public ExecutionId? ParentExecutionId { get; set; }
 
     /// <summary>
     /// Current execution status: INITIAL, SCHEDULED, ACTIVE, COMPLETED, FAILED
@@ -19,29 +20,14 @@ public class WorkflowExecutionReadModel : Entity
     public string Status { get; set; } = null!;
 
     /// <summary>
-    /// Workflow name from metadata
+    /// Which workflow ran. Mapped to the same WorkflowName/Version/Namespace/Registry columns
+    /// the segments were stored in separately, so it stays filterable and indexable.
     /// </summary>
-    public string WorkflowName { get; set; } = null!;
+    public WorkflowIdentity Identity { get; set; } = null!;
 
     /// <summary>
-    /// Workflow version from metadata (semantic version)
-    /// </summary>
-    public string WorkflowVersion { get; set; } = null!;
-
-    /// <summary>
-    /// Workflow namespace from metadata. Null when the workflow has none, and for rows
-    /// projected before this field existed.
-    /// </summary>
-    public string? WorkflowNamespace { get; set; }
-
-    /// <summary>
-    /// Workflow registry from metadata. Null when the workflow has none, and for rows
-    /// projected before this field existed.
-    /// </summary>
-    public string? WorkflowRegistry { get; set; }
-
-    /// <summary>
-    /// Content digest of the snapshotted bundle, resolved at schedule time. Null for
+    /// Content digest of the snapshotted bundle, resolved at schedule time. Not part of the
+    /// identity — it pins content, and two digests can share one identity. Null for
     /// sub-workflow rows and for rows projected before this field existed.
     /// </summary>
     public string? WorkflowDigest { get; set; }

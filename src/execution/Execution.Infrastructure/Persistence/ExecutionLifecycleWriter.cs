@@ -19,13 +19,13 @@ public sealed class ExecutionLifecycleWriter(
     private const int MaxAttempts = 3;
 
     public async Task ApplyAsync(
-        Guid executionId,
+        ExecutionId executionId,
         Action<WorkflowExecution> transition,
         CancellationToken cancellationToken = default)
     {
         for (var attempt = 1; ; attempt++)
         {
-            var execution = await eventStore.LoadAsync<WorkflowExecution>(executionId, cancellationToken);
+            var execution = await eventStore.LoadAsync<WorkflowExecution, ExecutionId>(executionId, cancellationToken);
 
             transition(execution);
 
@@ -40,7 +40,7 @@ public sealed class ExecutionLifecycleWriter(
 
             try
             {
-                await eventStore.SaveAsync(execution);
+                await eventStore.SaveAsync<WorkflowExecution, ExecutionId>(execution);
                 return;
             }
             catch (ConcurrencyException) when (attempt < MaxAttempts)

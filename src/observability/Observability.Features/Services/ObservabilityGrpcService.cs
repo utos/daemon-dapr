@@ -19,7 +19,7 @@ public class ObservabilityGrpcService(
     public override async Task WatchExecution(WatchExecutionRequest request,
         IServerStreamWriter<WatchExecutionResponse> responseStream, ServerCallContext context)
     {
-        if (!Guid.TryParse(request.ExecutionId, out var executionId))
+        if (!ExecutionId.TryParse(request.ExecutionId, out var executionId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid execution ID format"));
 
         // 'tail' and 'after' are a oneof since v0.0.10 — the wire format now makes them

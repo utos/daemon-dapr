@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using System.Text.Json.Serialization;
 using Common.Infrastructure.Serialization;
 using Dapr.Workflow;
@@ -37,7 +38,7 @@ public class EvaluateTransitionActivity(
 }
 
 public sealed record EvaluateTransitionInput(
-    Guid ExecutionId,
+    ExecutionId ExecutionId,
     string WorkflowKey,
     string ActivityName,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]

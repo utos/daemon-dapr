@@ -6,11 +6,6 @@ namespace Execution.Domain.Validation;
 
 public class WorkflowMetadataValidator : AbstractValidator<WorkflowMetadata>
 {
-    // Semantic version regex from schema
-    private static readonly Regex SemanticVersionPattern =
-        new(
-            @"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$");
-
     // Workflow name pattern: lowercase, alphanumeric, hyphens allowed
     private static readonly Regex NamePattern = new(@"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$");
 
@@ -27,7 +22,7 @@ public class WorkflowMetadataValidator : AbstractValidator<WorkflowMetadata>
         RuleFor(m => m.Version)
             .NotEmpty()
             .WithMessage("Metadata version cannot be empty")
-            .Must(version => SemanticVersionPattern.IsMatch(version))
+            .Must(version => SemanticVersion.TryParse(version, out _))
             .WithMessage(metadata => GetVersionError(metadata.Version));
 
         RuleFor(m => m.Description)
