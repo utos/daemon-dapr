@@ -23,3 +23,8 @@ jobs:
 
       - name: Build
         run: dotnet build Utos.Daemon.sln --no-restore --configuration Release
+
+      # Unit tests only. The integration suite needs Docker and a Dapr sidecar, so it stays
+      # a local step; these exercise the interpreter and need neither.
+      - name: Unit tests
+        run: dotnet test tests/UnitTests/UnitTests.csproj --no-build --configuration Release
