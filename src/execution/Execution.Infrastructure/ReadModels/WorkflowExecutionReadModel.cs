@@ -29,6 +29,24 @@ public class WorkflowExecutionReadModel : Entity
     public string WorkflowVersion { get; set; } = null!;
 
     /// <summary>
+    /// Workflow namespace from metadata. Null when the workflow has none, and for rows
+    /// projected before this field existed.
+    /// </summary>
+    public string? WorkflowNamespace { get; set; }
+
+    /// <summary>
+    /// Workflow registry from metadata. Null when the workflow has none, and for rows
+    /// projected before this field existed.
+    /// </summary>
+    public string? WorkflowRegistry { get; set; }
+
+    /// <summary>
+    /// Content digest of the snapshotted bundle, resolved at schedule time. Null for
+    /// sub-workflow rows and for rows projected before this field existed.
+    /// </summary>
+    public string? WorkflowDigest { get; set; }
+
+    /// <summary>
     /// When the execution was scheduled for execution
     /// </summary>
     public DateTime? ScheduledAt { get; set; }

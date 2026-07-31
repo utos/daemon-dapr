@@ -35,6 +35,17 @@ public class WorkflowExecutionReadModelConfiguration : BaseConfiguration<Workflo
 
         builder.HasIndex(e => new { e.WorkflowName, e.WorkflowVersion }); // Composite index
 
+        builder.Property(e => e.WorkflowNamespace)
+            .HasMaxLength(200);
+
+        builder.Property(e => e.WorkflowRegistry)
+            .HasMaxLength(200);
+
+        builder.Property(e => e.WorkflowDigest)
+            .HasMaxLength(100);
+
+        builder.HasIndex(e => e.WorkflowDigest); // Digest filter is highly selective
+
         // Timing columns
         builder.Property(e => e.ScheduledAt);
         builder.Property(e => e.StartedAt);

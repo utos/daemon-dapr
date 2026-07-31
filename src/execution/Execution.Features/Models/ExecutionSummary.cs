@@ -12,6 +12,9 @@ public class ExecutionSummary
     public ExecutionStatus Status { get; set; }
     public string WorkflowName { get; set; } = null!;
     public string WorkflowVersion { get; set; } = null!;
+    public string? WorkflowNamespace { get; set; }
+    public string? WorkflowRegistry { get; set; }
+    public string? WorkflowDigest { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? ScheduledAt { get; set; }
     public DateTime? StartedAt { get; set; }

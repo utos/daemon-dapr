@@ -13,6 +13,9 @@ public class ExecutionDetails
     public ExecutionStatus Status { get; set; }
     public string WorkflowName { get; set; } = null!;
     public string WorkflowVersion { get; set; } = null!;
+    public string? WorkflowNamespace { get; set; }
+    public string? WorkflowRegistry { get; set; }
+    public string? WorkflowDigest { get; set; }
     public WorkflowBundle Bundle { get; set; } = null!;
     public Dictionary<string, object> Input { get; set; } = new();
     public Dictionary<string, string> Env { get; set; } = new();

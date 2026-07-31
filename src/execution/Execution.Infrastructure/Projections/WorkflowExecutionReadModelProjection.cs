@@ -64,6 +64,8 @@ public class WorkflowExecutionReadModelProjection(
         }
     }
 
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
+
     private Task HandleCreatedEvent(WorkflowExecutionCreatedEvent @event, CancellationToken _)
     {
         // Resolve the entry workflow from the bundle to get name/version
@@ -76,6 +78,11 @@ public class WorkflowExecutionReadModelProjection(
             Status = ReadModelStatus.Unspecified,
             WorkflowName = entryWorkflow.Metadata.Name,
             WorkflowVersion = entryWorkflow.Metadata.Version,
+            // Store empty proto strings as null so "no namespace/registry" is a single
+            // representation for both querying and response mapping.
+            WorkflowNamespace = NullIfEmpty(entryWorkflow.Metadata.Namespace),
+            WorkflowRegistry = NullIfEmpty(entryWorkflow.Metadata.Registry),
+            WorkflowDigest = NullIfEmpty(@event.Digest),
             WorkflowDefinitionJson = Formatter.Format(@event.Bundle),
             InputJson = @event.Input.Count > 0 ? JsonSerializer.Serialize(@event.Input, JsonOptions) : null,
             EnvJson = @event.Env.Count > 0 ? JsonSerializer.Serialize(@event.Env) : null

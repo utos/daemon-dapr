@@ -139,8 +139,20 @@ namespace Execution.Infrastructure.Migrations
                     b.Property<string>("WorkflowDefinitionJson")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("WorkflowDigest")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("WorkflowName")
                         .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("WorkflowNamespace")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("WorkflowRegistry")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
@@ -156,6 +168,8 @@ namespace Execution.Infrastructure.Migrations
                     b.HasIndex("ParentExecutionId");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("WorkflowDigest");
 
                     b.HasIndex("WorkflowName", "WorkflowVersion");
 
