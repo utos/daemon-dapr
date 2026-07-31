@@ -77,6 +77,9 @@ public static class ExecutionExtensions
         builder.Services.AddScoped<IEventStoreRepository, EventStoreRepository>();
         builder.Services.AddScoped<IWorkflowExecutionRepository, WorkflowExecutionRepository>();
 
+        // The single path by which anything writes an execution's lifecycle
+        builder.Services.AddScoped<ExecutionLifecycleWriter>();
+
         // Add Templating engine
         builder.Services.AddSingleton<ITemplateEngine, ScribanTemplateEngine>();
 

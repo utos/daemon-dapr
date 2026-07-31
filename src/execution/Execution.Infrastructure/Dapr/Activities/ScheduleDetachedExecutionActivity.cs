@@ -42,14 +42,14 @@ public class ScheduleDetachedExecutionActivity(
     public override async Task<object> RunAsync(
         WorkflowActivityContext context, ScheduleDetachedExecutionInput input)
     {
-        // The append path uses StreamState.Any, so a replayed activity would otherwise create a
-        // second execution. The deterministic child id makes this check a reliable idempotency
-        // guard: if the execution already exists, the earlier attempt succeeded.
+        // A replayed activity would otherwise create the execution twice. The deterministic
+        // child id makes this a cheap short-circuit; it is not the guarantee, since the stream
+        // can be created between this check and the append below. The guarantee is that the
+        // create expects StreamState.NoStream, so a lost race raises ConcurrencyException —
+        // caught below and treated the same way.
         if (await eventStore.ExistsAsync<WorkflowExecution>(input.ChildExecutionId))
         {
-            logger.LogInformation(
-                "Detached execution {WorkflowExecutionId} already exists — skipping (likely replay)",
-                input.ChildExecutionId);
+            LogAlreadyStarted(input.ChildExecutionId);
             return new object();
         }
 
@@ -73,14 +73,25 @@ public class ScheduleDetachedExecutionActivity(
             Version = metadata.Version
         };
 
-        // A detached run inherits the parent's ambient env, matching an awaited sub-workflow.
-        await mediator.Send(new ScheduleExecutionCommand(
-            reference,
-            detachedBundle,
-            input.Input ?? new Dictionary<string, object>(),
-            input.SubStartActivity,
-            parentContext.Env,
-            input.ChildExecutionId));
+        try
+        {
+            // A detached run inherits the parent's ambient env, matching an awaited sub-workflow.
+            await mediator.Send(new ScheduleExecutionCommand(
+                reference,
+                detachedBundle,
+                input.Input ?? new Dictionary<string, object>(),
+                input.SubStartActivity,
+                parentContext.Env,
+                input.ChildExecutionId));
+        }
+        catch (ConcurrencyException)
+        {
+            // The stream appeared between the check above and this append, which can only be
+            // an earlier attempt at this same activity: the child id is replay-safe, so no
+            // other caller could have produced it.
+            LogAlreadyStarted(input.ChildExecutionId);
+            return new object();
+        }
 
         logger.LogInformation(
             "Started detached execution {WorkflowExecutionId} for sub-workflow '{SubWorkflowKey}' " +
@@ -88,5 +99,12 @@ public class ScheduleDetachedExecutionActivity(
             input.ChildExecutionId, input.SubWorkflowKey, input.ParentExecutionId);
 
         return new object();
+    }
+
+    private void LogAlreadyStarted(Guid childExecutionId)
+    {
+        logger.LogInformation(
+            "Detached execution {WorkflowExecutionId} already exists — skipping (likely replay)",
+            childExecutionId);
     }
 }

@@ -27,8 +27,15 @@ public class EventStoreRepository(
                 cancellationToken: cancellationToken);
 
             var domainEvents = new List<IDomainEvent>();
+            // Tracked separately from the event count: an event that fails to deserialize is
+            // dropped below but still occupies a revision, and the revision is what the next
+            // append is checked against.
+            var streamRevision = AggregateRoot.NoStream;
+
             await foreach (var resolvedEvent in events.WithCancellation(cancellationToken))
             {
+                streamRevision = resolvedEvent.GetEventNumber();
+
                 var domainEvent = eventSerializer.DeserializeEvent(
                     resolvedEvent.Event.EventType,
                     resolvedEvent.Event.Data.ToArray(),
@@ -36,7 +43,7 @@ public class EventStoreRepository(
                 if (domainEvent is IDomainEvent de) domainEvents.Add(de);
             }
 
-            aggregate.LoadFromHistory(domainEvents);
+            aggregate.LoadFromHistory(domainEvents, streamRevision);
 
             return aggregate;
         }
@@ -72,17 +79,35 @@ public class EventStoreRepository(
             })
             .ToArray();
 
+        // Expected-version rather than Any: the aggregate decided what to append by reading
+        // the stream, so if the stream has moved since, that decision was made against stale
+        // state and must be reconsidered rather than blindly applied.
+        var expectedState = aggregate.Version == AggregateRoot.NoStream
+            ? StreamState.NoStream
+            : StreamState.StreamRevision((ulong)aggregate.Version);
+
         try
         {
             await eventStoreClient.AppendToStreamAsync(
                 streamName,
-                StreamState.Any,
+                expectedState,
                 eventData);
 
+            aggregate.MarkCommitted(eventData.Length);
             aggregate.ClearDomainEvents();
 
             logger.LogDebug("Saved {EventCount} events for aggregate {AggregateId}",
                 eventData.Length, aggregate.Id);
+        }
+        catch (WrongExpectedVersionException ex)
+        {
+            logger.LogDebug(
+                "Concurrent write to aggregate {AggregateId}: expected revision {ExpectedRevision}, stream had moved on",
+                aggregate.Id, aggregate.Version);
+
+            throw new ConcurrencyException(
+                $"Aggregate {aggregate.Id} was modified by another writer since it was loaded " +
+                $"at revision {aggregate.Version}.", ex);
         }
         catch (Exception ex)
         {

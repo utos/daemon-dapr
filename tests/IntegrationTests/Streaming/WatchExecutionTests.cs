@@ -63,6 +63,30 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task WhenExecutionSucceeds_ShouldEmitExactlyOneTerminalFrame()
+    {
+        // The log store appends a terminal item and completes the buffer unconditionally, so a
+        // duplicate terminal event would put a second frame into the replayed history. Nothing
+        // downstream deduplicates; the guarantee is that the aggregate refuses to write a
+        // second terminal event in the first place.
+        var request = new TestWorkflowBuilder("terminal-once-workflow", fixture.MockBaseUrl)
+            .HttpGet("stream-activity", "/success")
+            .Build();
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
+
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = executionId
+        });
+
+        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        var terminals = events.Where(e => e.Status != ExecutionStatus.Unspecified).ToList();
+        Assert.Single(terminals);
+        Assert.Equal(ExecutionStatus.Completed, terminals[0].Status);
+    }
+
+    [Fact]
     public async Task WithNonExistentExecutionId_ShouldThrowNotFound()
     {
         // Arrange
