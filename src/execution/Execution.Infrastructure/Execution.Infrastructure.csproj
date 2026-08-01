@@ -2,6 +2,8 @@
 
     <ItemGroup>
         <ProjectReference Include="../../common/Common.Infrastructure/Common.Infrastructure.csproj"/>
+        <!-- The contract this module announces a finished run on; it does not know who listens. -->
+        <ProjectReference Include="../../common/Common.ExecutionLifecycle/Common.ExecutionLifecycle.csproj"/>
         <ProjectReference Include="../Execution.Domain/Execution.Domain.csproj"/>
         <ProjectReference Include="../Execution.Application/Execution.Application.csproj"/>
     </ItemGroup>

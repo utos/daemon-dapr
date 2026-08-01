@@ -2,8 +2,7 @@ using Common.Workflow.Validation;
 using Definition.Api.Services;
 using Definition.Application.Commands;
 using Definition.Application.Validation;
-using Definition.Domain;
-using Definition.Infrastructure.Store;
+using Definition.Infrastructure.Extensions;
 using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,8 +14,7 @@ public static class DefinitionExtensions
 {
     public static IHostApplicationBuilder AddDefinitionModule(this IHostApplicationBuilder builder)
     {
-        // Singleton: the store is the daemon's process-wide definition registry.
-        builder.Services.AddSingleton<IWorkflowDefinitionStore, InMemoryWorkflowDefinitionStore>();
+        builder.Services.AddDefinitionInfrastructure();
 
         // A bundle arrives here before it ever reaches an execution, so this module runs the
         // document's shape rules itself rather than borrowing another module's registration.

@@ -114,6 +114,7 @@ public static class ExecutionInfrastructureExtensions
 
         // Event handlers (side-effect-producing reactions)
         builder.Services.AddScoped<IEventHandler, WorkflowSchedulingProcessManager>();
+        builder.Services.AddScoped<IEventHandler, ExecutionLifecycleNotifier>();
 
         // Execution limits (loop ceiling, continue-as-new threshold)
         builder.Services.Configure<ExecutionLimitsOptions>(

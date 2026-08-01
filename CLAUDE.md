@@ -40,6 +40,12 @@ Modules: `execution` (the rich one), `definition`, `observability`. Shared kerne
 5. **Cross-cutting application code goes in `Common.Application`,** not in a module. The
    FluentValidation `ValidationBehavior` is registered globally and applies to every module's
    messages, so no module can own it.
+6. **Modules do not reference each other.** Anything two contexts must agree on lives in
+   `common/` as a contract one publishes and the other consumes — `Common.Workflow.Resolution`
+   (definition answers "which bundle does this reference name?") and `Common.ExecutionLifecycle`
+   (execution announces that a run ended) are the whole list. Both edges this replaced compiled
+   fine and read as reasonable, which is why
+   `tests/UnitTests/Architecture/ModuleBoundaryTests.cs` asserts the graph instead of trusting it.
 
 ## Persistence invariants
 
