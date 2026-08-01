@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <!-- The shared kernel only, for ExecutionId. The same line Observability.Domain draws,
+             for the same reason: that a run ended, and under which id, is common vocabulary —
+             the aggregate that decided so, and the events it wrote, are not. -->
+        <ProjectReference Include="../Common.SeedWork/Common.SeedWork.csproj"/>
+    </ItemGroup>
+
+</Project>

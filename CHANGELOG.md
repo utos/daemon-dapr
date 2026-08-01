@@ -20,6 +20,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The three modules no longer reference each other. Two project references survived the earlier
+  layering work and were the last of their kind: `Observability.Infrastructure` pulled in
+  `Execution.Domain` so one handler could pattern-match `WorkflowExecutionCompletedEvent` and
+  `WorkflowExecutionFailedEvent`, and `Execution.Application` pulled in `Definition.Domain` so
+  `ScheduleExecutionHandler` could call `IWorkflowDefinitionStore.Resolve`. Each was a single file
+  reaching for another context's types because they were one `using` away.
+
+  Both relationships are now contracts in `common/`, and both modules on either side reference the
+  contract instead of each other. `Common.Workflow.Resolution` holds `IWorkflowResolver` —
+  "which loaded definition does this reference name?" — which the definition module answers with a
+  small adapter over its store; execution asks the question without knowing a store exists.
+  `Common.ExecutionLifecycle` holds `IExecutionLifecycleListener`, on which execution announces
+  that a run reached a terminal state; observability's stream-completion handler becomes a
+  listener and moves up into `Observability.Application`, because it stopped reading another
+  context's events to find out what happened and is now simply told. The two domain events stay
+  exactly where they are — they are the aggregate's own, and relocating them into shared space
+  would have recreated the leak under a different project name — so nothing about the event
+  stream or its JSON changes.
+
+  Two contracts projects rather than one shared `Common.Contracts`: a single project would have
+  needed both `Common.SeedWork` and `Common.Workflow`, leaking the workflow *document* model into
+  observability, which has no business knowing what a workflow document is. Rejected alternatives
+  worth recording — an adapter in `API.Main`, which cuts the reference but puts unowned, untestable
+  cross-context translation in the composition root; and a port in `Execution.Application`
+  implemented by `Definition.Infrastructure`, which reverses the edge rather than removing it, and
+  points the module that owns definitions at one of its consumers.
+
+  **The coupling moves from the compiler to the container rather than disappearing.**
+  `ScheduleExecution` still fails if `AddDefinitionModule` was never called; the error now names
+  `IWorkflowResolver`. What is gained is that the dependency is a contract with a name and a
+  doc comment instead of a reach into another context's internals, that the modules compile
+  independently, and that a test can defend it. `ModuleBoundaryTests` reads the project files —
+  not compiled metadata, which drops references nothing uses — and fails on any module-to-module
+  edge. `Definition.Infrastructure` also gains the `AddDefinitionInfrastructure` extension the
+  other two modules already had; its store was registered inline in `Definition.Api`, the one
+  place the layering rule was not being followed.
+
+  The gRPC contract, the database schema and the event-stream format are all unchanged.
+
 - Workflow-document validation moved out of the execution module into a new shared-kernel project,
   `Common.Workflow.Validation`. `WorkflowBundleValidator` and the validators below it lived in
   `Execution.Domain`, and the only registration of `IValidator<WorkflowBundle>` was in

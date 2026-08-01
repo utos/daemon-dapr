@@ -9,6 +9,8 @@
     <ItemGroup>
         <ProjectReference Include="../Observability.Domain/Observability.Domain.csproj"/>
         <ProjectReference Include="../../common/Common.SeedWork/Common.SeedWork.csproj"/>
+        <!-- How this module learns a run ended, without knowing the module that ran it. -->
+        <ProjectReference Include="../../common/Common.ExecutionLifecycle/Common.ExecutionLifecycle.csproj"/>
     </ItemGroup>
 
 </Project>
