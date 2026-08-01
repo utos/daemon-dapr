@@ -1,3 +1,4 @@
+using Common.Constants;
 using Common.Infrastructure.EventHandling;
 using Common.Infrastructure.EventStore;
 using Common.Infrastructure.Extensions;
@@ -17,7 +18,7 @@ public class WorkflowExecutionEventProcessor(
     ILogger<WorkflowExecutionEventProcessor> logger)
     : BackgroundService
 {
-    private const string GroupName = "workflow-event-processor";
+    private const string GroupName = SubscriptionName.WorkflowEventProcessor;
 
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {

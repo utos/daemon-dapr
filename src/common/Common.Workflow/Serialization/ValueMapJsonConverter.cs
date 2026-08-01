@@ -39,7 +39,7 @@ public sealed class ValueMapJsonConverter : JsonConverter<ValueMap>
         return reader.TokenType switch
         {
             JsonTokenType.String => reader.GetString(),
-            JsonTokenType.Number => ReadNumber(ref reader),
+            JsonTokenType.Number => NumberNarrowing.Read(ref reader),
             JsonTokenType.True => true,
             JsonTokenType.False => false,
             JsonTokenType.Null => null,
@@ -49,17 +49,6 @@ public sealed class ValueMapJsonConverter : JsonConverter<ValueMap>
             JsonTokenType.StartArray => ReadArray(ref reader),
             _ => throw new JsonException($"Unexpected token type: {reader.TokenType}")
         };
-    }
-
-    private static object ReadNumber(ref Utf8JsonReader reader)
-    {
-        if (reader.TryGetInt32(out var intValue))
-            return intValue;
-
-        if (reader.TryGetInt64(out var longValue))
-            return longValue;
-
-        return reader.GetDouble();
     }
 
     private static Dictionary<string, object?> ReadObject(ref Utf8JsonReader reader)

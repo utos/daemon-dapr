@@ -63,7 +63,7 @@ public class WatchExecutionHandler(
             terminal.Outcome == ExecutionOutcome.Failed
                 ? ExecutionFrameLevel.Error
                 : ExecutionFrameLevel.Info,
-            "system",
+            FrameSource.System,
             string.Empty,
             terminal.Outcome == ExecutionOutcome.Failed
                 ? "Execution failed"

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Common.Workflow;
+using Common.Workflow.Serialization;
 using Execution.Domain.Aggregates;
 using Execution.Application.Models;
 using Execution.Infrastructure.ReadModels;
@@ -51,7 +52,10 @@ public static class ReadModelToDtoExtensions
         if (!string.IsNullOrEmpty(readModel.InputJson))
             try
             {
-                input = JsonSerializer.Deserialize<Dictionary<string, object>>(readModel.InputJson) ??
+                // With the shared options, not none: read back without them and every value is a
+                // JsonElement, which is why the proto mapper needed a JsonElement branch at all.
+                input = JsonSerializer.Deserialize<Dictionary<string, object>>(
+                            readModel.InputJson, WorkflowJson.Options) ??
                         new Dictionary<string, object>();
             }
             catch (JsonException ex)

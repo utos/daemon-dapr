@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using Common.Infrastructure.Serialization;
+using Common.Workflow.Serialization;
 using Common.SeedWork;
 using Dapr.Workflow;
 using Mediator;

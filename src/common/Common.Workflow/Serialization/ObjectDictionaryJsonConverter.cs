@@ -1,15 +1,31 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Common.Infrastructure.Serialization;
+namespace Common.Workflow.Serialization;
 
-public class ObjectDictionaryJsonConverter : JsonConverter<object>
+/// <summary>
+/// Reads an <c>object</c>-typed value as a real CLR type rather than a <see cref="JsonElement"/>,
+/// which template expressions cannot do arithmetic, comparisons or boolean tests on.
+/// </summary>
+/// <remarks>
+/// Nested objects become <c>Dictionary&lt;string, object?&gt;</c>, deliberately not
+/// <see cref="ValueMap"/>: these are run values that reach a template scope directly, and Scriban
+/// resolves members on something that implements a dictionary interface but falls back to
+/// reflection on anything else — a ValueMap here would make <c>{{ input.user.name }}</c> stop
+/// resolving. <see cref="ValueMapJsonConverter"/> nests as a ValueMap for the opposite reason: an
+/// authored document is flattened by the renderer before it can reach a scope.
+/// </remarks>
+public sealed class ObjectDictionaryJsonConverter : JsonConverter<object>
 {
     public override object? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         return ReadValue(ref reader);
     }
 
+    /// <summary>
+    /// Identical to what System.Text.Json does for an <c>object</c> by default — both dispatch on
+    /// the runtime type. Only the read path needed changing.
+    /// </summary>
     public override void Write(Utf8JsonWriter writer, object value, JsonSerializerOptions options)
     {
         JsonSerializer.Serialize(writer, value, value.GetType(), options);
@@ -20,35 +36,14 @@ public class ObjectDictionaryJsonConverter : JsonConverter<object>
         return reader.TokenType switch
         {
             JsonTokenType.String => reader.GetString(),
-
-            JsonTokenType.Number => ReadNumber(ref reader),
-
+            JsonTokenType.Number => NumberNarrowing.Read(ref reader),
             JsonTokenType.True => true,
-
             JsonTokenType.False => false,
-
             JsonTokenType.Null => null,
-
             JsonTokenType.StartObject => ReadObject(ref reader),
-
             JsonTokenType.StartArray => ReadArray(ref reader),
-
             _ => throw new JsonException($"Unexpected token type: {reader.TokenType}")
         };
-    }
-
-    private static object ReadNumber(ref Utf8JsonReader reader)
-    {
-        // Try int first (most common)
-        if (reader.TryGetInt32(out var intValue))
-            return intValue;
-
-        // Try long
-        if (reader.TryGetInt64(out var longValue))
-            return longValue;
-
-        // Fallback to double for decimals
-        return reader.GetDouble();
     }
 
     private static Dictionary<string, object?> ReadObject(ref Utf8JsonReader reader)
@@ -66,9 +61,7 @@ public class ObjectDictionaryJsonConverter : JsonConverter<object>
             var propertyName = reader.GetString()!;
 
             reader.Read();
-            var value = ReadValue(ref reader);
-
-            dictionary[propertyName] = value;
+            dictionary[propertyName] = ReadValue(ref reader);
         }
 
         throw new JsonException("Unexpected end of JSON while reading object");
@@ -83,8 +76,7 @@ public class ObjectDictionaryJsonConverter : JsonConverter<object>
             if (reader.TokenType == JsonTokenType.EndArray)
                 return list;
 
-            var value = ReadValue(ref reader);
-            list.Add(value);
+            list.Add(ReadValue(ref reader));
         }
 
         throw new JsonException("Unexpected end of JSON while reading array");

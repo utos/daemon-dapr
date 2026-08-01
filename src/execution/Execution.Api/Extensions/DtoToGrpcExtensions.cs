@@ -1,6 +1,5 @@
 using Google.Protobuf.WellKnownTypes;
-using System.Text.Json;
-using Common.Workflow;
+using Common.Constants;
 using Common.Workflow.Proto;
 using Execution.Application.Models;
 using DomainExecutionStatus = Execution.Domain.Aggregates.ExecutionStatus;
@@ -25,12 +24,6 @@ namespace Execution.Api.Extensions;
 /// </summary>
 public static class DtoToGrpcExtensions
 {
-    /// <summary>
-    /// Coarse code carried on <see cref="GrpcWorkflowError"/> until the execution pipeline
-    /// records structured failure causes of its own.
-    /// </summary>
-    private const string ExecutionFailedCode = "EXECUTION_FAILED";
-
     /// <summary>
     /// Maps the daemon's own lifecycle state onto the wire enum. The two are deliberately
     /// separate types: the domain one is durable aggregate state and must not shift because a
@@ -70,7 +63,7 @@ public static class DtoToGrpcExtensions
         if (!string.IsNullOrEmpty(dto.ErrorMessage))
             grpc.Error = new GrpcWorkflowError
             {
-                Code = ExecutionFailedCode,
+                Code = WorkflowErrorCode.ExecutionFailed,
                 Message = dto.ErrorMessage
             };
 
@@ -103,7 +96,7 @@ public static class DtoToGrpcExtensions
         if (!string.IsNullOrEmpty(dto.ErrorMessage))
             summary.Error = new GrpcWorkflowError
             {
-                Code = ExecutionFailedCode,
+                Code = WorkflowErrorCode.ExecutionFailed,
                 Message = dto.ErrorMessage
             };
 
@@ -123,69 +116,11 @@ public static class DtoToGrpcExtensions
     }
 
     /// <summary>
-    /// Converts Dictionary to gRPC ExecutionPayload (protobuf Struct)
+    /// Converts Dictionary to gRPC ExecutionPayload. The mapping itself lives in
+    /// <see cref="ValueMapping"/>, beside the one for authored document values — a local copy is
+    /// how the two ended up disagreeing about numbers.
     /// </summary>
-    public static GrpcExecutionPayload? ToGrpc(this Dictionary<string, object> dictionary)
-    {
-        if (dictionary.Count == 0)
-            return null;
+    public static GrpcExecutionPayload? ToGrpc(this Dictionary<string, object> dictionary) =>
+        dictionary.ToProto();
 
-        var grpc = new GrpcExecutionPayload();
-        foreach (var (key, value) in dictionary) grpc.Data.Add(key, ConvertToProtobufValue(value));
-
-        return grpc;
-    }
-
-    /// <summary>
-    /// Helper to convert C# object to protobuf Value.
-    /// Handles native types, JsonElement (from System.Text.Json deserialization),
-    /// nested dictionaries, and lists.
-    /// </summary>
-    private static Value ConvertToProtobufValue(object? value)
-    {
-        if (value == null)
-            return Value.ForNull();
-
-        // Handle JsonElement (when Dapr/System.Text.Json deserializes)
-        if (value is JsonElement jsonElement)
-            return jsonElement.ValueKind switch
-            {
-                JsonValueKind.Null => Value.ForNull(),
-                JsonValueKind.True => Value.ForBool(true),
-                JsonValueKind.False => Value.ForBool(false),
-                JsonValueKind.Number => Value.ForNumber(jsonElement.GetDouble()),
-                JsonValueKind.String => Value.ForString(jsonElement.GetString() ?? ""),
-                JsonValueKind.Array => Value.ForList(jsonElement.EnumerateArray()
-                    .Select(e => ConvertToProtobufValue(e))
-                    .ToArray()),
-                JsonValueKind.Object => Value.ForStruct(new Struct
-                {
-                    Fields =
-                    {
-                        jsonElement.EnumerateObject()
-                            .ToDictionary(p => p.Name, p => ConvertToProtobufValue(p.Value))
-                    }
-                }),
-                _ => Value.ForNull()
-            };
-
-        // Handle native C# types
-        return value switch
-        {
-            string s => Value.ForString(s),
-            bool b => Value.ForBool(b),
-            int i => Value.ForNumber(i),
-            long l => Value.ForNumber(l),
-            double d => Value.ForNumber(d),
-            float f => Value.ForNumber(f),
-            decimal dec => Value.ForNumber((double)dec),
-            ValueMap map => Value.ForStruct(map.ToProto()),
-            IDictionary<string, object?> dict => Value.ForStruct(new Struct
-            {
-                Fields = { dict.ToDictionary(kvp => kvp.Key, kvp => ConvertToProtobufValue(kvp.Value)) }
-            }),
-            IEnumerable<object?> list => Value.ForList(list.Select(ConvertToProtobufValue).ToArray()),
-            _ => Value.ForString(value.ToString() ?? "")
-        };
-    }
 }

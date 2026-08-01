@@ -7,6 +7,7 @@
     <ItemGroup>
         <ProjectReference Include="../Execution.Application/Execution.Application.csproj"/>
         <ProjectReference Include="../Execution.Infrastructure/Execution.Infrastructure.csproj"/>
+        <ProjectReference Include="../../common/Common.Constants/Common.Constants.csproj"/>
         <ProjectReference Include="../../common/Common.Workflow.Proto/Common.Workflow.Proto.csproj"/>
         <ProjectReference Include="../../common/Common.Workflow.Validation/Common.Workflow.Validation.csproj"/>
     </ItemGroup>

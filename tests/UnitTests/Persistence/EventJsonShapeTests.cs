@@ -64,11 +64,8 @@ public class EventJsonShapeTests
             Serialize(new WorkflowExecutionFailedEvent(Id, "HTTP 500", At)));
     }
 
-    [Fact]
-    public void Created_keeps_its_shape()
-    {
-        var bundle = new WorkflowBundle(
-            "send-email:1.0.0",
+    private static WorkflowBundle EmptyBundle() =>
+        new("send-email:1.0.0",
             new Dictionary<string, Workflow>
             {
                 ["send-email:1.0.0"] = new(
@@ -77,6 +74,11 @@ public class EventJsonShapeTests
                     new WorkflowMetadata("send-email", "1.0.0"),
                     WorkflowSpec.Empty)
             });
+
+    [Fact]
+    public void Created_keeps_its_shape()
+    {
+        var bundle = EmptyBundle();
 
         var created = new WorkflowExecutionCreatedEvent(
             Id, bundle, new Dictionary<string, object>(), "start", At, null, "sha256:abc");
@@ -93,6 +95,40 @@ public class EventJsonShapeTests
             "\"StartActivity\":\"start\",\"DateOccurred\":\"2026-07-31T12:00:00Z\"," +
             "\"AmbientEnv\":null,\"Digest\":\"sha256:abc\"}",
             json);
+    }
+
+    /// <summary>
+    /// The run input, which <see cref="Created_keeps_its_shape"/> leaves unpinned because it
+    /// asserts an empty dictionary. Every leaf type a client can send appears here, because this
+    /// is the segment a change of converter would alter — and altering it would not fail, it
+    /// would drop the event on the next read and rehydrate the aggregate with a hole.
+    ///
+    /// Note "whole":5 — a double whose value is whole writes without a decimal point, which is
+    /// why a "5.0 stays a double" guarantee cannot survive a round trip through the event store.
+    /// </summary>
+    [Fact]
+    public void Created_pins_the_shape_of_its_input_values()
+    {
+        var input = new Dictionary<string, object>
+        {
+            ["n"] = 1,
+            ["big"] = 9007199254740993L,
+            ["ratio"] = 2.5,
+            ["whole"] = 5.0,
+            ["s"] = "x",
+            ["b"] = true,
+            ["nested"] = new Dictionary<string, object?> { ["k"] = 1 },
+            ["list"] = new List<object?> { 1, "two", null }
+        };
+
+        var created = new WorkflowExecutionCreatedEvent(
+            Id, EmptyBundle(), input, "start", At, null, null);
+
+        Assert.Contains(
+            """
+            "Input":{"n":1,"big":9007199254740993,"ratio":2.5,"whole":5,"s":"x","b":true,"nested":{"k":1},"list":[1,"two",null]}
+            """,
+            Serialize(created));
     }
 
     /// <summary>

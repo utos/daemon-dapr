@@ -13,8 +13,6 @@ public sealed class ExecutionLogProvider(IExecutionLogStore store) : ILoggerProv
 
 internal sealed class ExecutionLogger(IExecutionLogStore store, string category) : ILogger
 {
-    private const string SystemSource = "system";
-
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
     public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
 
@@ -56,7 +54,7 @@ internal sealed class ExecutionLogger(IExecutionLogStore store, string category)
             DateTime.UtcNow,
             logLevel,
             formatter(state, exception),
-            source ?? SystemSource,
+            source ?? FrameSource.System,
             category));
     }
 }

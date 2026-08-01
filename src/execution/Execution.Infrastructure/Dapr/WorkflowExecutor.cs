@@ -1,6 +1,6 @@
 using Common.SeedWork;
 using System.Text.Json.Serialization;
-using Common.Infrastructure.Serialization;
+using Common.Workflow.Serialization;
 using Dapr.Workflow;
 using Execution.Domain.Aggregates;
 using Execution.Domain.Interpreter;

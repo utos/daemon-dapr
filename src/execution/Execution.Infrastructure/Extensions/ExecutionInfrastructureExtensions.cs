@@ -2,7 +2,7 @@ using Common.Infrastructure.Data;
 using Common.Infrastructure.EventHandling;
 using Common.Infrastructure.EventStore;
 using Common.Infrastructure.Projections;
-using Common.Infrastructure.Serialization;
+using Common.Workflow.Serialization;
 using Common.SeedWork;
 using Dapr.Workflow;
 using Microsoft.AspNetCore.Builder;
