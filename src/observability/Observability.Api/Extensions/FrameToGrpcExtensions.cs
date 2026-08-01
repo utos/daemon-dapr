@@ -1,3 +1,4 @@
+using Common.Constants;
 using Google.Protobuf.WellKnownTypes;
 using Observability.Application.Models;
 using Observability.Domain;
@@ -9,13 +10,6 @@ namespace Observability.Api.Extensions;
 
 public static class FrameToGrpcExtensions
 {
-    /// <summary>
-    /// Coarse failure code carried on the streamed <see cref="GrpcWorkflowError"/>. Mirrors the
-    /// query-side constant in <c>DtoToGrpcExtensions.ExecutionFailedCode</c> until the execution
-    /// pipeline records structured failure causes of its own.
-    /// </summary>
-    private const string ExecutionFailedCode = "EXECUTION_FAILED";
-
     public static WatchExecutionResponse ToGrpc(this ExecutionFrame frame)
     {
         var response = new WatchExecutionResponse
@@ -36,7 +30,7 @@ public static class FrameToGrpcExtensions
         if (failed)
             response.Error = new GrpcWorkflowError
             {
-                Code = ExecutionFailedCode,
+                Code = WorkflowErrorCode.ExecutionFailed,
                 Message = frame.FailureReason ?? string.Empty
             };
 

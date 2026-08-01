@@ -1,12 +1,18 @@
 using System.Text.Json.Serialization;
 using Common.SeedWork;
 using Common.Workflow;
+using Common.Workflow.Serialization;
 
 namespace Execution.Domain.Events;
 
 public record WorkflowExecutionCreatedEvent(
     ExecutionId ExecutionId,
     WorkflowBundle Bundle,
+    // Annotated rather than left to EventSerializer's options, which are deliberately the
+    // defaults: without this the values rehydrate as JsonElement, and every consumer downstream —
+    // the projection, the execution context, the gRPC egress — has to know that. The converter
+    // writes exactly what the default writer wrote, which EventJsonShapeTests pins.
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object> Input,
     string StartActivity,
     DateTime DateOccurred,

@@ -79,6 +79,12 @@ public class HttpActivityHandler(
 
         try
         {
+            // Deliberately without WorkflowJson.Options, which is the one place in the daemon
+            // that is true. A JsonElement re-serializes its raw token text, so an API's 10.0
+            // crosses the Dapr boundary as "10.0" and narrows to a double on the far side.
+            // Narrowing here instead would write it as "10" and hand the next activity an int,
+            // changing division on live workflows. It collapses to int on the hop after that
+            // either way — removing that limit needs declared response types, not a better guess.
             return JsonSerializer.Deserialize<object>(responseContent);
         }
         catch (JsonException ex)

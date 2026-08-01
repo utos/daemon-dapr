@@ -20,6 +20,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- One implementation of each rule for deciding what CLR type a number is. A number's type was
+  being decided at seven independent points, by four implementations, three `JsonSerializerOptions`
+  instances and three deserializes that passed no options at all — and the implementations did not
+  agree. The type matters: Scriban dispatches arithmetic and comparisons on the runtime type, so
+  this was behaviour, not housekeeping.
+
+  The proto edge had two converters for what is structurally the same thing — a
+  `map<string, google.protobuf.Value>` — because a document arrives as a `Struct` and a run's
+  input as an `ExecutionPayload`, and nobody bridged them. The document one narrowed whole numbers
+  to `int`/`long`; the run-input one handed the template engine a raw `double`. Both now live in
+  `ValueMapping`. The visible symptom was an id of 10^16 rendering into a URL as `1E+16` — .NET's
+  shortest round-trip format for a double — so the daemon called an endpoint that did not exist.
+  It had gone unnoticed because the persistence round trip narrowed the value back before any
+  template saw it, and because a whole double renders identically to an int at small magnitudes.
+
+  `NumberNarrowing` now holds both rules, and they stay deliberately **two**. Proto carries every
+  number as a bare double, so the value is the only evidence there is and `5.0` becomes `int 5`.
+  JSON still has the author's token, so `5.0` stays a `double`. Merging them would mean either
+  giving up narrowing on the proto side or turning every whole-valued decimal an API returns into
+  an integer, silently changing division on live workflows. Two fixes came with the consolidation:
+  `long.MaxValue` is not representable as a double — it rounds up to 2^63 — so the old range check
+  admitted 2^63 and the cast saturated back down, silently changing the number; and a non-finite
+  number is now rejected at the edge, where it previously flowed inward until `System.Text.Json`
+  refused to write it inside the read-model projection, parking the event and leaving a run that
+  had been acknowledged to the client but was never scheduled and never listed.
+
+  `ObjectDictionaryJsonConverter` and `StringObjectDictionaryJsonConverter` move to
+  `Common.Workflow.Serialization` beside `ValueMapJsonConverter`, since they state a rule about
+  workflow values rather than about infrastructure — which is also what lets
+  `WorkflowExecutionCreatedEvent.Input` name one, so run input stops rehydrating from the event
+  store as `JsonElement`. The read model stops deserializing without options for the same reason.
+  The serialized form of every event is unchanged, which `EventJsonShapeTests` now pins with a
+  populated `Input` rather than an empty one.
+
+  Deliberately left alone: `HttpActivityHandler` still parses a response body without converters,
+  so it produces `JsonElement`. That is load-bearing — a `JsonElement` re-serializes its raw token
+  text, which is the only reason `10.0` from an API survives as a `double` across the Dapr hop.
+  Narrowing it at parse time would collapse it to `int` one hop earlier. It survives exactly one
+  hop either way; making that limit go away needs declared types, not a better guess.
+
+  `EXECUTION_FAILED` was defined twice, in `DtoToGrpcExtensions` and `FrameToGrpcExtensions`,
+  whose comment admitted the mirror; it is now `Common.Constants.WorkflowErrorCode.ExecutionFailed`.
+  The frame source `"system"` was a named constant in one project and a bare literal in another,
+  and the watch stream filters on string equality, so a drift would have returned nothing rather
+  than failing — it is now `Observability.Domain.FrameSource.System`.
+  `SubscriptionName.WorkflowEventProcessor` existed but was dead, the value hardcoded in the event
+  processor; it is now used.
+
+  No behaviour changes beyond the two bug fixes named above. The gRPC contract, the database
+  schema and the event-stream format are all unchanged.
+
 - The three modules no longer reference each other. Two project references survived the earlier
   layering work and were the last of their kind: `Observability.Infrastructure` pulled in
   `Execution.Domain` so one handler could pattern-match `WorkflowExecutionCompletedEvent` and

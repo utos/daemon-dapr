@@ -108,6 +108,33 @@ public class TemplateTypingTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task RunInput_ReachesATemplateAsAnInteger_NotADouble()
+    {
+        // The run-input door used to hand the template engine a raw double while the document
+        // door narrowed to int. It was masked end to end, because a double whose value is whole
+        // renders identically ("0", not "0.0") and the persistence round trip narrowed it back
+        // before any template saw it — so no existing test could see the difference.
+        //
+        // A large id is where it becomes visible: .NET renders a double with the shortest
+        // round-trip format, so 10^16 went into the URL as "1E+16" and the daemon called an
+        // endpoint that does not exist.
+        const string path = "/typing-large-id/10000000000000000";
+        StubJson(path, """{"ok": true}""");
+
+        var request = new TestWorkflowBuilder("typing-large-id-workflow", fixture.MockBaseUrl)
+            .HttpGet("fetch", "/typing-large-id/{{ input.id }}")
+            .WithInput("id", 10_000_000_000_000_000L)
+            .Build("fetch");
+
+        var response = await fixture.ScheduleAsync(request);
+        await WatchToCompletion(response.Id);
+
+        await AssertCompleted(response.Id);
+        Assert.NotEmpty(fixture.WireMockServer.LogEntries
+            .Where(e => e.RequestMessage.Path == path));
+    }
+
+    [Fact]
     public async Task WholeExpression_KeepsBoolean_SoItDrivesAConditionDirectly()
     {
         // Arrange - a boolean forwarded through a transform must still be a boolean, not

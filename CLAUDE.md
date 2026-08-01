@@ -63,6 +63,16 @@ These are easy to break silently — see the notes in `Common.Workflow` and the 
 - **Bundles are persisted in three places** — `WorkflowExecutionCreatedEvent.Bundle`,
   `ExecutionContexts.BundleJson`, and `WorkflowExecutions.WorkflowDefinitionJson`. All three
   change together.
+- **A number's CLR type is decided in `NumberNarrowing`, and nowhere else.** Scriban dispatches
+  arithmetic and comparisons on the runtime type, so this is behaviour. There are deliberately
+  *two* rules: proto carries a bare double and must narrow by value (`5.0` → `int 5`), while JSON
+  still has the author's token and keeps `5.0` a `double`. Do not "unify" them — collapsing to the
+  proto rule turns every whole-valued decimal an API returns into an integer and changes division.
+- **Nothing may deserialize workflow values without `WorkflowJson.Options`.** Without it the
+  values come back as `JsonElement`, which template expressions cannot do arithmetic on, and the
+  failure is silent until a template runs. The one deliberate exception is
+  `HttpActivityHandler.ParseJsonResponse`: a `JsonElement` re-serializes its raw token text, which
+  is the only thing preserving `10.0` as a double across the Dapr hop.
 
 ## Tests
 

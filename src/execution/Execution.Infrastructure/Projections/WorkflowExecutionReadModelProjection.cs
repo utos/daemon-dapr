@@ -2,6 +2,7 @@ using System.Text.Json;
 using Common.Infrastructure.Projections;
 using Common.SeedWork;
 using Common.Workflow;
+using Common.Workflow.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Execution.Domain.Events;
@@ -17,11 +18,10 @@ public class WorkflowExecutionReadModelProjection(
 {
     // Persisted as the domain model's own JSON, matching what ReadModelToDtoExtensions reads back.
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = false,
-        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.Strict
-    };
+    // Shared with everything else that reads or writes untyped run data. The local copy this
+    // replaces set only WriteIndented = false and NumberHandling.Strict — both already the
+    // defaults — so it configured nothing while omitting the converter it needed.
+    private static JsonSerializerOptions JsonOptions => WorkflowJson.Options;
 
     public override bool CanHandle(Type eventType)
     {

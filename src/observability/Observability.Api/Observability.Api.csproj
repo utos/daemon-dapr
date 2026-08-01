@@ -5,6 +5,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="../../common/Common.Constants/Common.Constants.csproj"/>
         <ProjectReference Include="../Observability.Application/Observability.Application.csproj"/>
         <ProjectReference Include="../Observability.Infrastructure/Observability.Infrastructure.csproj"/>
     </ItemGroup>

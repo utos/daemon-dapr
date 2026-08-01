@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Common.Infrastructure.Serialization;
+using Common.Workflow.Serialization;
 using Common.SeedWork;
 using Common.Workflow;
 using Microsoft.EntityFrameworkCore;
@@ -13,10 +13,10 @@ namespace Execution.Infrastructure.Data;
 public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbContext> options) : DbContext(options)
 {
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        Converters = { new ObjectDictionaryJsonConverter() }
-    };
+    // The shared instance, not a local copy: three of these existed and two paths passed none
+    // at all, which is how the same value came back a real CLR type down one route and a
+    // JsonElement down another.
+    private static JsonSerializerOptions JsonOptions => WorkflowJson.Options;
 
     public DbSet<WorkflowExecutionReadModel> WorkflowExecutions => Set<WorkflowExecutionReadModel>();
     public DbSet<ExecutionContext> ExecutionContexts => Set<ExecutionContext>();
