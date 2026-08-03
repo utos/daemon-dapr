@@ -31,7 +31,7 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.17.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
-    <PackageVersion Include="Scriban" Version="7.2.5" />
+    <PackageVersion Include="Scriban" Version="7.2.6" />
     <PackageVersion Include="Utos.Daemon.Client" Version="0.0.10.1" />
     <PackageVersion Include="Utos.Daemon.Server" Version="0.0.10.1" />
     <PackageVersion Include="Utos.Workflow" Version="0.0.10.1" />
