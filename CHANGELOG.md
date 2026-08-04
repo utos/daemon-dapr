@@ -191,6 +191,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across the upgrade cannot resume either. Drop the KurrentDB volume and the SQL database before
   running this version. There is no upcaster; the daemon is pre-1.0.
 
+  Events are also no longer stored under the CLR type's assembly-qualified name but under the name
+  each one declares, so even an untouched stream would not resolve. Same instruction — drop the
+  volume — and the persistent subscription group is renamed to `workflow-event-processor-v2` so a
+  group left behind with the old event-type filter cannot linger and silently match nothing.
+
 - **The document's shape rules now come from the spec, not from this repository.**
   `Common.Workflow.Validation` is deleted; `DefinitionGrpcService` applies
   `Utos.Workflow.Validation` to the bundle in its **wire form**, next to where the content digest
@@ -221,6 +226,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TestWorkflowBuilder` keys bundles by canonical identity rather than by name, and resolves
   sub-workflow references to identities the way the CLI resolves a dependency alias. It had always
   produced bundles that `bundle.proto` called invalid; nothing enforced it until now.
+- An event's identity on the wire is now something it declares, not a byproduct of where its class
+  happens to live. The stored event type was the CLR type's `AssemblyQualifiedName` and reading one
+  back was `Type.GetType` on that string, so renaming an event, moving its namespace, or moving it
+  to another assembly made every event written before the move unresolvable.
+
+  Unresolvable meant *dropped*, which is the part that mattered. `EventSerializer` caught every
+  exception, logged, and returned null, and both readers took null as "skip":
+  `EventStoreRepository.LoadAsync` dropped the event while still advancing the stream revision, so
+  the aggregate rehydrated with a hole in its history at the correct revision and the next append
+  passed its expected-version check and made the hole permanent — a lost `Created` leaves the id
+  and creation time at their defaults, a lost `Failed` leaves a run reading as Active forever. The
+  event processor was worse: it returned, and the caller then acked, so an unreadable event was
+  acknowledged and dropped from the projection pipeline rather than parked. Neither surfaced
+  anywhere but a log line. The last five refactors were safe on this only because none of them
+  happened to move an event type, and nothing would have caught it if they had — `EventJsonShapeTests`
+  pins each event's JSON body, but said nothing about the name it is stored under.
+
+  Each event now declares that name with `[EventType("utos.execution.created")]`, and
+  `EventTypeRegistry` resolves both directions from a startup scan of the module's assembly — an
+  `IDomainEvent` without the attribute fails construction rather than being written under a name no
+  reader knows. `EventTypeRegistryTests` pins the five names as literal strings, so a rename is a
+  failing build instead of a lost stream.
+
+  Deserialization throws instead of returning null. A load that throws fails the command that asked
+  for it, and a subscription that throws parks the event where it can be inspected and replayed;
+  both are recoverable, and neither is silent. The event processor's early return is simply
+  deleted — the `Nack`/`Park` it needed was already there, one `catch` up.
+
+  Events also carry a schema version in their KurrentDB metadata (`{"v":n}`), which was previously
+  written as a literal `{}` and never read. Nothing needs an upcaster today, but a version cannot be
+  added to events already written, and the seam is built and tested rather than left for the first
+  migration to design under pressure: `IEventUpcaster` transforms one version to the next,
+  `EventSerializer` walks the chain, and a gap in it throws. An added optional field still needs
+  neither a bump nor an upcaster, which is what `AmbientEnv` and `Digest` are.
+
+  The persistent subscription filter follows the names, from `EventTypeFilter.Prefix(
+  "Execution.Domain.Events")` to `Prefix("utos.execution.")`. A group stores its filter server-side
+  at creation and `CreateToAllAsync` swallows `AlreadyExists`, so a group left over from before this
+  change would keep the old filter and quietly match nothing — the group name is bumped to
+  `workflow-event-processor-v2` so a stale one cannot linger.
+
+  The JSON body of every event is unchanged, which `EventJsonShapeTests` still pins; only the name
+  it is filed under moves. See **Breaking** for what that costs an existing stream.
 
 ### Removed
 

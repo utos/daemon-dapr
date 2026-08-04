@@ -27,20 +27,22 @@ public class EventStoreRepository(
                 cancellationToken: cancellationToken);
 
             var domainEvents = new List<IDomainEvent>();
-            // Tracked separately from the event count: an event that fails to deserialize is
-            // dropped below but still occupies a revision, and the revision is what the next
-            // append is checked against.
+            // Taken from the store rather than counted from the events: the revision is what the
+            // next append is checked against, and it is the store's fact, not ours.
             var streamRevision = AggregateRoot<TId>.NoStream;
 
             await foreach (var resolvedEvent in events.WithCancellation(cancellationToken))
             {
                 streamRevision = resolvedEvent.GetEventNumber();
 
-                var domainEvent = eventSerializer.DeserializeEvent(
+                // Deliberately unguarded. An event that cannot be read fails the load, because
+                // the alternative — skipping it — rehydrates the aggregate with a hole in its
+                // history at the correct revision, and the next append then passes its
+                // expected-version check and makes the hole permanent.
+                domainEvents.Add(eventSerializer.DeserializeEvent(
                     resolvedEvent.Event.EventType,
                     resolvedEvent.Event.Data.ToArray(),
-                    resolvedEvent.Event.Metadata.ToArray());
-                if (domainEvent is IDomainEvent de) domainEvents.Add(de);
+                    resolvedEvent.Event.Metadata.ToArray()));
             }
 
             aggregate.LoadFromHistory(domainEvents, streamRevision);
@@ -282,7 +284,7 @@ public class EventStoreRepository(
                 @event.GetMetadata()
             );
 
-            if (domainEvent != null) yield return new EventWithNumber(domainEvent, @event.GetEventNumber());
+            yield return new EventWithNumber(domainEvent, @event.GetEventNumber());
         }
     }
 }

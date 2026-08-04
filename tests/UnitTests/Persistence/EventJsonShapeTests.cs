@@ -7,11 +7,16 @@ namespace UnitTests.Persistence;
 
 /// <summary>
 /// Pins the JSON an event serializes to. <c>EventSerializer</c> uses plain
-/// <see cref="JsonSerializer"/> with no options, and — critically — its deserialize path catches
-/// every exception, logs it and returns null, after which <c>EventStoreRepository</c> drops that
-/// event while still counting its stream revision. A shape change therefore does not fail: an
-/// aggregate silently rehydrates with a hole in its history. So the shape is asserted directly,
-/// as text, rather than through a round-trip that would pass either way.
+/// <see cref="JsonSerializer"/> with no options, so the shape rests entirely on the converters the
+/// types themselves carry — and a round-trip test would pass whatever the shape became. It is
+/// asserted directly, as text, so that a change to it has to be a decision.
+///
+/// This is one half of the persistence contract; <see cref="EventTypeRegistryTests"/> is the
+/// other, pinning the name each event is stored under. A shape change now fails loudly on read
+/// rather than silently — a stored event that will not deserialize throws, and the readers no
+/// longer skip past it — but "loudly" means a failed load, not a caught mistake. Changing the
+/// shape still costs a version bump and an upcaster, which is what these literals are here to
+/// make you notice.
 ///
 /// An execution id must stay a bare GUID string, which is what a raw <c>Guid</c> wrote before
 /// <see cref="ExecutionId"/> existed. The same JSON also crosses the Dapr activity boundary, so
