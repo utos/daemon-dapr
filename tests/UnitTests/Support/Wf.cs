@@ -1,5 +1,7 @@
-using Common.Constants;
 using Common.Workflow;
+// Aliased rather than imported: Utos.Workflows.V1 also contains Workflow and WorkflowActivity,
+// which would collide with the domain types this builder constructs.
+using WorkflowDocument = Utos.Workflows.V1.WorkflowDocument;
 using Execution.Domain.Interpreter;
 using Execution.Infrastructure.Templating;
 using Microsoft.Extensions.Logging.Abstractions;

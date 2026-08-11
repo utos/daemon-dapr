@@ -1,4 +1,3 @@
-using Common.Workflow.Validation;
 using Execution.Api.Services;
 using Execution.Application.Commands;
 using Execution.Application.Validation;
@@ -18,9 +17,9 @@ public static class ExecutionExtensions
     {
         builder.AddExecutionInfrastructure(databaseName, eventStoreName);
 
-        // The document's shape rules are shared; asking for them here is what keeps this module
-        // standing on its own instead of on whichever module happened to register them.
-        builder.Services.AddWorkflowValidation();
+        // Only what scheduling means beyond the bundle. The bundle's own shape was validated
+        // against the spec when it was loaded, and it has not changed since — it comes from the
+        // definition store, not from the caller.
         builder.Services.AddScoped<IValidator<StartExecutionCommand>, StartExecutionCommandValidator>();
 
         builder.Services.AddScoped<ExecutionGrpcService>();

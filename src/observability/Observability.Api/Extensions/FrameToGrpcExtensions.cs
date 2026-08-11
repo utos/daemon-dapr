@@ -4,7 +4,7 @@ using Observability.Application.Models;
 using Observability.Domain;
 using Utos.Daemon.V1;
 using DaemonLogLevel = Utos.Daemon.V1.LogLevel;
-using GrpcWorkflowError = Utos.Workflow.V1.WorkflowError;
+using GrpcWorkflowError = Utos.Workflows.V1.WorkflowError;
 
 namespace Observability.Api.Extensions;
 

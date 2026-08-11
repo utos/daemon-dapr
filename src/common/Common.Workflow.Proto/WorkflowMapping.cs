@@ -1,5 +1,5 @@
 using Domain = Common.Workflow;
-using Wire = Utos.Workflow.V1;
+using Wire = Utos.Workflows.V1;
 
 namespace Common.Workflow.Proto;
 

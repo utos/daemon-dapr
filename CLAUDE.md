@@ -33,14 +33,23 @@ Modules: `execution` (the rich one), `definition`, `observability`. Shared kerne
 3. **Transport translates and delegates.** A gRPC method may validate request *shape*, map
    proto ↔ domain, and turn application exceptions into `RpcException`. Anything else — resolving
    against a store, coordinating across contexts, filtering — belongs in a handler.
+   A bundle's shape rules are part of that: `DefinitionGrpcService` applies
+   `Utos.Workflow.Validation` to the wire form before mapping, next to where the content digest is
+   computed, because both are defined over the wire form rather than over the domain model.
 4. **Mediator is source-generated once, in `API.Main`.** It is the only project that sees every
    module's handlers, so `Mediator.SourceGenerator` and the single `AddMediator()` call live
    there. Application projects reference `Mediator.Abstractions` only. Adding a handler in a new
    project requires nothing beyond `API.Main` reaching it transitively — verify after adding one.
 5. **Cross-cutting application code goes in `Common.Application`,** not in a module. The
    FluentValidation `ValidationBehavior` is registered globally and applies to every module's
-   messages, so no module can own it.
-6. **Modules do not reference each other.** Anything two contexts must agree on lives in
+   messages, so no module can own it. What it validates is whatever a *command* means beyond its
+   bundle — the bundle's own shape was settled at the transport edge.
+6. **The document's rules are the spec's, not ours.** `Utos.Workflow.Validation` implements
+   `api/docs/workflow-validation.md` and is shared with the CLI, so a workflow one tool accepts
+   cannot be rejected by the other. A new rule belongs in the spec and its conformance corpus,
+   not in this repository. Violations are reported as a code and a path; **the code is the
+   contract and the message text deliberately is not**, so assert on codes.
+7. **Modules do not reference each other.** Anything two contexts must agree on lives in
    `common/` as a contract one publishes and the other consumes — `Common.Workflow.Resolution`
    (definition answers "which bundle does this reference name?") and `Common.ExecutionLifecycle`
    (execution announces that a run ended) are the whole list. Both edges this replaced compiled
@@ -79,5 +88,10 @@ These are easy to break silently — see the notes in `Common.Workflow` and the 
 - `tests/UnitTests` — no Docker, no sidecar, no database. Interpreter, aggregate, mapping,
   value objects, event JSON shape.
 - `tests/IntegrationTests` — black-box gRPC clients against the real Aspire host; needs Docker.
-  These are what prove the proto mapping and the service surface end to end. Several assert on
-  `RpcException.Status.Detail` substrings, so validator and not-found message text is contract.
+  These are what prove the proto mapping and the service surface end to end. Validation failures
+  are asserted by **rule code** (`UTOS-A005`), never by wording: the spec pins the code and leaves
+  the message free to improve. Not-found message text is still matched on substrings, so that
+  wording remains contract.
+- `TestWorkflowBuilder` keys a bundle by canonical identity (`name:version`), not by name. It
+  once keyed by name, which `UTOS-B005` now rejects — the invariant was always in `bundle.proto`,
+  but nothing enforced it until the shared validator did.

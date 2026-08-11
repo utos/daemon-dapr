@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The document's shape rules now come from the spec, not from this repository.**
+  `Common.Workflow.Validation` is deleted; `DefinitionGrpcService` applies
+  `Utos.Workflow.Validation` to the bundle in its **wire form**, next to where the content digest
+  is computed, because both are defined over the wire form rather than over the domain model. The
+  rules are the ones in `api/docs/workflow-validation.md`, shared with the CLI and pinned by a
+  conformance corpus, so a workflow the CLI accepts can no longer be rejected here for a reason of
+  our own. This also picks up rules the daemon never had: a `workflows` key must equal the identity
+  derived from its own metadata (`UTOS-B005`), every sub-workflow reference must resolve inside the
+  bundle (`UTOS-B006`), an activity must have exactly one configuration (`UTOS-A007`), and
+  `apiVersion`/`kind` must be correct (`UTOS-D001`/`UTOS-D002`).
+- **Validation failures now report a code and a path**, e.g.
+  `UTOS-T003 at workflows["acme/greet:1.0.0"].spec.activities["send"].onSuccess[0].transition.name`,
+  and report *every* violation rather than stopping at the first. **The code is the contract; the
+  message text deliberately is not**, so integration tests assert on codes and error wording stays
+  free to improve without breaking anyone.
+- **Activity-name references resolve ordinally.** They previously used `OrdinalIgnoreCase`, which
+  disagreed with the daemon's own runtime map lookup — a workflow could validate and then fail to
+  find its target at run time. Transition targets are now also checked on `onFailure` and on
+  promise branches, not only on `onSuccess`.
+- `StartExecutionCommandValidator` no longer re-validates the bundle. By that point the bundle
+  comes from the definition store rather than from the caller, and its shape was settled when it
+  was loaded.
+- SDK packages moved to `0.0.11`, which renames the generated C# namespace from `Utos.Workflow.V1`
+  to `Utos.Workflows.V1`. Nothing on the wire changes: the proto package is still
+  `utos.workflow.v1`, so encoded bytes and content digests are identical.
+- `Common.Constants.WorkflowDocument` is gone — `Utos.Workflows.V1.WorkflowDocument` ships the same
+  two constants from the spec package.
+- `TestWorkflowBuilder` keys bundles by canonical identity rather than by name, and resolves
+  sub-workflow references to identities the way the CLI resolves a dependency alias. It had always
+  produced bundles that `bundle.proto` called invalid; nothing enforced it until now.
+
 ### Removed
 
 - Six sub-workflow and promise lifecycle event types (`SubWorkflowCreated/Started/Completed/Failed`,

@@ -63,7 +63,9 @@ public class DefinitionServiceTests(DaemonTestFixture fixture)
                 new LoadWorkflowRequest { Bundle = request.Bundle }).ResponseAsync);
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains("not found in bundle workflows", exception.Status.Detail);
+        // UTOS-B003: entry_point must be a key of workflows. The code is the contract; the
+        // wording deliberately is not (api/docs/workflow-validation.md).
+        Assert.Contains("UTOS-B003", exception.Status.Detail);
     }
 
     [Fact]

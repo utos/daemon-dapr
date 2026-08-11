@@ -173,7 +173,7 @@ public class TimerTests(DaemonTestFixture fixture)
         var exception = await Assert.ThrowsAsync<RpcException>(() => fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains("requires a duration", exception.Status.Detail);
+        Assert.Contains("UTOS-C201", exception.Status.Detail);
     }
 
     [Theory]
@@ -188,7 +188,7 @@ public class TimerTests(DaemonTestFixture fixture)
         var exception = await Assert.ThrowsAsync<RpcException>(() => fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains("must be positive", exception.Status.Detail);
+        Assert.Contains("UTOS-C202", exception.Status.Detail);
     }
 
     // ============================================================================
