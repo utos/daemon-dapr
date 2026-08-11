@@ -2,7 +2,7 @@ using System.Text.Json;
 using Common.Workflow;
 using Common.Workflow.Proto;
 using Google.Protobuf.WellKnownTypes;
-using Wire = Utos.Workflow.V1;
+using Wire = Utos.Workflows.V1;
 using WireDaemon = Utos.Daemon.V1;
 
 namespace UnitTests.Mapping;

@@ -1,7 +1,7 @@
 using Common.Constants;
 using Google.Protobuf.WellKnownTypes;
 using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Utos.Workflows.V1;
 
 namespace IntegrationTests.Shared.Builders;
 
@@ -139,17 +139,50 @@ public class TestWorkflowBuilder
             Spec = spec
         };
 
-        var bundle = new WorkflowBundle { EntryPoint = _workflowName };
-        bundle.Workflows.Add(_workflowName, workflow);
+        // A sub-workflow activity names its target by canonical identity once the bundle is built
+        // (UTOS-B006), while a test names it by workflow name — resolved here, the same way the
+        // CLI resolves a dependency alias. Every workflow in the bundle is rewritten, not just the
+        // entry point, because a dependent may itself call another one.
+        var identities = _dependentWorkflows.ToDictionary(
+            dependent => dependent.Key,
+            dependent => WorkflowIdentity.FormatMetadata(dependent.Value.Metadata));
+
+        ResolveSubWorkflowReferences(spec, identities);
+        foreach (var dependent in _dependentWorkflows.Values)
+            ResolveSubWorkflowReferences(dependent.Spec, identities);
+
+        // Keyed by canonical identity rather than by name: UTOS-B005 requires every key to equal
+        // the identity derived from that workflow's own metadata, which is what makes a bundle
+        // self-describing.
+        var identity = WorkflowIdentity.FormatMetadata(workflow.Metadata);
+        var bundle = new WorkflowBundle { EntryPoint = identity };
+        bundle.Workflows.Add(identity, workflow);
 
         foreach (var (name, depWorkflow) in _dependentWorkflows)
-            bundle.Workflows.Add(name, depWorkflow);
+            bundle.Workflows.Add(identities[name], depWorkflow);
 
         return new TestWorkflowRequest(
             bundle,
             _input,
             startActivity ?? (_activities.Count > 0 ? _activities[0].Name : ""),
             _env);
+    }
+
+    /// <summary>
+    /// Rewrites each sub-workflow activity's target from a workflow name to the canonical identity
+    /// it resolves to, leaving anything unrecognised alone so a test can still assert on a
+    /// deliberately dangling reference.
+    /// </summary>
+    private static void ResolveSubWorkflowReferences(
+        WorkflowSpec spec, IReadOnlyDictionary<string, string> identities)
+    {
+        foreach (var activity in spec.Activities.Values)
+        {
+            if (activity.ConfigCase != WorkflowActivity.ConfigOneofCase.Workflow) continue;
+
+            if (identities.TryGetValue(activity.Workflow.Workflow, out var identity))
+                activity.Workflow.Workflow = identity;
+        }
     }
 
     public TestWorkflowRequest BuildSequential(string? startActivity = null)

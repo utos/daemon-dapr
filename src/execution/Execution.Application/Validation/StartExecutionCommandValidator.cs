@@ -1,16 +1,20 @@
-using Common.Workflow;
 using Execution.Application.Commands;
 using FluentValidation;
 
 namespace Execution.Application.Validation;
 
+/// <summary>
+/// What scheduling means beyond the bundle it names.
+/// <para>
+/// The bundle's own shape is not re-checked here. It was validated against the spec when it was
+/// loaded, and by this point it comes from the definition store rather than from the caller, so
+/// re-running the document rules on every schedule would only re-answer a settled question.
+/// </para>
+/// </summary>
 public class StartExecutionCommandValidator : AbstractValidator<StartExecutionCommand>
 {
-    public StartExecutionCommandValidator(IValidator<WorkflowBundle> bundleValidator)
+    public StartExecutionCommandValidator()
     {
-        RuleFor(c => c.Bundle)
-            .SetValidator(bundleValidator);
-
         RuleFor(c => c.StartActivity)
             .NotEmpty()
             .WithMessage("start_activity is required");

@@ -85,17 +85,20 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
     // ============================================================================
 
     [Theory]
-    [InlineData("123invalid", "Activity name cannot start with number")]
-    [InlineData("-invalid", "Activity name cannot start with dash")]
-    [InlineData("_invalid", "Activity name cannot start with underscore")]
-    [InlineData("invalid-", "Activity name cannot end with dash")]
-    [InlineData("invalid_", "Activity name cannot end with underscore")]
-    [InlineData("", "Activity name cannot be empty")]
-    [InlineData("   ", "Activity name cannot be empty")]
-    [InlineData("\t\n ", "Activity name cannot be empty")]
-    [InlineData(" valid-name", "Activity name cannot start with whitespace")]
-    [InlineData("valid-name ", "Activity name cannot end with whitespace")]
-    public async Task WithInvalidActivityNameFormat_ShouldFail(string invalidName, string reason)
+    // These assert the rule code rather than the wording. api/docs/workflow-validation.md pins
+    // code and path as the contract and deliberately leaves message text free to improve, so a
+    // test that matched on prose would break every time an error was made clearer.
+    [InlineData("123invalid", "UTOS-A005")]   // may not begin with a digit, hyphen or underscore
+    [InlineData("-invalid", "UTOS-A005")]
+    [InlineData("_invalid", "UTOS-A005")]
+    [InlineData("invalid-", "UTOS-A006")]     // may not end with a hyphen or underscore
+    [InlineData("invalid_", "UTOS-A006")]
+    [InlineData("", "UTOS-A001")]             // required, and no surrounding whitespace
+    [InlineData("   ", "UTOS-A001")]
+    [InlineData("\t\n ", "UTOS-A001")]
+    [InlineData(" valid-name", "UTOS-A001")]
+    [InlineData("valid-name ", "UTOS-A001")]
+    public async Task WithInvalidActivityNameFormat_ShouldFail(string invalidName, string expectedCode)
     {
         // Arrange
         var request = new TestWorkflowBuilder("test-workflow", fixture.MockBaseUrl)
@@ -107,7 +110,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains(reason.ToLowerInvariant(), exception.Status.Detail.ToLowerInvariant());
+        Assert.Contains(expectedCode, exception.Status.Detail);
     }
 
     [Fact]
@@ -125,8 +128,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains("activity name too long", exception.Status.Detail.ToLowerInvariant());
-        Assert.Contains("maximum 63 characters", exception.Status.Detail.ToLowerInvariant());
+        Assert.Contains("UTOS-A002", exception.Status.Detail);
     }
 
     // NOTE: WithDuplicateActivityNames_ShouldFail test removed
@@ -149,7 +151,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains("workflow must contain at least one activity", exception.Status.Detail.ToLowerInvariant());
+        Assert.Contains("UTOS-D005", exception.Status.Detail);
     }
 
     [Theory]
@@ -169,7 +171,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains("reserved keyword", exception.Status.Detail.ToLowerInvariant());
+        Assert.Contains("UTOS-A003", exception.Status.Detail);
     }
 
     // ============================================================================
@@ -177,11 +179,11 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
     // ============================================================================
 
     [Theory]
-    [InlineData("not-semantic-version", "Invalid semantic version format")]
-    [InlineData("1.0", "Incomplete semantic version")]
-    [InlineData("v1.0.0", "Semantic version should not include 'v' prefix")]
-    [InlineData("", "Metadata version cannot be empty")]
-    public async Task WithInvalidMetadataVersion_ShouldFail(string invalidVersion, string reason)
+    [InlineData("not-semantic-version", "UTOS-M005")]
+    [InlineData("1.0", "UTOS-M005")]
+    [InlineData("v1.0.0", "UTOS-M005")]   // the 'v' prefix is rejected
+    [InlineData("", "UTOS-M004")]         // absent is a different rule from malformed
+    public async Task WithInvalidMetadataVersion_ShouldFail(string invalidVersion, string expectedCode)
     {
         // Arrange
         var request = new TestWorkflowBuilder("test-workflow", fixture.MockBaseUrl,
@@ -194,7 +196,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains(reason.ToLowerInvariant(), exception.Status.Detail.ToLowerInvariant());
+        Assert.Contains(expectedCode, exception.Status.Detail);
     }
 
     [Fact]
@@ -233,8 +235,7 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains("description too long", exception.Status.Detail.ToLowerInvariant());
-        Assert.Contains("maximum 500 characters", exception.Status.Detail.ToLowerInvariant());
+        Assert.Contains("UTOS-M006", exception.Status.Detail);
     }
 
     [Fact]
@@ -264,11 +265,11 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
     // ============================================================================
 
     [Theory]
-    [InlineData("not-a-url", "Invalid URL format")]
-    [InlineData("", "HTTP activity URL cannot be empty")]
-    [InlineData("ftp://invalid-scheme.com", "Unsupported URL scheme")]
-    [InlineData("javascript:alert('xss')", "Unsupported URL scheme")]
-    public async Task WithInvalidHttpUrl_ShouldFail(string invalidUrl, string reason)
+    [InlineData("not-a-url", "UTOS-C102")]
+    [InlineData("", "UTOS-C101")]         // absent is a different rule from malformed
+    [InlineData("ftp://invalid-scheme.com", "UTOS-C102")]
+    [InlineData("javascript:alert('xss')", "UTOS-C102")]
+    public async Task WithInvalidHttpUrl_ShouldFail(string invalidUrl, string expectedCode)
     {
         // Arrange
         var request = new TestWorkflowBuilder("test-workflow", fixture.MockBaseUrl)
@@ -280,6 +281,6 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
             await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains(reason.ToLowerInvariant(), exception.Status.Detail.ToLowerInvariant());
+        Assert.Contains(expectedCode, exception.Status.Detail);
     }
 }

@@ -1,9 +1,5 @@
-using Common.Workflow.Validation;
 using Definition.Api.Services;
-using Definition.Application.Commands;
-using Definition.Application.Validation;
 using Definition.Infrastructure.Extensions;
-using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -16,11 +12,9 @@ public static class DefinitionExtensions
     {
         builder.Services.AddDefinitionInfrastructure();
 
-        // A bundle arrives here before it ever reaches an execution, so this module runs the
-        // document's shape rules itself rather than borrowing another module's registration.
-        builder.Services.AddWorkflowValidation();
-        builder.Services.AddScoped<IValidator<LoadWorkflowCommand>, LoadWorkflowCommandValidator>();
-
+        // No bundle validator is registered: the document's shape rules are the spec's, and
+        // DefinitionGrpcService applies them to the wire form before it becomes a command. What
+        // is left for the pipeline is whatever a command means beyond its bundle.
         builder.Services.AddScoped<DefinitionGrpcService>();
 
         return builder;

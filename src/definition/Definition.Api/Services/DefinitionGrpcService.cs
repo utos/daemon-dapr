@@ -7,7 +7,8 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Mediator;
 using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Utos.Workflows.V1;
+using Utos.Workflows.V1.Validation;
 
 namespace Definition.Api.Services;
 
@@ -24,9 +25,11 @@ public class DefinitionGrpcService(IMediator mediator) : DefinitionService.Defin
         if (request.Bundle is null)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Bundle is required"));
 
-        // Computed here, while the bundle is still in its wire form: the digest is defined over
-        // the canonical serialization, and must match what the CLI and registry computed for the
-        // same content.
+        // Both of these belong to the wire form. The digest is defined over the canonical
+        // serialization and must match what the CLI and registry computed for the same content;
+        // the shape rules are the spec's, shared with the CLI through Utos.Workflow.Validation,
+        // so a bundle the CLI accepts cannot be rejected here for a different reason.
+        Validate(request.Bundle);
         var digest = request.Bundle.ComputeContentDigest();
 
         var definition = await Send(
@@ -83,6 +86,23 @@ public class DefinitionGrpcService(IMediator mediator) : DefinitionService.Defin
             ct => mediator.Send(new UnloadWorkflowCommand(ToDomainReference(request.Reference)), ct), context);
 
         return new UnloadWorkflowResponse { Removed = removed };
+    }
+
+    /// <summary>
+    /// Applies the spec's bundle rules (<c>api/docs/workflow-validation.md</c>) to the wire form,
+    /// before it is mapped to the domain model.
+    /// <para>
+    /// Every violation is reported rather than only the first, and each carries its code and the
+    /// path it occurred at, so a caller can act on a specific rule without matching on prose.
+    /// </para>
+    /// </summary>
+    private static void Validate(WorkflowBundle bundle)
+    {
+        var report = WorkflowBundleValidator.Validate(bundle);
+        if (report.IsValid) return;
+
+        var detail = string.Join("; ", report.Issues.Select(i => $"{i.Code} at {i.Path}: {i.Message}"));
+        throw new RpcException(new Status(StatusCode.InvalidArgument, detail));
     }
 
     private static Common.Workflow.WorkflowReference ToDomainReference(WorkflowReference? reference)

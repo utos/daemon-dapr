@@ -8,11 +8,11 @@
         <ProjectReference Include="../Definition.Application/Definition.Application.csproj"/>
         <ProjectReference Include="../Definition.Infrastructure/Definition.Infrastructure.csproj"/>
         <ProjectReference Include="../../common/Common.Workflow.Proto/Common.Workflow.Proto.csproj"/>
-        <ProjectReference Include="../../common/Common.Workflow.Validation/Common.Workflow.Validation.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="Utos.Workflow" />
+        <PackageReference Include="Utos.Workflow.Validation" />
         <PackageReference Include="Utos.Daemon.Server" />
         <PackageReference Include="FluentValidation"/>
         <PackageReference Include="Grpc.AspNetCore" />

@@ -2,7 +2,7 @@ using Common.Constants;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Utos.Workflows.V1;
 
 namespace IntegrationTests.Executions;
 

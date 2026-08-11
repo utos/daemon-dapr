@@ -7,15 +7,15 @@ using GrpcExecution = Utos.Daemon.V1.ScheduleExecutionResponse;
 using GrpcExecutionSummary = Utos.Daemon.V1.ExecutionSummary;
 using GrpcExecutionDetails = Utos.Daemon.V1.GetExecutionResponse;
 using GrpcExecutionStatus = Utos.Daemon.V1.ExecutionStatus;
-using GrpcWorkflow = Utos.Workflow.V1.Workflow;
-using GrpcWorkflowSpec = Utos.Workflow.V1.WorkflowSpec;
-using GrpcWorkflowActivity = Utos.Workflow.V1.WorkflowActivity;
-using GrpcHttpActivityConfig = Utos.Workflow.V1.HttpActivityConfig;
-using GrpcWorkflowMetadata = Utos.Workflow.V1.WorkflowMetadata;
+using GrpcWorkflow = Utos.Workflows.V1.Workflow;
+using GrpcWorkflowSpec = Utos.Workflows.V1.WorkflowSpec;
+using GrpcWorkflowActivity = Utos.Workflows.V1.WorkflowActivity;
+using GrpcHttpActivityConfig = Utos.Workflows.V1.HttpActivityConfig;
+using GrpcWorkflowMetadata = Utos.Workflows.V1.WorkflowMetadata;
 using GrpcExecutionPayload = Utos.Daemon.V1.ExecutionPayload;
-using GrpcTransitionTarget = Utos.Workflow.V1.TransitionTarget;
+using GrpcTransitionTarget = Utos.Workflows.V1.TransitionTarget;
 using GrpcWorkflowReference = Utos.Daemon.V1.WorkflowReference;
-using GrpcWorkflowError = Utos.Workflow.V1.WorkflowError;
+using GrpcWorkflowError = Utos.Workflows.V1.WorkflowError;
 
 namespace Execution.Api.Extensions;
 
