@@ -104,7 +104,7 @@ public class ActivityInputResolutionTests
     [Fact]
     public void A_detached_sub_workflow_call_is_marked_as_such()
     {
-        var graph = Wf.Graph(("call", Wf.SubWorkflow("emailer:1.0.0", "send", detached: true)));
+        var graph = Wf.Graph(("call", Wf.SubWorkflow("emailer:1.0.0", "send", spawn: true)));
 
         var resolved = (ResolvedActivityInput.SubWorkflow)_interpreter.ResolveInput(
             Wf.Session(graph), "call", null);

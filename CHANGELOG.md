@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Sub-workflow invocation is two domain types rather than a flag.** `SubWorkflowActivityConfig`
+  becomes an abstract base over `CallActivityConfig` and `SpawnActivityConfig`, matching spec
+  `0.0.12`. The old `Detached` boolean decided what the activity *returned* — the child's result
+  or a `{execution_id}` handle — and whose failures `on_failure` saw, so it could not be reasoned
+  about at the point that output is consumed. The orchestrator still matches on the shared base
+  wherever the distinction does not matter.
+- **Promise completion is the `PromiseMode` enum end to end.** The wire format models it as a
+  oneof, so `PromiseModes` — the string table that parsed a mode name — is deleted along with the
+  interpreter's parse step and its "unsupported promise mode" failure: an unknown mode is no
+  longer representable. `RequiredCount` is carried only by the count mode, so it can no longer be
+  set where it is ignored. The coverage that lived in `PromiseExpansionTests` moved to
+  `WorkflowMappingTests`, which is where choosing the mode now happens.
+- Mapping **refuses an unset mode** on either construct rather than defaulting. `UTOS-A007`
+  rejects these at load, and guessing would silently change what an activity returns, or when it
+  resolves.
+- Bumped the Utos SDK packages to `0.0.12`.
+
+### Added
+
+- `ActivityConfigJsonShapeTests` pins the polymorphic type discriminators activity configs persist
+  under. They are a persistence contract — `EventSerializer` swallows a deserialize failure, logs,
+  and returns null, after which the repository drops the event while still counting its stream
+  revision, so a renamed discriminator rehydrates an execution with a hole rather than failing.
+  **Nothing pinned them before**, which is how `detached` could be replaced without a test
+  noticing.
+  The same suite records two pre-existing surprises it turned up rather than silently inheriting
+  them: `Kind` reaches the stream despite carrying `[JsonIgnore]` (the attribute sits on the
+  abstract declaration, which System.Text.Json does not honour for the derived overrides), and
+  `HttpActivityConfig.HeaderMap` — a computed convenience property — lands there too. Both are
+  write-only and harmless, and both are now visible.
+
+### Breaking
+
+- **This is a breaking change to persisted state.** Activity configs change discriminator
+  (`workflow` becomes `workflow.call` / `workflow.spawn`) and promise mode changes from a
+  lowercase string to an enum name, so existing `workflowexecution-{id}` streams cannot be
+  replayed. Drop the KurrentDB volume and the SQL database before running this version. There is
+  no upcaster; the daemon is pre-1.0.
+
 - **The document's shape rules now come from the spec, not from this repository.**
   `Common.Workflow.Validation` is deleted; `DefinitionGrpcService` applies
   `Utos.Workflow.Validation` to the bundle in its **wire form**, next to where the content digest

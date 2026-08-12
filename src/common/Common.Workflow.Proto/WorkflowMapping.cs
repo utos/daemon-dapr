@@ -146,15 +146,13 @@ public static class WorkflowMapping
             Wire.WorkflowActivity.ConfigOneofCase.Timer =>
                 new Domain.TimerActivityConfig(source.Timer.Duration?.ToTimeSpan()),
 
-            Wire.WorkflowActivity.ConfigOneofCase.Workflow => new Domain.SubWorkflowActivityConfig(
-                source.Workflow.Workflow,
-                source.Workflow.StartActivity,
-                source.Workflow.Input?.ToDomain(),
-                source.Workflow.Detached),
+            Wire.WorkflowActivity.ConfigOneofCase.Workflow => source.Workflow.ToDomainSubWorkflow(),
 
             Wire.WorkflowActivity.ConfigOneofCase.Promise => new Domain.PromiseActivityConfig(
-                source.Promise.Mode,
-                source.Promise.RequiredCount,
+                source.Promise.ToDomainMode(),
+                source.Promise.CompletionCase == Wire.PromiseActivityConfig.CompletionOneofCase.Count
+                    ? source.Promise.Count.RequiredCount
+                    : 0,
                 source.Promise.Branches.Select(ToDomain).ToList()),
 
             _ => throw new NotSupportedException(
@@ -183,14 +181,57 @@ public static class WorkflowMapping
                 : null
         };
 
+    /// <summary>
+    /// Selects the domain sub-workflow shape from the wire mode oneof. An unset mode is a
+    /// malformed bundle — <c>UTOS-A007</c> names it — so mapping refuses rather than defaulting to
+    /// one of the two, since guessing would silently change what the activity returns.
+    /// </summary>
+    private static Domain.SubWorkflowActivityConfig ToDomainSubWorkflow(
+        this Wire.WorkflowActivityConfig source) =>
+        source.ModeCase switch
+        {
+            Wire.WorkflowActivityConfig.ModeOneofCase.Call => new Domain.CallActivityConfig(
+                source.Workflow, source.StartActivity, source.Input?.ToDomain()),
+
+            Wire.WorkflowActivityConfig.ModeOneofCase.Spawn => new Domain.SpawnActivityConfig(
+                source.Workflow, source.StartActivity, source.Input?.ToDomain()),
+
+            _ => throw new NotSupportedException(
+                "Sub-workflow activity has no mode set (expected call or spawn).")
+        };
+
+    private static Domain.PromiseMode ToDomainMode(this Wire.PromiseActivityConfig source) =>
+        source.CompletionCase switch
+        {
+            Wire.PromiseActivityConfig.CompletionOneofCase.All => Domain.PromiseMode.All,
+            Wire.PromiseActivityConfig.CompletionOneofCase.Any => Domain.PromiseMode.Any,
+            Wire.PromiseActivityConfig.CompletionOneofCase.Race => Domain.PromiseMode.Race,
+            Wire.PromiseActivityConfig.CompletionOneofCase.Count => Domain.PromiseMode.Count,
+
+            _ => throw new NotSupportedException(
+                "Promise activity has no completion mode set (expected all, any, race or count).")
+        };
+
     private static Wire.WorkflowActivityConfig ToProto(this Domain.SubWorkflowActivityConfig source)
     {
         var result = new Wire.WorkflowActivityConfig
         {
             Workflow = source.Workflow,
-            StartActivity = source.StartActivity,
-            Detached = source.Detached
+            StartActivity = source.StartActivity
         };
+
+        switch (source)
+        {
+            case Domain.CallActivityConfig:
+                result.Call = new Wire.CallActivityConfig();
+                break;
+            case Domain.SpawnActivityConfig:
+                result.Spawn = new Wire.SpawnActivityConfig();
+                break;
+            default:
+                throw new NotSupportedException(
+                    $"No wire mapping for sub-workflow config '{source.GetType().Name}'.");
+        }
 
         if (source.Input != null)
             result.Input = source.Input.ToProto();
@@ -200,11 +241,25 @@ public static class WorkflowMapping
 
     private static Wire.PromiseActivityConfig ToProto(this Domain.PromiseActivityConfig source)
     {
-        var result = new Wire.PromiseActivityConfig
+        var result = new Wire.PromiseActivityConfig();
+
+        switch (source.Mode)
         {
-            Mode = source.Mode,
-            RequiredCount = source.RequiredCount
-        };
+            case Domain.PromiseMode.All:
+                result.All = new Wire.PromiseAllConfig();
+                break;
+            case Domain.PromiseMode.Any:
+                result.Any = new Wire.PromiseAnyConfig();
+                break;
+            case Domain.PromiseMode.Race:
+                result.Race = new Wire.PromiseRaceConfig();
+                break;
+            case Domain.PromiseMode.Count:
+                result.Count = new Wire.PromiseCountConfig { RequiredCount = source.RequiredCount };
+                break;
+            default:
+                throw new NotSupportedException($"No wire mapping for promise mode '{source.Mode}'.");
+        }
 
         result.Branches.AddRange(source.Branches.Select(ToProto));
 

@@ -173,7 +173,7 @@ public class DeleteExecutionTests(DaemonTestFixture fixture)
         handleToInput.Fields.Add("childId", Value.ForString("{{ output.execution_id }}"));
 
         var request = new TestWorkflowBuilder("delete-detached-parent", fixture.MockBaseUrl)
-            .WorkflowCall("start-child", "delete-detached-child-wf", "wait", detached: true)
+            .WorkflowSpawn("start-child", "delete-detached-child-wf", "wait")
             .OnSuccess("after", handleToInput)
             .HttpPost("after", "/delete-detached-parent-after", """{"childId": "{{ input.childId }}"}""")
             .OnSuccess("end")

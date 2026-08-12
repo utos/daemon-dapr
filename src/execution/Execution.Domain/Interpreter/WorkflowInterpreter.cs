@@ -155,10 +155,9 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             }
         }
 
-        if (!PromiseModes.TryParse(promise.Mode, out var mode))
-            throw new NotSupportedException($"Unsupported promise mode: {promise.Mode}");
-
-        return new PromiseExpansion(mode, promise.RequiredCount, branches);
+        // No parse step: the mode arrived as a oneof case and was mapped to the enum at the wire
+        // boundary, so an unknown mode cannot reach here.
+        return new PromiseExpansion(promise.Mode, promise.RequiredCount, branches);
     }
 
     private TransitionDecision Goto(TransitionTarget target, TemplateScope scope, object? activityOutput)
@@ -218,8 +217,10 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             ? structRenderer.Render(config.Input, scope)
             : AsMutable(rawActivityInput);
 
+        // The orchestrator still asks a yes/no question here — await the child or not — so the
+        // mode collapses to a flag at this boundary rather than the shape being threaded further.
         return new ResolvedActivityInput.SubWorkflow(
-            config.Workflow, config.StartActivity, subInput, config.Detached);
+            config.Workflow, config.StartActivity, subInput, config is SpawnActivityConfig);
     }
 
     private PromiseBranchPlan PlanBranch(

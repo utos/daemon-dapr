@@ -56,15 +56,31 @@ public class TestWorkflowBuilder
         return AddHttpActivity(name, path, "DELETE", null, customUrl);
     }
 
+    /// <summary>Awaits the sub-workflow; its result becomes the activity's output.</summary>
     public ActivityBuilder WorkflowCall(string activityName, string targetWorkflow,
-        string startActivity, Struct? input = null, bool detached = false)
+        string startActivity, Struct? input = null) =>
+        SubWorkflow(activityName, targetWorkflow, startActivity, input,
+            config => config.Call = new CallActivityConfig());
+
+    /// <summary>
+    /// Starts the sub-workflow and moves on. The activity's output is a handle to the run rather
+    /// than a result, and the child outlives the parent.
+    /// </summary>
+    public ActivityBuilder WorkflowSpawn(string activityName, string targetWorkflow,
+        string startActivity, Struct? input = null) =>
+        SubWorkflow(activityName, targetWorkflow, startActivity, input,
+            config => config.Spawn = new SpawnActivityConfig());
+
+    private ActivityBuilder SubWorkflow(string activityName, string targetWorkflow,
+        string startActivity, Struct? input, Action<WorkflowActivityConfig> setMode)
     {
         var config = new WorkflowActivityConfig
         {
             Workflow = targetWorkflow,
-            StartActivity = startActivity,
-            Detached = detached
+            StartActivity = startActivity
         };
+
+        setMode(config);
 
         if (input != null)
             config.Input = input;
@@ -237,11 +253,22 @@ public class TestWorkflowBuilder
         return new ActivityBuilder(this, activity);
     }
 
+    /// <summary>
+    /// Fan-out. <paramref name="mode"/> stays a string so the suites keep reading the way a
+    /// workflow is authored; it selects the completion oneof rather than being carried as one.
+    /// </summary>
     public PromiseBranchListBuilder Promise(string activityName, string mode, int requiredCount = 0)
     {
-        var config = new PromiseActivityConfig { Mode = mode };
-        if (requiredCount > 0)
-            config.RequiredCount = requiredCount;
+        var config = new PromiseActivityConfig();
+
+        switch (mode)
+        {
+            case "all": config.All = new PromiseAllConfig(); break;
+            case "any": config.Any = new PromiseAnyConfig(); break;
+            case "race": config.Race = new PromiseRaceConfig(); break;
+            case "count": config.Count = new PromiseCountConfig { RequiredCount = requiredCount }; break;
+            default: throw new ArgumentException($"Unknown promise mode '{mode}'.", nameof(mode));
+        }
 
         var activity = new WorkflowActivity { Promise = config };
         _activities.Add((activityName, activity));
@@ -335,9 +362,15 @@ public class ActivityBuilder
     }
 
     public ActivityBuilder WorkflowCall(string activityName, string targetWorkflow,
-        string startActivity, Struct? input = null, bool detached = false)
+        string startActivity, Struct? input = null)
     {
-        return _parent.WorkflowCall(activityName, targetWorkflow, startActivity, input, detached);
+        return _parent.WorkflowCall(activityName, targetWorkflow, startActivity, input);
+    }
+
+    public ActivityBuilder WorkflowSpawn(string activityName, string targetWorkflow,
+        string startActivity, Struct? input = null)
+    {
+        return _parent.WorkflowSpawn(activityName, targetWorkflow, startActivity, input);
     }
 
     public PromiseBranchListBuilder Promise(string activityName, string mode, int requiredCount = 0)

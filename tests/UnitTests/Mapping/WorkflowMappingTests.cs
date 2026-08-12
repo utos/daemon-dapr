@@ -66,8 +66,21 @@ public class WorkflowMappingTests
             {
                 Workflow = "acme/send-email:1.0.0",
                 StartActivity = "send",
-                Detached = true,
+                Spawn = new Wire.SpawnActivityConfig(),
                 Input = new Struct { Fields = { ["to"] = Value.ForString("{{ input.email }}") } }
+            }
+        };
+
+        // Both modes appear in the bundle so the round trip covers each arm of the oneof. An
+        // empty discriminator message still has to survive it: presence is its whole payload, and
+        // dropping it would make a spawn and a call indistinguishable.
+        var awaitedSubWorkflowActivity = new Wire.WorkflowActivity
+        {
+            Workflow = new Wire.WorkflowActivityConfig
+            {
+                Workflow = "acme/send-email:1.0.0",
+                StartActivity = "send",
+                Call = new Wire.CallActivityConfig()
             }
         };
 
@@ -75,8 +88,7 @@ public class WorkflowMappingTests
         {
             Promise = new Wire.PromiseActivityConfig
             {
-                Mode = "count",
-                RequiredCount = 2,
+                Count = new Wire.PromiseCountConfig { RequiredCount = 2 },
                 Branches =
                 {
                     new Wire.PromiseBranch
@@ -115,6 +127,7 @@ public class WorkflowMappingTests
                     ["start"] = httpActivity,
                     ["wait"] = timerActivity,
                     ["call-sub"] = subWorkflowActivity,
+                    ["await-sub"] = awaitedSubWorkflowActivity,
                     ["fan-out"] = promiseActivity
                 }
             }
@@ -124,6 +137,116 @@ public class WorkflowMappingTests
         bundle.Workflows.Add("registry.example.com/acme/order:1.2.3", workflow);
 
         return bundle;
+    }
+
+    private static Wire.WorkflowActivity SubWorkflowActivity(
+        Action<Wire.WorkflowActivityConfig> configure)
+    {
+        var config = new Wire.WorkflowActivityConfig
+        {
+            Workflow = "acme/send-email:1.0.0",
+            StartActivity = "send"
+        };
+
+        configure(config);
+        return new Wire.WorkflowActivity { Workflow = config };
+    }
+
+    private static Wire.WorkflowActivity PromiseActivity(
+        Action<Wire.PromiseActivityConfig> configure)
+    {
+        var config = new Wire.PromiseActivityConfig
+        {
+            Branches = { new Wire.PromiseBranch { Name = "a", Target = new Wire.TransitionTarget { Name = "x" } } }
+        };
+
+        configure(config);
+        return new Wire.WorkflowActivity { Promise = config };
+    }
+
+    // Choosing the mode used to be a string parse in the interpreter, which owned both of these
+    // concerns. It is a oneof case now, resolved here at the wire boundary, so the coverage lives
+    // here too.
+
+    [Theory]
+    [InlineData(Wire.PromiseActivityConfig.CompletionOneofCase.All, PromiseMode.All)]
+    [InlineData(Wire.PromiseActivityConfig.CompletionOneofCase.Any, PromiseMode.Any)]
+    [InlineData(Wire.PromiseActivityConfig.CompletionOneofCase.Race, PromiseMode.Race)]
+    [InlineData(Wire.PromiseActivityConfig.CompletionOneofCase.Count, PromiseMode.Count)]
+    public void Every_completion_case_maps_to_its_domain_mode(
+        Wire.PromiseActivityConfig.CompletionOneofCase completion, PromiseMode expected)
+    {
+        var activity = PromiseActivity(config =>
+        {
+            switch (completion)
+            {
+                case Wire.PromiseActivityConfig.CompletionOneofCase.All:
+                    config.All = new Wire.PromiseAllConfig();
+                    break;
+                case Wire.PromiseActivityConfig.CompletionOneofCase.Any:
+                    config.Any = new Wire.PromiseAnyConfig();
+                    break;
+                case Wire.PromiseActivityConfig.CompletionOneofCase.Race:
+                    config.Race = new Wire.PromiseRaceConfig();
+                    break;
+                case Wire.PromiseActivityConfig.CompletionOneofCase.Count:
+                    config.Count = new Wire.PromiseCountConfig { RequiredCount = 3 };
+                    break;
+            }
+        });
+
+        var mapped = Assert.IsType<PromiseActivityConfig>(activity.ToDomain().Config);
+
+        Assert.Equal(expected, mapped.Mode);
+    }
+
+    [Fact]
+    public void Required_count_is_only_carried_by_the_count_mode()
+    {
+        // It lives on PromiseCountConfig now, so there is no longer a mode where it is present
+        // but meaningless — every other mode maps to zero because it has nowhere to come from.
+        var counted = PromiseActivity(c => c.Count = new Wire.PromiseCountConfig { RequiredCount = 3 });
+        var raced = PromiseActivity(c => c.Race = new Wire.PromiseRaceConfig());
+
+        Assert.Equal(3, Assert.IsType<PromiseActivityConfig>(counted.ToDomain().Config).RequiredCount);
+        Assert.Equal(0, Assert.IsType<PromiseActivityConfig>(raced.ToDomain().Config).RequiredCount);
+    }
+
+    [Fact]
+    public void A_promise_with_no_completion_mode_is_refused()
+    {
+        // UTOS-A007 names this, and the validator rejects it at load. Mapping still refuses rather
+        // than defaulting: guessing a mode would change when the activity resolves.
+        var activity = PromiseActivity(_ => { });
+
+        Assert.Throws<NotSupportedException>(() => activity.ToDomain());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Each_sub_workflow_mode_maps_to_its_own_domain_type(bool spawn)
+    {
+        var activity = SubWorkflowActivity(config =>
+        {
+            if (spawn) config.Spawn = new Wire.SpawnActivityConfig();
+            else config.Call = new Wire.CallActivityConfig();
+        });
+
+        var mapped = activity.ToDomain().Config;
+
+        if (spawn) Assert.IsType<SpawnActivityConfig>(mapped);
+        else Assert.IsType<CallActivityConfig>(mapped);
+    }
+
+    [Fact]
+    public void A_sub_workflow_with_no_mode_is_refused()
+    {
+        // The mode decides what the activity returns — a result or a handle — so defaulting to
+        // one would silently change the meaning of whatever consumes its output.
+        var activity = SubWorkflowActivity(_ => { });
+
+        Assert.Throws<NotSupportedException>(() => activity.ToDomain());
     }
 
     [Fact]

@@ -270,7 +270,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
         handleToInput.Fields.Add("childId", Value.ForString("{{ output.execution_id }}"));
 
         var request = new TestWorkflowBuilder("parent-detached", fixture.MockBaseUrl)
-            .WorkflowCall("start-child", "child-detached", "wait", detached: true)
+            .WorkflowSpawn("start-child", "child-detached", "wait")
             .OnSuccess("after", handleToInput)
             .HttpPost("after", "/parent-after", """{"childId": "{{ input.childId }}"}""")
             .OnSuccess("end")

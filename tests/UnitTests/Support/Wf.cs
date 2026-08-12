@@ -79,16 +79,18 @@ internal static class Wf
         string workflowKey,
         string startActivity,
         ValueMap? input = null,
-        bool detached = false,
+        bool spawn = false,
         params TransitionRule[] onSuccess)
     {
-        return new WorkflowActivity(
-            new SubWorkflowActivityConfig(workflowKey, startActivity, input, detached),
-            onSuccess);
+        SubWorkflowActivityConfig config = spawn
+            ? new SpawnActivityConfig(workflowKey, startActivity, input)
+            : new CallActivityConfig(workflowKey, startActivity, input);
+
+        return new WorkflowActivity(config, onSuccess);
     }
 
     public static WorkflowActivity Promise(
-        string mode,
+        PromiseMode mode,
         int requiredCount,
         PromiseBranch[] branches,
         params TransitionRule[] onSuccess)
