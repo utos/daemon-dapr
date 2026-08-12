@@ -11,7 +11,7 @@ public class PromiseExpansionTests
     private static WorkflowGraph GraphWith(params PromiseBranch[] branches)
     {
         return Wf.Graph(
-            ("fan", Wf.Promise("all", 0, branches)),
+            ("fan", Wf.Promise(PromiseMode.All, 0, branches)),
             ("price", Wf.SubWorkflow("pricing:1.0.0", "quote")),
             ("ship", Wf.SubWorkflow("shipping:1.0.0", "estimate")));
     }
@@ -134,7 +134,7 @@ public class PromiseExpansionTests
     public void A_branch_pointing_at_a_non_workflow_activity_is_rejected()
     {
         var graph = Wf.Graph(
-            ("fan", Wf.Promise("all", 0, [Wf.Branch("pricing", "fetch")])),
+            ("fan", Wf.Promise(PromiseMode.All, 0, [Wf.Branch("pricing", "fetch")])),
             ("fetch", Wf.Http("https://example.com")));
 
         var ex = Assert.Throws<InvalidOperationException>(
@@ -143,30 +143,22 @@ public class PromiseExpansionTests
         Assert.Equal("Branch target activity 'fetch' must be a workflow-type activity", ex.Message);
     }
 
+    // This suite used to own both "every documented mode parses" and "an unknown mode is
+    // rejected", because the mode arrived here as a string. It is a oneof on the wire now: an
+    // unknown mode is unrepresentable, and choosing the member happens at the mapping boundary.
+    // Both concerns moved to WorkflowMappingTests. What is left to check here is that expansion
+    // carries the mode through untouched.
     [Theory]
-    [InlineData("all", PromiseMode.All)]
-    [InlineData("any", PromiseMode.Any)]
-    [InlineData("race", PromiseMode.Race)]
-    [InlineData("count", PromiseMode.Count)]
-    public void Every_documented_mode_parses(string mode, PromiseMode expected)
+    [InlineData(PromiseMode.All)]
+    [InlineData(PromiseMode.Any)]
+    [InlineData(PromiseMode.Race)]
+    [InlineData(PromiseMode.Count)]
+    public void Expansion_carries_the_mode_through(PromiseMode mode)
     {
         var graph = Wf.Graph(
             ("fan", Wf.Promise(mode, 1, [Wf.Branch("pricing", "price")])),
             ("price", Wf.SubWorkflow("pricing:1.0.0", "quote")));
 
-        Assert.Equal(expected, _interpreter.ExpandPromise(Wf.Session(graph), "fan", null).Mode);
-    }
-
-    [Fact]
-    public void An_unknown_mode_is_rejected()
-    {
-        var graph = Wf.Graph(
-            ("fan", Wf.Promise("most", 0, [Wf.Branch("pricing", "price")])),
-            ("price", Wf.SubWorkflow("pricing:1.0.0", "quote")));
-
-        var ex = Assert.Throws<NotSupportedException>(
-            () => _interpreter.ExpandPromise(Wf.Session(graph), "fan", null));
-
-        Assert.Equal("Unsupported promise mode: most", ex.Message);
+        Assert.Equal(mode, _interpreter.ExpandPromise(Wf.Session(graph), "fan", null).Mode);
     }
 }

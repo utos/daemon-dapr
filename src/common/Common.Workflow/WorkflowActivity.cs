@@ -38,7 +38,8 @@ public sealed record WorkflowActivity(
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(HttpActivityConfig), "http")]
 [JsonDerivedType(typeof(TimerActivityConfig), "timer")]
-[JsonDerivedType(typeof(SubWorkflowActivityConfig), "workflow")]
+[JsonDerivedType(typeof(CallActivityConfig), "workflow.call")]
+[JsonDerivedType(typeof(SpawnActivityConfig), "workflow.spawn")]
 [JsonDerivedType(typeof(PromiseActivityConfig), "promise")]
 public abstract record ActivityConfig
 {
@@ -71,22 +72,49 @@ public sealed record TimerActivityConfig(TimeSpan? Duration) : ActivityConfig
 }
 
 /// <summary>
-/// A call into another workflow from the bundle. When <see cref="Detached"/>, the call is
-/// fire-and-forget: the sub-workflow becomes its own top-level execution and the parent
-/// transitions immediately with a handle to it.
+/// A call into another workflow from the bundle. The two modes differ in what the activity
+/// produces and in whose failures it sees, which is why they are separate types rather than one
+/// type with a flag: a boolean that changes an activity's output contract cannot be reasoned
+/// about at the point that output is consumed.
+/// <para>
+/// Both share the identity fields, so the orchestrator can match on this base type wherever the
+/// distinction does not matter.
+/// </para>
 /// </summary>
-public sealed record SubWorkflowActivityConfig(
+public abstract record SubWorkflowActivityConfig(
     string Workflow,
     string StartActivity,
-    ValueMap? Input = null,
-    bool Detached = false) : ActivityConfig
+    ValueMap? Input = null) : ActivityConfig
 {
     public override ActivityKind Kind => ActivityKind.Workflow;
 }
 
+/// <summary>
+/// Awaits the sub-workflow: the activity completes when the child terminates, the child's result
+/// becomes its output, and <c>on_failure</c> catches the child's runtime failures.
+/// </summary>
+public sealed record CallActivityConfig(
+    string Workflow,
+    string StartActivity,
+    ValueMap? Input = null) : SubWorkflowActivityConfig(Workflow, StartActivity, Input);
+
+/// <summary>
+/// Starts the sub-workflow and moves on. The child becomes its own top-level execution with an
+/// independent lifecycle and may outlive the parent, so the activity's output is a handle to it
+/// rather than a result, and <c>on_failure</c> sees only failures to *start* it.
+/// </summary>
+public sealed record SpawnActivityConfig(
+    string Workflow,
+    string StartActivity,
+    ValueMap? Input = null) : SubWorkflowActivityConfig(Workflow, StartActivity, Input);
+
 /// <summary>Runs several branches concurrently and resolves on <see cref="Mode"/>.</summary>
+/// <param name="RequiredCount">
+/// Meaningful only when <see cref="Mode"/> is <see cref="PromiseMode.Count"/>; the wire format
+/// carries it on that mode alone, so nothing else can set it.
+/// </param>
 public sealed record PromiseActivityConfig(
-    string Mode,
+    PromiseMode Mode,
     int RequiredCount,
     IReadOnlyList<PromiseBranch> Branches) : ActivityConfig
 {
