@@ -28,7 +28,15 @@ public class WorkflowExecution : AggregateRoot<ExecutionId>
     /// <summary>Why the execution failed. Null unless <see cref="Status"/> is Failed.</summary>
     public string? FailureReason { get; private set; }
 
-    public bool IsTerminal => Status is ExecutionStatus.Completed or ExecutionStatus.Failed;
+    /// <summary>
+    /// Why the execution was cancelled. Null unless <see cref="Status"/> is Cancelled, and null
+    /// then too when nobody gave a reason. Kept apart from <see cref="FailureReason"/> so a run
+    /// stopped on purpose never surfaces as an error.
+    /// </summary>
+    public string? CancellationReason { get; private set; }
+
+    public bool IsTerminal =>
+        Status is ExecutionStatus.Completed or ExecutionStatus.Failed or ExecutionStatus.Cancelled;
 
     public WorkflowExecution()
     {
@@ -92,6 +100,20 @@ public class WorkflowExecution : AggregateRoot<ExecutionId>
     }
 
     /// <summary>
+    /// Stopped on purpose. Like the other terminals this is idempotent and loses to a state the
+    /// run already reached: a cancel that arrives after the work finished does not rewrite that
+    /// history into "cancelled". Callers that need to know which happened read
+    /// <see cref="Status"/> back.
+    /// </summary>
+    public void Cancel(string? reason = null)
+    {
+        if (IsTerminal)
+            return;
+
+        ApplyChange(new WorkflowExecutionCancelledEvent(Id, reason, DateTime.UtcNow));
+    }
+
+    /// <summary>
     /// A plain fold, in stream order, with no guards. Last write wins — matching how the read
     /// model projects status — so a legacy stream containing a contradiction resolves the same
     /// way in both places. The command methods above are what stop a new stream from ever
@@ -122,6 +144,11 @@ public class WorkflowExecution : AggregateRoot<ExecutionId>
             case WorkflowExecutionFailedEvent e:
                 Status = ExecutionStatus.Failed;
                 FailureReason = e.Reason;
+                break;
+
+            case WorkflowExecutionCancelledEvent e:
+                Status = ExecutionStatus.Cancelled;
+                CancellationReason = e.Reason;
                 break;
         }
     }

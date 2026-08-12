@@ -29,7 +29,8 @@ public class WorkflowExecutionReadModelProjection(
                || eventType == typeof(WorkflowExecutionScheduledEvent)
                || eventType == typeof(WorkflowExecutionActiveEvent)
                || eventType == typeof(WorkflowExecutionCompletedEvent)
-               || eventType == typeof(WorkflowExecutionFailedEvent);
+               || eventType == typeof(WorkflowExecutionFailedEvent)
+               || eventType == typeof(WorkflowExecutionCancelledEvent);
     }
 
     protected override async Task ProjectEventAsync(IDomainEvent @event, long position,
@@ -55,6 +56,10 @@ public class WorkflowExecutionReadModelProjection(
 
             case WorkflowExecutionFailedEvent e:
                 await HandleFailedEvent(e, cancellationToken);
+                break;
+
+            case WorkflowExecutionCancelledEvent e:
+                await HandleCancelledEvent(e, cancellationToken);
                 break;
         }
     }
@@ -157,6 +162,28 @@ public class WorkflowExecutionReadModelProjection(
         readModel.ErrorMessage = @event.Reason;
 
         logger.LogDebug("Updated read model to {Status} for execution {ExecutionId}", ReadModelStatus.Failed,
+            @event.ExecutionId);
+    }
+
+    private async Task HandleCancelledEvent(WorkflowExecutionCancelledEvent @event, CancellationToken cancellationToken)
+    {
+        var readModel = await dbContext.WorkflowExecutions
+            .FirstOrDefaultAsync(e => e.Id == @event.ExecutionId, cancellationToken);
+
+        if (readModel == null)
+        {
+            logger.LogWarning("Read model not found for execution {ExecutionId}", @event.ExecutionId);
+            return;
+        }
+
+        readModel.Status = ReadModelStatus.Cancelled;
+        readModel.CancelledAt = @event.DateOccurred;
+
+        // Deliberately not ErrorMessage: a run stopped on purpose has not errored, and a client
+        // reading the summary should not need to know the status to interpret the field.
+        readModel.CancellationReason = @event.Reason;
+
+        logger.LogDebug("Updated read model to {Status} for execution {ExecutionId}", ReadModelStatus.Cancelled,
             @event.ExecutionId);
     }
 }

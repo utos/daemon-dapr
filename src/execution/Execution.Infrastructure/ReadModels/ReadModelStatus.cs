@@ -11,4 +11,5 @@ public static class ReadModelStatus
     public const string Active = "ACTIVE";
     public const string Completed = "COMPLETED";
     public const string Failed = "FAILED";
+    public const string Cancelled = "CANCELLED";
 }

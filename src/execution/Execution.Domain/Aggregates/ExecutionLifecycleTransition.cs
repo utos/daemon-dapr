@@ -8,5 +8,6 @@ public enum ExecutionLifecycleTransition
 {
     Active,
     Completed,
-    Failed
+    Failed,
+    Cancelled
 }

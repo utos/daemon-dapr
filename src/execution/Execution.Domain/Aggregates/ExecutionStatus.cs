@@ -19,5 +19,12 @@ public enum ExecutionStatus
     Completed = 3,
 
     /// <summary>Terminal: failure.</summary>
-    Failed = 4
+    Failed = 4,
+
+    /// <summary>
+    /// Terminal: stopped on purpose, by a caller or by the daemon itself. Distinct from
+    /// <see cref="Failed"/> because nothing went wrong — a poller cancelled deliberately has not
+    /// failed, and collapsing the two would make every "why did this stop" answer ambiguous.
+    /// </summary>
+    Cancelled = 5
 }

@@ -19,4 +19,9 @@ public class ExecutionSummary
     public DateTime? StartedAt { get; set; }
     public DateTime? FinishedAt { get; set; }
     public string? ErrorMessage { get; set; }
+
+    /// <summary>Why the run was cancelled. Null unless Status is Cancelled — and null then too
+    /// when no reason was given. Separate from ErrorMessage so a deliberate stop never reads as
+    /// a failure.</summary>
+    public string? CancellationReason { get; set; }
 }

@@ -29,14 +29,19 @@ public class WriteLifecycleEventActivity(
             ExecutionLifecycleTransition.Active => execution => execution.MarkActive(),
             ExecutionLifecycleTransition.Completed => execution => execution.Complete(),
             ExecutionLifecycleTransition.Failed => execution => execution.Fail(input.FailureReason),
+            ExecutionLifecycleTransition.Cancelled => execution => execution.Cancel(input.FailureReason),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(input), input.Transition, "Unknown execution lifecycle transition")
         };
 
         await lifecycle.ApplyAsync(input.ExecutionId, transition);
 
-        if (input.Transition is ExecutionLifecycleTransition.Completed or ExecutionLifecycleTransition.Failed)
+        if (input.Transition is ExecutionLifecycleTransition.Completed
+            or ExecutionLifecycleTransition.Failed
+            or ExecutionLifecycleTransition.Cancelled)
+        {
             await contextStore.DeleteAllAsync(input.ExecutionId);
+        }
 
         return new object();
     }
