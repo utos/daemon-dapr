@@ -22,5 +22,11 @@ public class ExecutionDetails
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public DateTime? FailedAt { get; set; }
+
+    /// <summary>When the run was cancelled. Null unless Status is Cancelled.</summary>
+    public DateTime? CancelledAt { get; set; }
+
+    /// <summary>Why it was cancelled, when a reason was given.</summary>
+    public string? CancellationReason { get; set; }
     public string? ErrorMessage { get; set; }
 }

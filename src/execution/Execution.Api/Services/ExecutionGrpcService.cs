@@ -78,6 +78,33 @@ public class ExecutionGrpcService(IMediator mediator)
         return response;
     }
 
+    public override async Task<CancelExecutionResponse> CancelExecution(
+        CancelExecutionRequest request, ServerCallContext context)
+    {
+        if (!ExecutionId.TryParse(request.ExecutionId, out var executionId))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid execution ID format"));
+
+        try
+        {
+            await mediator.Send(
+                new CancelExecutionCommand(executionId, request.HasReason ? request.Reason : null),
+                context.CancellationToken);
+
+            return new CancelExecutionResponse { Status = ExecutionStatus.Cancelled };
+        }
+        catch (ExecutionNotFoundException ex)
+        {
+            throw new RpcException(new Status(StatusCode.NotFound, ex.Message));
+        }
+        catch (ExecutionAlreadyTerminalException ex)
+        {
+            // The run reached a different terminal state first, and that one wins. Reported
+            // rather than smoothed into a success, so a caller is not told it stopped something
+            // that had already finished on its own.
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, ex.Message));
+        }
+    }
+
     public override async Task<DeleteExecutionResponse> DeleteExecution(
         DeleteExecutionRequest request, ServerCallContext context)
     {

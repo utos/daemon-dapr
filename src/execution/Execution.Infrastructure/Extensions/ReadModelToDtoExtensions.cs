@@ -27,10 +27,13 @@ public static class ReadModelToDtoExtensions
             CreatedAt = readModel.CreatedAt,
             ScheduledAt = readModel.ScheduledAt,
             StartedAt = readModel.StartedAt,
-            FinishedAt = readModel.CompletedAt ?? readModel.FailedAt,
+            // Any terminal state finishes a run, cancellation included — otherwise a cancelled
+            // execution reports no finish time at all.
+            FinishedAt = readModel.CompletedAt ?? readModel.FailedAt ?? readModel.CancelledAt,
             ErrorMessage = readModel.ErrorMessage != null && readModel.ErrorMessage.Length > 200
                 ? readModel.ErrorMessage.Substring(0, 200)
-                : readModel.ErrorMessage
+                : readModel.ErrorMessage,
+            CancellationReason = readModel.CancellationReason
         };
     }
 
@@ -90,6 +93,8 @@ public static class ReadModelToDtoExtensions
             StartedAt = readModel.StartedAt,
             CompletedAt = readModel.CompletedAt,
             FailedAt = readModel.FailedAt,
+            CancelledAt = readModel.CancelledAt,
+            CancellationReason = readModel.CancellationReason,
             ErrorMessage = readModel.ErrorMessage
         };
     }
@@ -103,6 +108,7 @@ public static class ReadModelToDtoExtensions
             ReadModelStatus.Active => ExecutionStatus.Active,
             ReadModelStatus.Completed => ExecutionStatus.Completed,
             ReadModelStatus.Failed => ExecutionStatus.Failed,
+            ReadModelStatus.Cancelled => ExecutionStatus.Cancelled,
             _ => throw new ArgumentException($"Unknown status: {status}")
         };
     }

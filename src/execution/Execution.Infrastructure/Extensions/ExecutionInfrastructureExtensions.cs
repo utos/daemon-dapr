@@ -87,6 +87,10 @@ public static class ExecutionInfrastructureExtensions
         // Add Execution Context Store
         builder.Services.AddScoped<IExecutionContextStore, EfCoreExecutionContextStore>();
 
+        // Add the orchestration port, so cancelling a run does not pull Dapr into the
+        // application layer.
+        builder.Services.AddScoped<IExecutionRuntime, DaprExecutionRuntime>();
+
         // Add Activity Handlers (strategy pattern for activity type dispatch)
         builder.Services.AddScoped<IActivityHandler, HttpActivityHandler>();
         builder.Services.AddHttpClient<HttpActivityHandler>();

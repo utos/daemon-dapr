@@ -76,7 +76,7 @@ public class WorkflowExecutionRepository(WorkflowExecutionDbContext dbContext) :
         if (status is null)
             return ExecutionDeletionEligibility.NotFound;
 
-        return status is ReadModelStatus.Completed or ReadModelStatus.Failed
+        return status is ReadModelStatus.Completed or ReadModelStatus.Failed or ReadModelStatus.Cancelled
             ? ExecutionDeletionEligibility.Terminal
             : ExecutionDeletionEligibility.NonTerminal;
     }

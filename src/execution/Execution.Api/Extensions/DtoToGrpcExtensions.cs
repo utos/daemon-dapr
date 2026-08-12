@@ -37,6 +37,7 @@ public static class DtoToGrpcExtensions
             DomainExecutionStatus.Active => GrpcExecutionStatus.Active,
             DomainExecutionStatus.Completed => GrpcExecutionStatus.Completed,
             DomainExecutionStatus.Failed => GrpcExecutionStatus.Failed,
+            DomainExecutionStatus.Cancelled => GrpcExecutionStatus.Cancelled,
             _ => GrpcExecutionStatus.Unspecified
         };
     }
@@ -59,6 +60,10 @@ public static class DtoToGrpcExtensions
 
         if (dto.FinishedAt.HasValue)
             grpc.FinishedAt = Timestamp.FromDateTime(dto.FinishedAt.Value.ToUniversalTime());
+
+        // Never folded into Error: a run stopped on purpose has not failed.
+        if (!string.IsNullOrEmpty(dto.CancellationReason))
+            grpc.CancellationReason = dto.CancellationReason;
 
         if (!string.IsNullOrEmpty(dto.ErrorMessage))
             grpc.Error = new GrpcWorkflowError
@@ -89,9 +94,12 @@ public static class DtoToGrpcExtensions
             summary.StartedAt = Timestamp.FromDateTime(dto.StartedAt.Value.ToUniversalTime());
 
         // ExecutionSummary has a single finished_at; take whichever terminal time is set.
-        var finishedAt = dto.CompletedAt ?? dto.FailedAt;
+        var finishedAt = dto.CompletedAt ?? dto.FailedAt ?? dto.CancelledAt;
         if (finishedAt.HasValue)
             summary.FinishedAt = Timestamp.FromDateTime(finishedAt.Value.ToUniversalTime());
+
+        if (!string.IsNullOrEmpty(dto.CancellationReason))
+            summary.CancellationReason = dto.CancellationReason;
 
         if (!string.IsNullOrEmpty(dto.ErrorMessage))
             summary.Error = new GrpcWorkflowError

@@ -7,8 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ExecutionService.CancelExecution`** — stop a running execution, optionally with a reason. The
+  run reaches the new terminal status `Cancelled` and its orchestration is torn down. This closes
+  a hole the daemon already depended on: `ExecutionLimitsOptions` notes that an endless loop
+  "would be unstoppable short of purging the Dapr instance", and `DeleteExecution` told callers to
+  cancel first without there being any way to.
+- Cancellation is **idempotent, and loses to a state the run already reached**. Cancelling an
+  already-cancelled execution succeeds; one that finished under the caller's feet reports
+  `FAILED_PRECONDITION` rather than a success implying the cancel did something. The first
+  terminal state wins, consistently with every other lifecycle transition, because the driver is
+  at-least-once.
+- `IExecutionRuntime` — the orchestration as a port, so cancelling a run does not pull Dapr into
+  the application layer, the way `IExecutionContextStore` keeps the database out of it.
+- `CancelledAt` and `CancellationReason` on the execution read model, with a migration.
+  `CancellationReason` is **its own column rather than `ErrorMessage`**: a run stopped on purpose
+  has not errored, and a client should not have to read the status to know how to interpret a
+  field. `finished_at` now derives from the cancellation time too, so a cancelled run reports when
+  it stopped.
+
 ### Changed
 
+- `DeleteExecution` accepts `Cancelled` as a deletable terminal state.
+- **The cascade to awaited sub-workflows needed no code.** They are child orchestrations of their
+  parent rather than executions of their own, so Dapr tears them down with it — which is exactly
+  the spec's rule. A `workflow.spawn` child is a separate top-level orchestration and is
+  deliberately left running.
 - **Sub-workflow invocation is two domain types rather than a flag.** `SubWorkflowActivityConfig`
   becomes an abstract base over `CallActivityConfig` and `SpawnActivityConfig`, matching spec
   `0.0.12`. The old `Detached` boolean decided what the activity *returned* — the child's result

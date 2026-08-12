@@ -58,6 +58,17 @@ public class WorkflowExecutionReadModel : Entity<ExecutionId>
     public string? ErrorMessage { get; set; }
 
     /// <summary>
+    /// When the workflow execution was cancelled
+    /// </summary>
+    public DateTime? CancelledAt { get; set; }
+
+    /// <summary>
+    /// Why the execution was cancelled, when a reason was given. Its own column rather than
+    /// <see cref="ErrorMessage"/>, so a run stopped on purpose is never read back as an error.
+    /// </summary>
+    public string? CancellationReason { get; set; }
+
+    /// <summary>
     /// Full workflow definition as JSON (for GetExecution details)
     /// Stored as JSON to avoid complex relational mapping
     /// </summary>
