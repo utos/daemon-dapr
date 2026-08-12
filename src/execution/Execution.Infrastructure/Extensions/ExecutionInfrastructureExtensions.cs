@@ -91,6 +91,9 @@ public static class ExecutionInfrastructureExtensions
         // application layer.
         builder.Services.AddScoped<IExecutionRuntime, DaprExecutionRuntime>();
 
+        // Add the execution output stream — the durable log of what a workflow produced.
+        builder.Services.AddScoped<IExecutionOutputStore, KurrentExecutionOutputStore>();
+
         // Add Activity Handlers (strategy pattern for activity type dispatch)
         builder.Services.AddScoped<IActivityHandler, HttpActivityHandler>();
         builder.Services.AddHttpClient<HttpActivityHandler>();
