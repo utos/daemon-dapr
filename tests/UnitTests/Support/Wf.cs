@@ -47,10 +47,9 @@ internal static class Wf
         return new ScribanTemplateEngine(NullLogger<ScribanTemplateEngine>.Instance);
     }
 
-    /// <summary>Mirrors the shipped defaults: no loop ceiling unless a test asks for one.</summary>
-    public static ExecutionLimits Limits(int maxLooped = 0, int continueAsNewAfter = 100)
+    public static ExecutionLimits Limits(int continueAsNewAfter = 100)
     {
-        return new ExecutionLimits(maxLooped, continueAsNewAfter);
+        return new ExecutionLimits(continueAsNewAfter);
     }
 
     // ---- activities ----------------------------------------------------

@@ -19,9 +19,9 @@ namespace Execution.Infrastructure.Dapr;
 /// non-null means this instance resumed via continue-as-new, which is what suppresses the
 /// duplicate "Active" lifecycle event. Bounded by the workflow's activity count.
 /// </param>
-/// <param name="LoopedTransitions">
-/// Activities re-executed since a loop was entered, carried across continuations so the
-/// ceiling survives them.
+/// <param name="LoopDetected">
+/// A back-edge has been taken, carried across continuations because it is what makes a segment
+/// eligible to continue as new at all.
 /// </param>
 /// <param name="StartedAt">
 /// When the execution originally began, so the completion duration covers the whole run
@@ -35,9 +35,8 @@ public record WorkflowExecutorInput(
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? ActivityInput = null,
     List<string>? Visited = null,
-    int LoopedTransitions = 0,
+    bool LoopDetected = false,
     DateTime? StartedAt = null,
-    int MaxLoopedTransitions = 0,
     int ContinueAsNewAfterTransitions = 100);
 
 /// <summary>
@@ -77,8 +76,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 new LoadWorkflowInput(input.ExecutionId, input.WorkflowKey));
 
             var graph = new WorkflowGraph(workflowInfo.Workflow, input.WorkflowKey);
-            var limits = new ExecutionLimits(input.MaxLoopedTransitions, input.ContinueAsNewAfterTransitions);
-            var cursor = ExecutionCursor.Start(input.Visited, input.LoopedTransitions);
+            var limits = new ExecutionLimits(input.ContinueAsNewAfterTransitions);
+            var cursor = ExecutionCursor.Start(input.Visited, input.LoopDetected);
 
             var currentActivityName = input.StartActivity;
             var currentActivityInput = input.ActivityInput;
@@ -112,7 +111,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                             StartActivity = currentActivityName,
                             ActivityInput = currentActivityInput,
                             Visited = [..continuation.Cursor.Visited],
-                            LoopedTransitions = continuation.Cursor.LoopedTransitions,
+                            LoopDetected = continuation.Cursor.LoopDetected,
                             StartedAt = startTime
                         },
                         preserveUnprocessedEvents: true);
@@ -339,14 +338,13 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 [new ChildContextSpec(childExecutionId, resolved.SubWorkflowKey!, resolved.WorkflowInput)]));
 
         // Launch and await child workflow via Dapr's native child workflow support.
-        // The child inherits the limits but starts with its own empty visited set and
-        // budget — a sub-workflow invoked twice from a parent loop is two separate
-        // executions, not a back-edge.
+        // The child inherits the limits but starts with its own empty visited set — a
+        // sub-workflow invoked twice from a parent loop is two separate executions, not a
+        // back-edge.
         return await context.CallChildWorkflowAsync<object?>(
             nameof(WorkflowExecutor),
             new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
                 resolved.SubStartActivity!, input.ExecutionId,
-                MaxLoopedTransitions: input.MaxLoopedTransitions,
                 ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
             new ChildWorkflowTaskOptions(childExecutionId.ToString()));
     }
@@ -391,7 +389,6 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 nameof(WorkflowExecutor),
                 new WorkflowExecutorInput(branchExecutionId, branch.WorkflowKey,
                     branch.StartActivity, input.ExecutionId,
-                    MaxLoopedTransitions: input.MaxLoopedTransitions,
                     ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
                 new ChildWorkflowTaskOptions(branchExecutionId.ToString()));
 

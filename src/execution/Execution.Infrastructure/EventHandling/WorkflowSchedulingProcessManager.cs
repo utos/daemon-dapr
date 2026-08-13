@@ -77,7 +77,6 @@ public class WorkflowSchedulingProcessManager(
                 executionId,
                 bundle.EntryPoint,
                 startActivity,
-                MaxLoopedTransitions: limits.Value.MaxLoopedTransitions,
                 ContinueAsNewAfterTransitions: limits.Value.ContinueAsNewAfterTransitions);
 
             try

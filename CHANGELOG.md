@@ -56,14 +56,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The loop ceiling is gone by default.** `Execution:MaxLoopedTransitions` now defaults to `0`,
-  meaning no ceiling, and the knob stays so an operator can re-impose one without a code change.
-  Its own comment asked for this once cancellation existed — cancellation now exists, and it, not
-  a counter, is what stops a runaway. A workflow consuming another's output stream will re-enter
-  its call activity once per emitted value, so any finite ceiling was a countdown to killing a
-  long-lived watcher for doing its job. Note what this does *not* loosen: orchestration history
-  is bounded by `ContinueAsNewAfterTransitions`, which is untouched and is the limit that was
-  ever load-bearing.
+- **The loop ceiling is gone** — the setting, the counter and the failure mode, not just the
+  default. `Execution:MaxLoopedTransitions` is removed; a loop with no exit now runs until it is
+  cancelled, which is what the spec always said it should do. The ceiling was a stand-in for a
+  cancellation primitive that did not exist, its own comment said so, and keeping it as a knob
+  would have left a config setting whose only purpose is to reintroduce a bug. A workflow
+  consuming another's output stream re-enters its call activity once per emitted value, so any
+  finite ceiling was a countdown to killing a long-lived watcher for doing its job.
+  `ExecutionCursor` loses `LoopedTransitions` with it: the count existed to be compared against
+  the ceiling, and the one thing still needed across a continuation — *whether* a loop was
+  detected — is now carried as the boolean it always was.
+  Note what this does **not** loosen. Orchestration history is bounded by
+  `ContinueAsNewAfterTransitions`, which is untouched and is the limit that was ever load-bearing:
+  history is state Dapr must rebuild after a crash or a node move, while an output stream is a
+  ledger that is appended to and read by cursor, with nothing to rebuild.
 - `DeleteExecution` accepts `Cancelled` as a deletable terminal state.
 - **The cascade to awaited sub-workflows needed no code.** They are child orchestrations of their
   parent rather than executions of their own, so Dapr tears them down with it — which is exactly
@@ -105,8 +111,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **This is a breaking change to persisted state.** Activity configs change discriminator
   (`workflow` becomes `workflow.call` / `workflow.spawn`) and promise mode changes from a
   lowercase string to an enum name, so existing `workflowexecution-{id}` streams cannot be
-  replayed. Drop the KurrentDB volume and the SQL database before running this version. There is
-  no upcaster; the daemon is pre-1.0.
+  replayed. `WorkflowExecutorInput` also changes shape — `LoopedTransitions` and
+  `MaxLoopedTransitions` are replaced by a `LoopDetected` flag — so an orchestration in flight
+  across the upgrade cannot resume either. Drop the KurrentDB volume and the SQL database before
+  running this version. There is no upcaster; the daemon is pre-1.0.
 
 - **The document's shape rules now come from the spec, not from this repository.**
   `Common.Workflow.Validation` is deleted; `DefinitionGrpcService` applies

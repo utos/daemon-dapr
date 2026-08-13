@@ -7,7 +7,7 @@ public class WorkflowNavigatorTests
 {
     private static ExecutionCursor Fresh()
     {
-        return ExecutionCursor.Start(null, 0);
+        return ExecutionCursor.Start(null, false);
     }
 
     [Theory]
@@ -58,7 +58,6 @@ public class WorkflowNavigatorTests
         Assert.Equal("a", run.ActivityName);
         Assert.False(run.LoopJustDetected);
         Assert.False(run.Cursor.LoopDetected);
-        Assert.Equal(0, run.Cursor.LoopedTransitions);
         Assert.Equal(1, run.Cursor.TransitionsThisSegment);
         Assert.Contains("a", run.Cursor.Visited);
     }
@@ -74,12 +73,11 @@ public class WorkflowNavigatorTests
         var third = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", second.Cursor, limits);
 
         Assert.True(second.LoopJustDetected);
-        Assert.Equal(1, second.Cursor.LoopedTransitions);
+        Assert.True(second.Cursor.LoopDetected);
 
         // Already reported — the driver should not log the discovery again.
         Assert.False(third.LoopJustDetected);
         Assert.True(third.Cursor.LoopDetected);
-        Assert.Equal(2, third.Cursor.LoopedTransitions);
     }
 
     [Fact]
@@ -90,8 +88,7 @@ public class WorkflowNavigatorTests
             ("b", Wf.Http("https://example.com")),
             ("c", Wf.Http("https://example.com")));
 
-        // A ceiling of 1 would fail immediately if linear steps were charged to it.
-        var limits = Wf.Limits(maxLooped: 1);
+        var limits = Wf.Limits();
         var cursor = Fresh();
 
         foreach (var name in new[] { "a", "b", "c" })
@@ -101,59 +98,7 @@ public class WorkflowNavigatorTests
         }
 
         Assert.False(cursor.LoopDetected);
-        Assert.Equal(0, cursor.LoopedTransitions);
         Assert.Equal(3, cursor.TransitionsThisSegment);
-    }
-
-    [Fact]
-    public void Exceeding_the_loop_ceiling_fails_and_names_the_re_entered_activity()
-    {
-        var graph = Wf.Graph(("poll", Wf.Http("https://example.com")));
-        var limits = Wf.Limits(maxLooped: 3, continueAsNewAfter: int.MaxValue);
-
-        var cursor = Fresh();
-        WorkflowStep step;
-
-        // Lap 1 is the first visit; laps 2-4 are back-edges, so the third one hits the ceiling.
-        do
-        {
-            step = WorkflowNavigator.Next(graph, "poll", cursor, limits);
-            if (step is WorkflowStep.Run run)
-                cursor = run.Cursor;
-        } while (step is WorkflowStep.Run);
-
-        var fail = Assert.IsType<WorkflowStep.Fail>(step);
-        Assert.Equal(
-            "Workflow exceeded the maximum of 3 looped activity executions; the loop re-enters " +
-            "activity 'poll'. Either the loop has no reachable exit, or the limit is too low " +
-            "for this workflow.",
-            fail.Reason);
-    }
-
-    [Fact]
-    public void No_ceiling_is_the_default_so_a_loop_runs_until_it_is_cancelled()
-    {
-        // What the spec permits — "runs until the execution is cancelled" — and what a workflow
-        // consuming another's output stream needs: it re-enters its call activity once per
-        // emitted value, so any finite ceiling is a countdown to killing a long-lived watcher.
-        //
-        // The continuation threshold is pinned out of the way so every lap comes back as Run;
-        // it is checked before the ceiling and would otherwise end the loop first. Note which of
-        // the two is load-bearing: continuing as new is what keeps orchestration history bounded,
-        // and it still does that here. This ceiling only ever decided when to give up.
-        var graph = Wf.Graph(("poll", Wf.Http("https://example.com")));
-        var limits = Wf.Limits(continueAsNewAfter: int.MaxValue);
-
-        var cursor = Fresh();
-
-        // Well past the 10,000 that used to fail a run.
-        for (var lap = 0; lap < 20_000; lap++)
-        {
-            var step = WorkflowNavigator.Next(graph, "poll", cursor, limits);
-            cursor = Assert.IsType<WorkflowStep.Run>(step).Cursor;
-        }
-
-        Assert.Equal(19_999, cursor.LoopedTransitions);
     }
 
     [Fact]
@@ -169,7 +114,7 @@ public class WorkflowNavigatorTests
 
         var continuation = Assert.IsType<WorkflowStep.ContinueAsNew>(step);
         Assert.Equal(2, continuation.Cursor.TransitionsThisSegment);
-        Assert.Equal(1, continuation.Cursor.LoopedTransitions);
+        Assert.True(continuation.Cursor.LoopDetected);
         Assert.Contains("a", continuation.Cursor.Visited);
     }
 
@@ -209,10 +154,9 @@ public class WorkflowNavigatorTests
     [Fact]
     public void A_resumed_segment_carries_its_loop_state_and_resets_the_segment_count()
     {
-        var cursor = ExecutionCursor.Start(["a", "b"], 7);
+        var cursor = ExecutionCursor.Start(["a", "b"], true);
 
         Assert.True(cursor.LoopDetected);
-        Assert.Equal(7, cursor.LoopedTransitions);
         Assert.Equal(0, cursor.TransitionsThisSegment);
         Assert.Contains("a", cursor.Visited);
         Assert.Contains("b", cursor.Visited);
@@ -221,9 +165,41 @@ public class WorkflowNavigatorTests
     [Fact]
     public void A_fresh_segment_is_not_looping_even_with_an_empty_visited_set()
     {
-        Assert.False(ExecutionCursor.Start(null, 0).LoopDetected);
+        Assert.False(ExecutionCursor.Start(null, false).LoopDetected);
+        Assert.False(ExecutionCursor.Start([], false).LoopDetected);
+    }
 
-        // Continued before any back-edge was charged: still not looping.
-        Assert.False(ExecutionCursor.Start([], 0).LoopDetected);
+    [Fact]
+    public void A_loop_has_no_ceiling_so_it_runs_until_the_execution_is_cancelled()
+    {
+        // The spec permits it — "runs until the execution is cancelled" — and a workflow
+        // consuming another's output stream depends on it: it re-enters its call activity once
+        // per emitted value, so any finite ceiling would be a countdown to killing a long-lived
+        // watcher for doing its job.
+        //
+        // Continuation is what bounds a run, and it still does: the threshold is left at its
+        // default, so the segment restarts rather than growing without limit.
+        var graph = Wf.Graph(("poll", Wf.Http("https://example.com")));
+        var limits = Wf.Limits();
+
+        var cursor = Fresh();
+        var laps = 0;
+
+        // Well past the 10,000 that used to fail a run outright.
+        while (laps < 20_000)
+        {
+            var step = WorkflowNavigator.Next(graph, "poll", cursor, limits);
+
+            // Continuing as new resets the segment, which is the point: history stays bounded
+            // while the loop itself carries on.
+            cursor = step is WorkflowStep.ContinueAsNew continuation
+                ? ExecutionCursor.Start(continuation.Cursor.Visited, continuation.Cursor.LoopDetected)
+                : Assert.IsType<WorkflowStep.Run>(step).Cursor;
+
+            if (step is WorkflowStep.Run)
+                laps++;
+        }
+
+        Assert.True(cursor.LoopDetected);
     }
 }

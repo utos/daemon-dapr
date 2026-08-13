@@ -10,9 +10,9 @@ namespace IntegrationTests.Executions;
 
 /// <summary>
 /// Tests for back-edge transitions — a transition target naming an already-visited activity,
-/// which forms a loop. The executor bounds these two ways: it continues as new once a loop is
-/// detected, so Dapr instance history stays bounded, and it fails the run past a ceiling on
-/// looped work.
+/// which forms a loop. The executor bounds one thing and one thing only: it continues as new once
+/// a loop is detected, so Dapr instance history stays bounded. How many times a loop goes round is
+/// not bounded at all — an endless loop is legal, and cancellation is what stops one.
 ///
 /// Loops here terminate on <em>data</em>, so no timer or cancellation primitive is needed.
 /// State is accumulated as a string, which exercises the same threading as a counter without
@@ -168,29 +168,37 @@ public class LoopTests(DaemonTestFixture fixture)
     }
 
     [Fact]
-    public async Task Loop_WithNoExit_FailsOnceCeilingIsReached()
+    public async Task Loop_WithNoExit_KeepsRunningUntilItIsCancelled()
     {
-        // Arrange - an unconditional back-edge, so nothing ever leaves the loop
+        // Arrange - an unconditional back-edge, so nothing ever leaves the loop. This used to
+        // fail the run past a ceiling of looped activity executions. That ceiling existed only
+        // because the daemon had no way to stop a runaway; CancelExecution is that way, so a
+        // loop with no exit is now exactly what the spec says it is — a run that continues until
+        // someone stops it. A timer paces the lap so the stub is not hammered.
         const string path = "/loop-runaway";
         StubJson(path);
 
         var request = new TestWorkflowBuilder("loop-runaway-workflow", fixture.MockBaseUrl)
             .HttpGet("poll", path)
+            .OnSuccess("pace")
+            .Timer("pace", TimeSpan.FromSeconds(1))
             .OnSuccess("poll")
-            .Build();
+            .Build("poll");
 
-        // Act
         var response = await fixture.ScheduleAsync(request);
-        await WatchToCompletion(response.Id);
 
-        // Assert - failed with a diagnostic naming the limit and the re-entered activity
-        var execution = await fixture.DaemonClient.GetExecutionAsync(
-            new GetExecutionRequest { ExecutionId = response.Id });
+        // Act - let it lap well past where the old ceiling would have been irrelevant, then stop it
+        await WaitForLaps(path, 3, TimeSpan.FromSeconds(30));
 
-        Assert.Equal(ExecutionStatus.Failed, execution.Summary.Status);
-        Assert.NotNull(execution.Summary.Error);
-        Assert.Contains("looped activity executions", execution.Summary.Error.Message);
-        Assert.Contains("'poll'", execution.Summary.Error.Message);
+        await fixture.DaemonClient.CancelExecutionAsync(
+            new CancelExecutionRequest { ExecutionId = response.Id, Reason = "runaway" });
+
+        // Assert - stopped, and never failed on its own. Polled rather than read once: the RPC
+        // returns when the event is appended, and the read model is a projection behind it.
+        var execution = await WaitForStatus(
+            response.Id, ExecutionStatus.Cancelled, TimeSpan.FromSeconds(20));
+
+        Assert.Null(execution.Summary.Error);
     }
 
     [Fact]
@@ -249,6 +257,42 @@ public class LoopTests(DaemonTestFixture fixture)
 
     private int CallCount(string path) =>
         fixture.WireMockServer.LogEntries.Count(e => e.RequestMessage.Path == path);
+
+    private async Task<GetExecutionResponse> WaitForStatus(
+        string executionId, ExecutionStatus status, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+
+        while (true)
+        {
+            var execution = await fixture.DaemonClient.GetExecutionAsync(
+                new GetExecutionRequest { ExecutionId = executionId });
+
+            if (execution.Summary.Status == status)
+                return execution;
+
+            if (cts.IsCancellationRequested)
+                throw new TimeoutException(
+                    $"Execution {executionId} was {execution.Summary.Status}, not {status}, " +
+                    $"within {timeout}");
+
+            await Task.Delay(200, cts.Token);
+        }
+    }
+
+    private async Task WaitForLaps(string path, int laps, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+
+        while (CallCount(path) < laps)
+        {
+            if (cts.IsCancellationRequested)
+                throw new TimeoutException(
+                    $"Only {CallCount(path)} of {laps} laps ran within {timeout}");
+
+            await Task.Delay(200, cts.Token);
+        }
+    }
 
     private List<string> MarkersSent(string path) =>
         fixture.WireMockServer.LogEntries

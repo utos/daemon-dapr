@@ -34,14 +34,11 @@ public static class WorkflowNavigator
             return new WorkflowStep.Fail(
                 $"Activity '{activityName}' not found in workflow '{graph.WorkflowKey}'");
 
-        var entry = cursor.Enter(activityName, limits);
+        // Nothing here caps how many times a loop may go round. An endless loop is legal, and
+        // CancelExecution is what stops one; the ceiling that used to live here only existed
+        // because nothing else could.
+        var entry = cursor.Enter(activityName);
 
-        if (entry.LimitExceeded)
-            return new WorkflowStep.Fail(
-                $"Workflow exceeded the maximum of {limits.MaxLoopedTransitions} looped activity " +
-                $"executions; the loop re-enters activity '{activityName}'. Either the " +
-                $"loop has no reachable exit, or the limit is too low for this workflow.");
-
-        return new WorkflowStep.Run(activityName, activity, entry.Cursor!, entry.LoopJustDetected);
+        return new WorkflowStep.Run(activityName, activity, entry.Cursor, entry.LoopJustDetected);
     }
 }
