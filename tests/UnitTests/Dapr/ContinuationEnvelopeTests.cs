@@ -35,25 +35,20 @@ public class ContinuationEnvelopeTests
             LoopDetected: false,
             StartedAt: Started,
             ContinueAsNewAfterTransitions: 7,
-            Subscriptions: new Dictionary<string, SubscriptionState>
-            {
-                ["watch"] = new(ChildId, 3)
-            });
+            Subscriptions: new Dictionary<string, ExecutionId>(),
+            OutputEventName: "child-output:upstream");
 
     private static ExecutionCursor Cursor() =>
         ExecutionCursor.Start(["first", "handle"], loopDetected: true).Enter("handle").Cursor;
 
     private static WorkflowExecutorInput Continued(
-        Dictionary<string, SubscriptionState>? subscriptions = null) =>
+        Dictionary<string, ExecutionId>? subscriptions = null) =>
         Original().ContinueFrom(
             "handle",
             new Dictionary<string, object> { ["fresh"] = 2 },
             Cursor(),
             Started,
-            subscriptions ?? new Dictionary<string, SubscriptionState>
-            {
-                ["watch"] = new(ChildId, 9)
-            });
+            subscriptions ?? new Dictionary<string, ExecutionId> { ["watch"] = ChildId });
 
     [Fact]
     public void The_next_segment_resumes_at_the_activity_the_last_one_stopped_on()
@@ -78,23 +73,37 @@ public class ContinuationEnvelopeTests
     }
 
     [Fact]
-    public void A_subscription_cursor_advanced_during_the_segment_is_what_carries_forward()
+    public void A_subscription_opened_during_the_segment_is_what_carries_forward()
     {
-        // The exact rewind this whole shape exists to prevent: the original envelope says 3, the
-        // segment consumed up to 9. Carry the record's own value and the caller silently
-        // re-handles entries 4 through 9 after every continuation.
+        // The exact rewind this shape exists to prevent. The original envelope has no
+        // subscriptions; the segment opened one. Carry the record's own empty map instead and the
+        // caller re-enters its call activity seeing nothing subscribed — so it starts a *second*
+        // child, and the first is left parked on an acknowledgement nobody will ever send.
         var continued = Continued();
 
-        Assert.Equal(9, continued.Subscriptions!["watch"].Cursor);
-        Assert.Equal(ChildId, continued.Subscriptions["watch"].ChildExecutionId);
+        Assert.Equal(ChildId, continued.Subscriptions!["watch"]);
     }
 
     [Fact]
     public void A_subscription_that_ended_during_the_segment_does_not_come_back()
     {
-        var continued = Continued(new Dictionary<string, SubscriptionState>());
+        // The mirror image: a resurrected subscription would have the caller wait for output
+        // from a child that has already terminated.
+        var continued = Original() with { Subscriptions = new Dictionary<string, ExecutionId> { ["watch"] = ChildId } };
 
-        Assert.Empty(continued.Subscriptions!);
+        var ended = continued.ContinueFrom(
+            "handle", null, Cursor(), Started, new Dictionary<string, ExecutionId>());
+
+        Assert.Empty(ended.Subscriptions!);
+    }
+
+    [Fact]
+    public void Whether_this_run_has_a_consumer_is_settled_at_start_and_never_reconsidered()
+    {
+        // Unlike the subscriptions it carries, this one is fixed for the life of the child: it
+        // came from the caller's on_emitted when the child was started. Recomputing it per
+        // segment is exactly what a replaying orchestration must not do.
+        Assert.Equal("child-output:upstream", Continued().OutputEventName);
     }
 
     [Fact]
@@ -133,7 +142,8 @@ public class ContinuationEnvelopeTests
             nameof(WorkflowExecutorInput.ExecutionId),
             nameof(WorkflowExecutorInput.WorkflowKey),
             nameof(WorkflowExecutorInput.ParentExecutionId),
-            nameof(WorkflowExecutorInput.ContinueAsNewAfterTransitions)
+            nameof(WorkflowExecutorInput.ContinueAsNewAfterTransitions),
+            nameof(WorkflowExecutorInput.OutputEventName)
         ];
 
         var declared = typeof(WorkflowExecutorInput)
@@ -157,12 +167,12 @@ public class ContinuationEnvelopeTests
         var json = JsonSerializer.Serialize(Continued());
 
         // An execution id stays a bare GUID string inside the subscription map, as everywhere else.
-        Assert.Contains("\"ChildExecutionId\":\"33333333-3333-3333-3333-333333333333\"", json);
+        Assert.Contains("\"watch\":\"33333333-3333-3333-3333-333333333333\"", json);
 
         var restored = JsonSerializer.Deserialize<WorkflowExecutorInput>(json)!;
 
-        Assert.Equal(ChildId, restored.Subscriptions!["watch"].ChildExecutionId);
-        Assert.Equal(9, restored.Subscriptions["watch"].Cursor);
+        Assert.Equal(ChildId, restored.Subscriptions!["watch"]);
+        Assert.Equal("child-output:upstream", restored.OutputEventName);
         Assert.Equal(2, restored.ActivityInput!["fresh"]);
         Assert.True(restored.LoopDetected);
     }

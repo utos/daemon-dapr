@@ -28,8 +28,15 @@ namespace Execution.Infrastructure.Dapr;
 /// rather than just the final segment.
 /// </param>
 /// <param name="Subscriptions">
-/// Live output-stream subscriptions, keyed by the call activity that opened each. Re-entering
-/// that activity resumes the subscription rather than starting a second child.
+/// Live output subscriptions — the call activity that opened each, and the child producing for
+/// it. Re-entering that activity resumes the subscription rather than starting a second child.
+/// </param>
+/// <param name="OutputEventName">
+/// Set on a child whose caller consumes what it emits, and is both the fact and the address: the
+/// channel to hand each value to <see cref="ParentExecutionId"/> on. Null means no privileged
+/// consumer, so an emit completes as soon as the entry is durable rather than waiting for an
+/// acknowledgement that would never come. Decided once, at start, from the caller's
+/// <c>on_emitted</c> — never by asking at emit time who is listening, which could not replay.
 /// </param>
 public record WorkflowExecutorInput(
     ExecutionId ExecutionId,
@@ -42,7 +49,8 @@ public record WorkflowExecutorInput(
     bool LoopDetected = false,
     DateTime? StartedAt = null,
     int ContinueAsNewAfterTransitions = 100,
-    Dictionary<string, SubscriptionState>? Subscriptions = null)
+    Dictionary<string, ExecutionId>? Subscriptions = null,
+    string? OutputEventName = null)
 {
     /// <summary>
     /// The envelope for the next segment of this execution — everything that must survive a
@@ -67,7 +75,7 @@ public record WorkflowExecutorInput(
         Dictionary<string, object>? activityInput,
         ExecutionCursor cursor,
         DateTime startedAt,
-        Dictionary<string, SubscriptionState>? subscriptions) =>
+        Dictionary<string, ExecutionId> subscriptions) =>
         this with
         {
             StartActivity = activityName,
@@ -77,6 +85,19 @@ public record WorkflowExecutorInput(
             StartedAt = startedAt,
             Subscriptions = subscriptions
         };
+}
+
+/// <summary>
+/// What an activity produced, and whether that was the end of it. An emission is a value a
+/// sub-workflow handed over mid-run, which routes through <c>on_emitted</c>; everything else is a
+/// finished activity, routing through <c>on_success</c>. The two are indistinguishable by value
+/// alone, which is why they are not carried as one.
+/// </summary>
+public readonly record struct ActivityOutcome(object? Output, bool IsEmission)
+{
+    public static ActivityOutcome Completed(object? output) => new(output, false);
+
+    public static ActivityOutcome Emitted(object? value) => new(value, true);
 }
 
 /// <summary>
@@ -126,9 +147,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             // Per-segment state, resumed from the envelope. Mutated as the segment runs and
             // written back by ContinueFrom — see the remarks there for why it is threaded rather
             // than read off `input` at the continuation point.
-            var subscriptions = input.Subscriptions is null
-                ? null
-                : new Dictionary<string, SubscriptionState>(input.Subscriptions, StringComparer.Ordinal);
+            var subscriptions = new Dictionary<string, ExecutionId>(
+                input.Subscriptions ?? [], StringComparer.Ordinal);
 
             while (currentActivityName != null)
             {
@@ -169,21 +189,43 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                         "Loop detected at activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
                         run.ActivityName, logExecutionId);
 
-                var activityOutput = await PerformAsync(
-                    context, logger, input, run, currentActivityInput, logExecutionId);
+                var outcome = await PerformAsync(
+                    context, logger, input, run, currentActivityInput, logExecutionId, subscriptions);
 
+                // An emission routes through on_emitted rather than on_success: the child has
+                // produced a value, not finished. Which rule list applies is the interpreter's
+                // call; that it was an emission is only knowable here.
                 var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
                     nameof(EvaluateTransitionActivity),
                     new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
-                        run.ActivityName, currentActivityInput, activityOutput));
+                        run.ActivityName, currentActivityInput, outcome.Output, outcome.IsEmission));
 
                 // An emit is emit-and-continue: the value becomes durable before the run moves
                 // on, so a consumer reading the stream in order can never see the effect of a
                 // value it has not been given yet.
                 if (transition.EmittedValue != null)
+                {
                     await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
                         new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Value,
                             transition.EmittedValue));
+
+                    // Gating, depth one. Hand the value to the privileged consumer and do not
+                    // continue until it says so, which bounds the unconsumed buffer to a single
+                    // entry however much faster this run is than its caller.
+                    //
+                    // Only when there *is* such a consumer. A caller that declared no on_emitted
+                    // wants the terminal value alone, and waiting for an acknowledgement it will
+                    // never send would not fail — it would hang, taking the caller with it.
+                    if (input.OutputEventName != null)
+                    {
+                        await context.CallActivityAsync(nameof(RaiseChildOutputActivity),
+                            new RaiseChildOutputInput(
+                                input.ParentExecutionId!.Value, input.OutputEventName,
+                                new ChildOutputMessage(ChildOutputKind.Value, transition.EmittedValue)));
+
+                        await context.WaitForExternalEventAsync<bool>(OutputEvents.Consumed);
+                    }
+                }
 
                 if (transition.ReturnValue != null)
                 {
@@ -209,6 +251,15 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
                 new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Result, workflowOutput));
 
+            // The terminal message ends the subscription. A consumer waits on this channel and
+            // nothing else, so a child that finished without saying so would leave its caller
+            // waiting on a value that is never coming.
+            if (input.OutputEventName != null)
+                await context.CallActivityAsync(nameof(RaiseChildOutputActivity),
+                    new RaiseChildOutputInput(
+                        input.ParentExecutionId!.Value, input.OutputEventName,
+                        new ChildOutputMessage(ChildOutputKind.Result, workflowOutput)));
+
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
                     new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Completed, null));
@@ -225,6 +276,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Error,
                     ErrorMessage: ex.Message));
 
+            // A failure is a terminal message too. Reported to the consumer rather than left to
+            // be inferred from a child that simply stops speaking.
+            if (input.OutputEventName != null)
+                await context.CallActivityAsync(nameof(RaiseChildOutputActivity),
+                    new RaiseChildOutputInput(
+                        input.ParentExecutionId!.Value, input.OutputEventName,
+                        new ChildOutputMessage(ChildOutputKind.Error, null, ex.Message)));
+
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
                     new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Failed, ex.Message));
@@ -238,24 +297,28 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
     /// evaluated against. Each arm is a different durable primitive; the decisions around
     /// them have already been made.
     /// </summary>
-    private async Task<object?> PerformAsync(
+    private async Task<ActivityOutcome> PerformAsync(
         WorkflowContext context,
         ILogger logger,
         WorkflowExecutorInput input,
         WorkflowStep.Run run,
         Dictionary<string, object>? activityInput,
-        ExecutionId logExecutionId)
+        ExecutionId logExecutionId,
+        Dictionary<string, ExecutionId> subscriptions)
     {
         switch (run.Activity.Config)
         {
             case SubWorkflowActivityConfig:
-                return await CallSubWorkflowAsync(context, logger, input, run, activityInput, logExecutionId);
+                return await CallSubWorkflowAsync(
+                    context, logger, input, run, activityInput, logExecutionId, subscriptions);
 
             case HttpActivityConfig:
-                return await CallHttpAsync(context, logger, input, run, activityInput, logExecutionId);
+                return ActivityOutcome.Completed(
+                    await CallHttpAsync(context, logger, input, run, activityInput, logExecutionId));
 
             case PromiseActivityConfig:
-                return await FanOutAsync(context, logger, input, run, activityInput, logExecutionId);
+                return ActivityOutcome.Completed(
+                    await FanOutAsync(context, logger, input, run, activityInput, logExecutionId));
 
             case TimerActivityConfig timer:
             {
@@ -278,7 +341,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
                 // A timer performs no work, so it has no output of its own — the interpreter
                 // passes its input through instead.
-                return null;
+                return ActivityOutcome.Completed(null);
             }
 
             default:
@@ -334,14 +397,32 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         }
     }
 
-    private static async Task<object?> CallSubWorkflowAsync(
+    private static async Task<ActivityOutcome> CallSubWorkflowAsync(
         WorkflowContext context,
         ILogger logger,
         WorkflowExecutorInput input,
         WorkflowStep.Run run,
         Dictionary<string, object>? activityInput,
-        ExecutionId logExecutionId)
+        ExecutionId logExecutionId,
+        Dictionary<string, ExecutionId> subscriptions)
     {
+        // Re-entry into a live subscription. The child is already running and already knows where
+        // to send what it produces, so there is nothing to resolve and nothing to start:
+        // acknowledge the value just handled, and wait for whatever comes next.
+        //
+        // This is the one place an activity stops being a pure function of its input. The same
+        // activity, entered twice with the same input, means "start a child" the first time and
+        // "take the next value" afterwards — the difference is the subscription, which is carried
+        // in the continuation envelope rather than recomputed.
+        if (subscriptions.TryGetValue(run.ActivityName, out var subscribedChild))
+        {
+            await context.CallActivityAsync(nameof(AckChildOutputActivity),
+                new AckChildOutputInput(subscribedChild));
+
+            return await TakeChildOutputAsync(
+                context, logger, run, logExecutionId, subscriptions, subscribedChild);
+        }
+
         logger.LogInformation(
             "Entering sub-workflow from activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
             run.ActivityName, logExecutionId);
@@ -368,10 +449,10 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     resolved.WorkflowInput));
 
             // The activity output is a handle to the started run, not its result.
-            return new Dictionary<string, object>
+            return ActivityOutcome.Completed(new Dictionary<string, object>
             {
                 ["execution_id"] = childExecutionId.ToString()
-            };
+            });
         }
 
         // Save child execution context (copies parent's bundle)
@@ -379,16 +460,36 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             new SaveChildContextInput(input.ExecutionId,
                 [new ChildContextSpec(childExecutionId, resolved.SubWorkflowKey!, resolved.WorkflowInput)]));
 
-        // Launch and await child workflow via Dapr's native child workflow support.
+        // Whether this caller consumes what the child emits is settled here, once, from the
+        // bundle — and travels with the child, because the child cannot ask at emit time who is
+        // listening and still replay the same way twice.
+        var consumes = run.Activity.Config is CallActivityConfig { ConsumesOutput: true };
+        var outputEventName = consumes ? OutputEvents.For(run.ActivityName) : null;
+
         // The child inherits the limits but starts with its own empty visited set — a
         // sub-workflow invoked twice from a parent loop is two separate executions, not a
         // back-edge.
-        var childOutput = await context.CallChildWorkflowAsync<object?>(
+        var childTask = context.CallChildWorkflowAsync<object?>(
             nameof(WorkflowExecutor),
             new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
                 resolved.SubStartActivity!, input.ExecutionId,
-                ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
+                ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions,
+                OutputEventName: outputEventName),
             new ChildWorkflowTaskOptions(childExecutionId.ToString()));
+
+        if (consumes)
+        {
+            // Deliberately not awaited. This activity is left and re-entered once per emitted
+            // value, and a task cannot survive that — it is a local, and a continue-as-new
+            // restarts the method outright. So the child reports through events instead, and the
+            // only thing that has to survive is the subscription below.
+            subscriptions[run.ActivityName] = childExecutionId;
+
+            return await TakeChildOutputAsync(
+                context, logger, run, logExecutionId, subscriptions, childExecutionId);
+        }
+
+        var childOutput = await childTask;
 
         // The child's stream has served its only purpose. Reclaimed here rather than left to the
         // terminal cleanup because a parent looping over a sub-workflow call need never reach a
@@ -397,7 +498,48 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         await context.CallActivityAsync(nameof(DeleteOutputStreamActivity),
             new DeleteOutputStreamInput(childExecutionId));
 
-        return childOutput;
+        return ActivityOutcome.Completed(childOutput);
+    }
+
+    /// <summary>
+    /// Waits for the child's next message: another value, or the one terminal message that ends
+    /// the subscription.
+    /// </summary>
+    private static async Task<ActivityOutcome> TakeChildOutputAsync(
+        WorkflowContext context,
+        ILogger logger,
+        WorkflowStep.Run run,
+        ExecutionId logExecutionId,
+        Dictionary<string, ExecutionId> subscriptions,
+        ExecutionId childExecutionId)
+    {
+        var message = await context.WaitForExternalEventAsync<ChildOutputMessage>(
+            OutputEvents.For(run.ActivityName));
+
+        if (message.Kind == ChildOutputKind.Value)
+        {
+            logger.LogDebug(
+                "Consuming an emitted value from '{WorkflowActivity}' (execution {WorkflowExecutionId})",
+                run.ActivityName, logExecutionId);
+
+            // Back to the loop, which routes this through on_emitted. The child stays parked on
+            // its acknowledgement until this activity is re-entered, which is what holds the
+            // unconsumed buffer at one entry.
+            return ActivityOutcome.Emitted(message.Value);
+        }
+
+        // Terminal. The subscription is over, so re-entering this activity would start a fresh
+        // child rather than resume a finished one.
+        subscriptions.Remove(run.ActivityName);
+
+        await context.CallActivityAsync(nameof(DeleteOutputStreamActivity),
+            new DeleteOutputStreamInput(childExecutionId));
+
+        if (message.Kind == ChildOutputKind.Error)
+            throw new InvalidOperationException(
+                $"Sub-workflow at activity '{run.ActivityName}' failed: {message.ErrorMessage}");
+
+        return ActivityOutcome.Completed(message.Value);
     }
 
     private static async Task<object?> FanOutAsync(

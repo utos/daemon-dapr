@@ -18,11 +18,17 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     /// Where <paramref name="activityName"/> sends the execution, given what it produced.
     /// Rules are evaluated in order and the first whose condition matches wins.
     /// </summary>
+    /// <param name="emitted">
+    /// The output is a value a sub-workflow emitted rather than its result, so the activity's
+    /// <c>on_emitted</c> rules apply instead of <c>on_success</c>. Those rules must lead back to
+    /// the call activity — leaving any other way ends the subscription.
+    /// </param>
     public TransitionDecision Advance(
         WorkflowSession session,
         string activityName,
         IReadOnlyDictionary<string, object>? activityInput,
-        object? activityOutput)
+        object? activityOutput,
+        bool emitted = false)
     {
         var activity = Require(session, activityName);
         var input = session.InputFor(activityInput);
@@ -36,8 +42,15 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             ? input
             : activityOutput;
 
+        // An emitted value is dispatched by the caller's on_emitted rules, which live on the call
+        // configuration rather than on the activity — they only mean anything for an awaited
+        // sub-workflow, so they cannot be authored anywhere they would be ignored.
+        var rules = emitted
+            ? (activity.Config as CallActivityConfig)?.OnEmitted ?? []
+            : activity.OnSuccess;
+
         // If no transitions, workflow ends
-        if (activity.OnSuccess.Count == 0)
+        if (rules.Count == 0)
             return new TransitionDecision.End();
 
         var scope = new TemplateScope()
@@ -45,7 +58,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             .WithOutput(output)
             .WithEnv(session.Env);
 
-        foreach (var rule in activity.OnSuccess)
+        foreach (var rule in rules)
         {
             // Check condition first — skip this rule if condition doesn't match
             if (!string.IsNullOrEmpty(rule.Condition))

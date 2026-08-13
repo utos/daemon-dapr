@@ -120,6 +120,8 @@ public static class ExecutionInfrastructureExtensions
             options.RegisterActivity<ResolvePromiseActivity>();
             options.RegisterActivity<AppendOutputEntryActivity>();
             options.RegisterActivity<DeleteOutputStreamActivity>();
+            options.RegisterActivity<RaiseChildOutputActivity>();
+            options.RegisterActivity<AckChildOutputActivity>();
         });
 
         // Projection engine and projections (idempotent read model updates)
