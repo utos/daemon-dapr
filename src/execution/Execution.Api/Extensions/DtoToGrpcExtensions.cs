@@ -120,6 +120,13 @@ public static class DtoToGrpcExtensions
         if (dto.Input.Count > 0)
             grpc.Input = dto.Input.ToGrpc();
 
+        // Set whenever the run produced a result entry, empty included: a completed run that
+        // returned nothing did produce a result, and reporting that as an absent field would make
+        // it indistinguishable from a run that failed. Which runs have one is the handler's call,
+        // not this mapping's.
+        if (dto.Result != null)
+            grpc.Result = dto.Result.ToProto();
+
         foreach (var (key, value) in dto.Env)
             grpc.Env.Add(key, value);
 

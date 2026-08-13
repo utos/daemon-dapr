@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Readers here are **observers**: reading never gates the producer, however far behind the cursor
   falls. Gating belongs to a `workflow.call` parent that declared `on_emitted`, which does not
   exist yet.
+- **`GetExecutionResponse.result`** — what a run returned, closing a gap that predates this work:
+  there was previously no result field anywhere in `daemon/v1`, so a completed execution's value
+  had nowhere to go over the wire. It is read back from the terminal entry of the output stream
+  rather than projected into the read model — the stream is already where a result lives, and a
+  copy in a projection would be a second thing to keep in step, one the lifecycle event it is
+  built from does not even carry. Reading it the moment the status says Completed is safe because
+  the terminal entry is appended before that lifecycle event. Set for every completed run,
+  **empty included**: a run that ended without returning did produce a result, and reporting that
+  as an absent field would make it indistinguishable from one that failed.
 - The terminal entry is written by whoever ends the run — the driver on success and failure, and
   `CancelExecutionHandler` on cancellation, since cancelling tears the orchestration down and
   nothing else would ever close the stream. It carries `EXECUTION_CANCELLED` rather than

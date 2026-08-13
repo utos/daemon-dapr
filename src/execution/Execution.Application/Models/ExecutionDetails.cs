@@ -29,4 +29,15 @@ public class ExecutionDetails
     /// <summary>Why it was cancelled, when a reason was given.</summary>
     public string? CancellationReason { get; set; }
     public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// What the run returned — the <c>result</c> terminal entry of its output stream.
+    /// <para>
+    /// Null means there is none to report: the run has not finished, or it failed or was
+    /// cancelled and reports <see cref="ErrorMessage"/> or <see cref="CancellationReason"/>
+    /// instead. A run that completed without returning anything is <see cref="ValueMap.Empty"/>
+    /// rather than null — it produced a result, and the result was nothing.
+    /// </para>
+    /// </summary>
+    public ValueMap? Result { get; set; }
 }
