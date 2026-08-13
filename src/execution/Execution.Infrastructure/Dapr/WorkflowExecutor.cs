@@ -27,6 +27,10 @@ namespace Execution.Infrastructure.Dapr;
 /// When the execution originally began, so the completion duration covers the whole run
 /// rather than just the final segment.
 /// </param>
+/// <param name="Subscriptions">
+/// Live output-stream subscriptions, keyed by the call activity that opened each. Re-entering
+/// that activity resumes the subscription rather than starting a second child.
+/// </param>
 public record WorkflowExecutorInput(
     ExecutionId ExecutionId,
     string WorkflowKey,
@@ -37,7 +41,43 @@ public record WorkflowExecutorInput(
     List<string>? Visited = null,
     bool LoopDetected = false,
     DateTime? StartedAt = null,
-    int ContinueAsNewAfterTransitions = 100);
+    int ContinueAsNewAfterTransitions = 100,
+    Dictionary<string, SubscriptionState>? Subscriptions = null)
+{
+    /// <summary>
+    /// The envelope for the next segment of this execution — everything that must survive a
+    /// <c>ContinueAsNew</c>.
+    /// <para>
+    /// This record *is* the continuation envelope, and a <c>with</c> expression carries anything
+    /// it does not name straight through. That makes the dangerous case a quiet one: state the
+    /// segment <em>changed</em> and did not write back here does not reset to a default, it
+    /// rewinds to whatever it held when the segment began — every
+    /// <see cref="ContinueAsNewAfterTransitions"/> transitions, invisibly. A subscription cursor
+    /// that rewinds re-delivers values a caller already handled.
+    /// </para>
+    /// <para>
+    /// So every piece of per-segment state is a required parameter here rather than being read
+    /// off <c>this</c>. Adding another one breaks the call site until it is threaded through,
+    /// which is the only mechanism that reliably catches the omission — a test cannot see into a
+    /// <c>with</c> expression, and the runtime failure is silent.
+    /// </para>
+    /// </summary>
+    public WorkflowExecutorInput ContinueFrom(
+        string activityName,
+        Dictionary<string, object>? activityInput,
+        ExecutionCursor cursor,
+        DateTime startedAt,
+        Dictionary<string, SubscriptionState>? subscriptions) =>
+        this with
+        {
+            StartActivity = activityName,
+            ActivityInput = activityInput,
+            Visited = [..cursor.Visited],
+            LoopDetected = cursor.LoopDetected,
+            StartedAt = startedAt,
+            Subscriptions = subscriptions
+        };
+}
 
 /// <summary>
 /// The durable driver for a workflow execution. It owns nothing about what a workflow
@@ -83,6 +123,13 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             var currentActivityInput = input.ActivityInput;
             object? workflowOutput = null;
 
+            // Per-segment state, resumed from the envelope. Mutated as the segment runs and
+            // written back by ContinueFrom — see the remarks there for why it is threaded rather
+            // than read off `input` at the continuation point.
+            var subscriptions = input.Subscriptions is null
+                ? null
+                : new Dictionary<string, SubscriptionState>(input.Subscriptions, StringComparer.Ordinal);
+
             while (currentActivityName != null)
             {
                 var step = WorkflowNavigator.Next(graph, currentActivityName, cursor, limits);
@@ -106,14 +153,9 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                         currentActivityName, continuation.Cursor.TransitionsThisSegment, logExecutionId);
 
                     context.ContinueAsNew(
-                        input with
-                        {
-                            StartActivity = currentActivityName,
-                            ActivityInput = currentActivityInput,
-                            Visited = [..continuation.Cursor.Visited],
-                            LoopDetected = continuation.Cursor.LoopDetected,
-                            StartedAt = startTime
-                        },
+                        input.ContinueFrom(
+                            currentActivityName, currentActivityInput, continuation.Cursor,
+                            startTime, subscriptions),
                         preserveUnprocessedEvents: true);
 
                     return null;
