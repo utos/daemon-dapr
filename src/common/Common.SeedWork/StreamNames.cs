@@ -17,4 +17,12 @@ public static class StreamNames
     /// cannot name the aggregate type.
     /// </summary>
     public static string Execution(ExecutionId id) => For("WorkflowExecution", id);
+
+    /// <summary>
+    /// An execution's output stream: the values it produced, kept apart from its lifecycle
+    /// events. Two streams rather than one because they are read for different reasons — the
+    /// lifecycle stream rebuilds an aggregate, while this one is walked by cursor by whoever is
+    /// consuming what the workflow emits.
+    /// </summary>
+    public static string ExecutionOutput(ExecutionId id) => For("ExecutionOutput", id);
 }

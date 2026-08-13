@@ -1,6 +1,9 @@
+using Common.Constants;
 using Common.SeedWork;
 using Execution.Application.Exceptions;
 using Execution.Domain.Aggregates;
+using Execution.Application.Services;
+using Execution.Domain.Output;
 using Execution.Domain.Services;
 using Mediator;
 using Microsoft.Extensions.Logging;
@@ -25,6 +28,8 @@ namespace Execution.Application.Commands;
 public class CancelExecutionHandler(
     IEventStoreRepository eventStore,
     IExecutionRuntime runtime,
+    IExecutionOutputStore outputStore,
+    ExecutionSubtreeReclaimer reclaimer,
     ILogger<CancelExecutionHandler> logger)
     : ICommandHandler<CancelExecutionCommand, CancelExecutionResult>
 {
@@ -52,6 +57,25 @@ public class CancelExecutionHandler(
             throw new ExecutionAlreadyTerminalException(command.ExecutionId, execution.Status.ToString());
 
         await runtime.TerminateAsync(command.ExecutionId, ct);
+
+        // The orchestration is gone, so nothing else will ever close this run's output stream.
+        // Terminated here for that reason, and before the lifecycle event for the same reason the
+        // driver writes its terminal entry first: whoever waits for the run to end must find the
+        // stream already ended, rather than blocking on an entry that is never coming.
+        await outputStore.AppendAsync(
+            command.ExecutionId,
+            new ExecutionErrorProduced(
+                command.ExecutionId,
+                WorkflowErrorCode.ExecutionCancelled,
+                command.Reason ?? "Execution cancelled",
+                DateTime.UtcNow),
+            ct);
+
+        // Cancelling tears the orchestration down, so the driver's terminal transition — which is
+        // what normally reclaims a run's sub-workflows — never runs. Without this, every
+        // cancelled run leaves its children's output streams and context rows behind with nothing
+        // left pointing at them.
+        await reclaimer.ReclaimAsync(command.ExecutionId, ct);
 
         execution.Cancel(command.Reason);
 

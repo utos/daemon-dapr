@@ -50,6 +50,22 @@ public class WorkflowMappingTests
             }
         });
 
+        // The third action a rule can take. Its target carries an input transform too, since an
+        // emitting loop threads its cursor across the back-edge the same way any loop does.
+        httpActivity.OnSuccess.Add(new Wire.TransitionRule
+        {
+            Condition = "{{ output.n > 0 }}",
+            Emit = new Wire.EmitAction
+            {
+                Value = new Struct { Fields = { ["batch"] = Value.ForString("{{ output.items }}") } },
+                Transition = new Wire.TransitionTarget
+                {
+                    Name = "start",
+                    Input = new Struct { Fields = { ["cursor"] = Value.ForNumber(7) } }
+                }
+            }
+        });
+
         httpActivity.OnFailure.Add(new Wire.TransitionRule
         {
             Result = new Struct { Fields = { ["failed"] = Value.ForBool(true) } }

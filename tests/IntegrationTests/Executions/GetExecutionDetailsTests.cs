@@ -1,8 +1,11 @@
 using Common.Constants;
+using Google.Protobuf.WellKnownTypes;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
 using Utos.Workflows.V1;
+using WireMock.RequestBuilders;
+using WireMock.ResponseBuilders;
 
 namespace IntegrationTests.Executions;
 
@@ -66,6 +69,80 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             ExecutionStatus.Completed,
             ExecutionStatus.Failed
         });
+    }
+
+    [Fact]
+    public async Task GetExecution_ReturnsWhatTheRunReturned()
+    {
+        // The terminal `result` entry of the run's output stream, read back rather than kept in
+        // the read model — there is one source of truth for what an execution returned, and
+        // WatchOutput reads the same entry.
+        var request = new TestWorkflowBuilder("get-result-test", fixture.MockBaseUrl)
+            .HttpGet("call", "/success")
+            .OnResult(new Struct
+            {
+                Fields =
+                {
+                    ["status"] = Value.ForString("{{ output.status }}"),
+                    ["count"] = Value.ForNumber(3)
+                }
+            })
+            .Build();
+
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
+
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+        Assert.NotNull(details.Result);
+        Assert.Equal("success", details.Result.Fields["status"].StringValue);
+        Assert.Equal(3d, details.Result.Fields["count"].NumberValue);
+    }
+
+    [Fact]
+    public async Task GetExecution_ReturnsAnEmptyResult_WhenTheRunEndedWithoutReturning()
+    {
+        // Not the same as having no result: the run produced one, and the result was nothing.
+        // Reporting it as absent would make it indistinguishable from a run that failed.
+        var request = new TestWorkflowBuilder("get-no-result-test", fixture.MockBaseUrl)
+            .HttpGet("call", "/success")
+            .Build();
+
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
+
+        Assert.NotNull(details.Result);
+        Assert.Empty(details.Result.Fields);
+    }
+
+    [Fact]
+    public async Task GetExecution_ReportsNoResult_WhenTheRunFailed()
+    {
+        // A failed run reports its error, never a result — its stream terminated with an error
+        // entry, so there is nothing to show.
+        const string path = "/get-failed-result-test";
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath(path).UsingGet())
+            .RespondWith(Response.Create().WithStatusCode(500));
+
+        var request = new TestWorkflowBuilder("get-failed-result-test", fixture.MockBaseUrl)
+            .HttpGet("call", path)
+            .Build();
+
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
+
+        Assert.Equal(ExecutionStatus.Failed, details.Summary.Status);
+        Assert.Null(details.Result);
+        Assert.NotNull(details.Summary.Error);
     }
 
     [Fact]

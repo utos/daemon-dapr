@@ -19,9 +19,9 @@ namespace Execution.Infrastructure.Dapr;
 /// non-null means this instance resumed via continue-as-new, which is what suppresses the
 /// duplicate "Active" lifecycle event. Bounded by the workflow's activity count.
 /// </param>
-/// <param name="LoopedTransitions">
-/// Activities re-executed since a loop was entered, carried across continuations so the
-/// ceiling survives them.
+/// <param name="LoopDetected">
+/// A back-edge has been taken, carried across continuations because it is what makes a segment
+/// eligible to continue as new at all.
 /// </param>
 /// <param name="StartedAt">
 /// When the execution originally began, so the completion duration covers the whole run
@@ -35,9 +35,8 @@ public record WorkflowExecutorInput(
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? ActivityInput = null,
     List<string>? Visited = null,
-    int LoopedTransitions = 0,
+    bool LoopDetected = false,
     DateTime? StartedAt = null,
-    int MaxLoopedTransitions = 10_000,
     int ContinueAsNewAfterTransitions = 100);
 
 /// <summary>
@@ -77,8 +76,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 new LoadWorkflowInput(input.ExecutionId, input.WorkflowKey));
 
             var graph = new WorkflowGraph(workflowInfo.Workflow, input.WorkflowKey);
-            var limits = new ExecutionLimits(input.MaxLoopedTransitions, input.ContinueAsNewAfterTransitions);
-            var cursor = ExecutionCursor.Start(input.Visited, input.LoopedTransitions);
+            var limits = new ExecutionLimits(input.ContinueAsNewAfterTransitions);
+            var cursor = ExecutionCursor.Start(input.Visited, input.LoopDetected);
 
             var currentActivityName = input.StartActivity;
             var currentActivityInput = input.ActivityInput;
@@ -112,7 +111,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                             StartActivity = currentActivityName,
                             ActivityInput = currentActivityInput,
                             Visited = [..continuation.Cursor.Visited],
-                            LoopedTransitions = continuation.Cursor.LoopedTransitions,
+                            LoopDetected = continuation.Cursor.LoopDetected,
                             StartedAt = startTime
                         },
                         preserveUnprocessedEvents: true);
@@ -136,6 +135,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
                         run.ActivityName, currentActivityInput, activityOutput));
 
+                // An emit is emit-and-continue: the value becomes durable before the run moves
+                // on, so a consumer reading the stream in order can never see the effect of a
+                // value it has not been given yet.
+                if (transition.EmittedValue != null)
+                    await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
+                        new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Value,
+                            transition.EmittedValue));
+
                 if (transition.ReturnValue != null)
                 {
                     workflowOutput = transition.ReturnValue;
@@ -152,6 +159,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 "Workflow execution completed successfully in {DurationMs}ms (execution {WorkflowExecutionId})",
                 (long)totalDuration, logExecutionId);
 
+            // Every execution terminates its own stream, children included: a stream is
+            // per-execution, and the caller consuming a child's is what branch B is built on.
+            // Written before the lifecycle event, not after — a client that waits for the run to
+            // finish is waiting on that event, and must find the stream already closed when it
+            // reads it.
+            await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
+                new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Result, workflowOutput));
+
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
                     new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Completed, null));
@@ -163,6 +178,10 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             logger.LogError(
                 "Workflow execution failed: {ErrorMessage} (execution {WorkflowExecutionId})",
                 ex.Message, logExecutionId);
+
+            await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
+                new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Error,
+                    ErrorMessage: ex.Message));
 
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
@@ -319,16 +338,24 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 [new ChildContextSpec(childExecutionId, resolved.SubWorkflowKey!, resolved.WorkflowInput)]));
 
         // Launch and await child workflow via Dapr's native child workflow support.
-        // The child inherits the limits but starts with its own empty visited set and
-        // budget — a sub-workflow invoked twice from a parent loop is two separate
-        // executions, not a back-edge.
-        return await context.CallChildWorkflowAsync<object?>(
+        // The child inherits the limits but starts with its own empty visited set — a
+        // sub-workflow invoked twice from a parent loop is two separate executions, not a
+        // back-edge.
+        var childOutput = await context.CallChildWorkflowAsync<object?>(
             nameof(WorkflowExecutor),
             new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
                 resolved.SubStartActivity!, input.ExecutionId,
-                MaxLoopedTransitions: input.MaxLoopedTransitions,
                 ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
             new ChildWorkflowTaskOptions(childExecutionId.ToString()));
+
+        // The child's stream has served its only purpose. Reclaimed here rather than left to the
+        // terminal cleanup because a parent looping over a sub-workflow call need never reach a
+        // terminal state — and with no loop ceiling, "one stream per lap, forever" is a real
+        // shape. The result above replays from orchestration history, not from the stream.
+        await context.CallActivityAsync(nameof(DeleteOutputStreamActivity),
+            new DeleteOutputStreamInput(childExecutionId));
+
+        return childOutput;
     }
 
     private static async Task<object?> FanOutAsync(
@@ -371,7 +398,6 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 nameof(WorkflowExecutor),
                 new WorkflowExecutorInput(branchExecutionId, branch.WorkflowKey,
                     branch.StartActivity, input.ExecutionId,
-                    MaxLoopedTransitions: input.MaxLoopedTransitions,
                     ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
                 new ChildWorkflowTaskOptions(branchExecutionId.ToString()));
 

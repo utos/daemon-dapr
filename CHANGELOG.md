@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every execution has a durable output stream.** Ordered, cursor-addressable, its own KurrentDB
+  stream (`executionoutput-{id}`), surviving daemon restart and orchestrator replay — see
+  `api/docs/execution-output-stream.md`. A stream is zero or more `value` entries followed by
+  exactly one terminal entry (`result` or `error`), which is what makes the ordering between what
+  a workflow emitted and what it returned arithmetic rather than a rule: one cursor walks one log.
+- **The `emit` transition action** — append a value to this execution's output stream and carry
+  on. `result` is emit-and-terminate; `emit` is emit-and-continue, so a workflow can produce values
+  as it goes rather than only once, at the end. Its `transition` is required: an emit is not a
+  terminal action, so a rule that emits and goes nowhere is a dead end rather than a return
+  (`UTOS-T004`).
+- **`ExecutionService.WatchOutput`** — stream an execution's output from a cursor, `after` or
+  `tail`. Deliberately separate from `ObservabilityService.WatchExecution`, which carries log
+  lines: emitted values are what a workflow produced, not a record of what it did, and folding
+  them into a filterable log stream would let a `level` filter drop them. Watching a finished
+  execution replays its recorded entries and then ends, and a cursor already at the terminal entry
+  returns nothing rather than blocking on an entry that can never arrive.
+- Readers here are **observers**: reading never gates the producer, however far behind the cursor
+  falls. Gating belongs to a `workflow.call` parent that declared `on_emitted`, which does not
+  exist yet. `WatchOutput` on a sub-workflow's id reports NOT_FOUND: a `workflow.call` child has
+  no execution record, and its stream exists for its caller rather than for clients.
+- **`GetExecutionResponse.result`** — what a run returned, closing a gap that predates this work:
+  there was previously no result field anywhere in `daemon/v1`, so a completed execution's value
+  had nowhere to go over the wire. It is read back from the terminal entry of the output stream
+  rather than projected into the read model — the stream is already where a result lives, and a
+  copy in a projection would be a second thing to keep in step, one the lifecycle event it is
+  built from does not even carry. Reading it the moment the status says Completed is safe because
+  the terminal entry is appended before that lifecycle event. Set for every completed run,
+  **empty included**: a run that ended without returning did produce a result, and reporting that
+  as an absent field would make it indistinguishable from one that failed.
+- The terminal entry is written by whoever ends the run — the driver on success and failure, and
+  `CancelExecutionHandler` on cancellation, since cancelling tears the orchestration down and
+  nothing else would ever close the stream. It carries `EXECUTION_CANCELLED` rather than
+  `EXECUTION_FAILED`: a reader of the stream sees the entry and not the run's status.
+- `DeleteExecution` deletes the output stream alongside the lifecycle stream.
+- **Sub-workflow output streams are reclaimed**, at both ends a run can stop at. A
+  `workflow.call` child writes its own output stream — the consumer side reads it — but is a child
+  orchestration rather than an execution of its own, so it has no record to delete it by. The
+  caller drops the stream as each call returns, which is what bounds a parent that loops over a
+  sub-workflow call and may never terminate at all; the terminal transition reclaims whatever did
+  not get there, such as the child a run failed on. Cancellation reclaims too, since tearing the
+  orchestration down means the driver's terminal transition never runs.
+- `ExecutionContext.RootExecutionId`, with a migration — the only record anywhere that a
+  sub-workflow execution happened, and therefore the only way to find what it left behind. The
+  *root* rather than the immediate parent, so one query reaches a whole tree rather than one
+  level. Streams are always deleted before the rows that name them: the other order does not leak
+  a deletion, it makes the streams unreachable.
+- **Fixes a pre-existing leak this uncovered:** `IExecutionContextStore.DeleteAllAsync` deleted a
+  single row despite its name, so every sub-workflow's context row outlived the run that created
+  it, and a cancelled run's own row was never dropped at all — the driver that would have dropped
+  it had been terminated.
 - **`ExecutionService.CancelExecution`** — stop a running execution, optionally with a reason. The
   run reaches the new terminal status `Cancelled` and its orchestration is torn down. This closes
   a hole the daemon already depended on: `ExecutionLimitsOptions` notes that an endless loop
@@ -29,6 +79,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The loop ceiling is gone** — the setting, the counter and the failure mode, not just the
+  default. `Execution:MaxLoopedTransitions` is removed; a loop with no exit now runs until it is
+  cancelled, which is what the spec always said it should do. The ceiling was a stand-in for a
+  cancellation primitive that did not exist, its own comment said so, and keeping it as a knob
+  would have left a config setting whose only purpose is to reintroduce a bug. A workflow
+  consuming another's output stream re-enters its call activity once per emitted value, so any
+  finite ceiling was a countdown to killing a long-lived watcher for doing its job.
+  `ExecutionCursor` loses `LoopedTransitions` with it: the count existed to be compared against
+  the ceiling, and the one thing still needed across a continuation — *whether* a loop was
+  detected — is now carried as the boolean it always was.
+  Note what this does **not** loosen. Orchestration history is bounded by
+  `ContinueAsNewAfterTransitions`, which is untouched and is the limit that was ever load-bearing:
+  history is state Dapr must rebuild after a crash or a node move, while an output stream is a
+  ledger that is appended to and read by cursor, with nothing to rebuild.
 - `DeleteExecution` accepts `Cancelled` as a deletable terminal state.
 - **The cascade to awaited sub-workflows needed no code.** They are child orchestrations of their
   parent rather than executions of their own, so Dapr tears them down with it — which is exactly
@@ -70,8 +134,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **This is a breaking change to persisted state.** Activity configs change discriminator
   (`workflow` becomes `workflow.call` / `workflow.spawn`) and promise mode changes from a
   lowercase string to an enum name, so existing `workflowexecution-{id}` streams cannot be
-  replayed. Drop the KurrentDB volume and the SQL database before running this version. There is
-  no upcaster; the daemon is pre-1.0.
+  replayed. `WorkflowExecutorInput` also changes shape — `LoopedTransitions` and
+  `MaxLoopedTransitions` are replaced by a `LoopDetected` flag — so an orchestration in flight
+  across the upgrade cannot resume either. Drop the KurrentDB volume and the SQL database before
+  running this version. There is no upcaster; the daemon is pre-1.0.
 
 - **The document's shape rules now come from the spec, not from this repository.**
   `Common.Workflow.Validation` is deleted; `DefinitionGrpcService` applies

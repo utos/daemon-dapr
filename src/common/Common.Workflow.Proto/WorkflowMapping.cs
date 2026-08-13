@@ -302,6 +302,9 @@ public static class WorkflowMapping
             source.ActionCase == Wire.TransitionRule.ActionOneofCase.Result
                 ? source.Result.ToDomain()
                 : null,
+            source.ActionCase == Wire.TransitionRule.ActionOneofCase.Emit
+                ? source.Emit.ToDomain()
+                : null,
             source.HasCondition ? source.Condition : null);
 
     public static Wire.TransitionRule ToProto(this Domain.TransitionRule source)
@@ -312,9 +315,32 @@ public static class WorkflowMapping
             result.Transition = source.Transition.ToProto();
         else if (source.Result != null)
             result.Result = source.Result.ToProto();
+        else if (source.Emit != null)
+            result.Emit = source.Emit.ToProto();
 
         if (source.Condition != null)
             result.Condition = source.Condition;
+
+        return result;
+    }
+
+    /// <summary>
+    /// An emit's value and target both map leniently. A rule authored without a target is
+    /// malformed — <c>UTOS-T004</c> names it — and refusing here would report it as a mapping
+    /// failure instead, which says nothing about which rule is wrong.
+    /// </summary>
+    public static Domain.EmitAction ToDomain(this Wire.EmitAction source) =>
+        new(source.Value?.ToDomain(), source.Transition?.ToDomain());
+
+    public static Wire.EmitAction ToProto(this Domain.EmitAction source)
+    {
+        var result = new Wire.EmitAction();
+
+        if (source.Value != null)
+            result.Value = source.Value.ToProto();
+
+        if (source.Transition != null)
+            result.Transition = source.Transition.ToProto();
 
         return result;
     }

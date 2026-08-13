@@ -176,7 +176,91 @@ public class TransitionSelectionTests
         var ex = Assert.Throws<InvalidOperationException>(
             () => _interpreter.Advance(session, "a", null, null));
 
-        Assert.Equal("Transition rule has no action set (neither transition nor result)", ex.Message);
+        Assert.Equal("Transition rule has no action set (neither transition, result nor emit)", ex.Message);
+    }
+
+    [Fact]
+    public void An_emit_rule_renders_its_value_and_carries_on_to_its_target()
+    {
+        var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
+            onSuccess: [Wf.Emit(Wf.Fields(("batch", "{{ output.count }}")), "a")]))));
+
+        var decision = _interpreter.Advance(session, "a", null, Output(("count", 7)));
+
+        var emit = Assert.IsType<TransitionDecision.Emit>(decision);
+        Assert.Equal(7, emit.Value["batch"]);
+
+        // Emit-and-continue: unlike a result, the run has somewhere to be afterwards. Here that
+        // is a back-edge, which is what a producer emitting in a loop looks like.
+        Assert.Equal("a", emit.ActivityName);
+    }
+
+    [Fact]
+    public void An_emit_resolves_its_targets_input_the_way_a_transition_does()
+    {
+        var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
+            onSuccess:
+            [
+                Wf.Emit(
+                    Wf.Fields(("value", "{{ output.count }}")),
+                    "a",
+                    Wf.Fields(("cursor", "{{ output.count + 1 }}")))
+            ]))));
+
+        var emit = Assert.IsType<TransitionDecision.Emit>(
+            _interpreter.Advance(session, "a", null, Output(("count", 41))));
+
+        Assert.NotNull(emit.Input);
+        Assert.Equal(42, emit.Input["cursor"]);
+    }
+
+    [Fact]
+    public void An_emit_without_a_transform_passes_the_output_through_like_any_transition()
+    {
+        var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
+            onSuccess: [Wf.Emit(Wf.Fields(("v", 1)), "b")]))));
+
+        var output = Output(("count", 3));
+
+        var emit = Assert.IsType<TransitionDecision.Emit>(
+            _interpreter.Advance(session, "a", null, output));
+
+        Assert.Same(output, emit.Input);
+    }
+
+    [Fact]
+    public void An_emit_conditions_the_same_way_every_other_rule_does()
+    {
+        var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
+            onSuccess:
+            [
+                Wf.Emit(Wf.Fields(("v", "{{ output.count }}")), "a",
+                    condition: "{{ output.count > 0 }}"),
+                Wf.Result(Wf.Fields(("done", true)))
+            ]))));
+
+        Assert.IsType<TransitionDecision.Emit>(
+            _interpreter.Advance(session, "a", null, Output(("count", 1))));
+
+        Assert.IsType<TransitionDecision.Return>(
+            _interpreter.Advance(session, "a", null, Output(("count", 0))));
+    }
+
+    [Fact]
+    public void An_emit_with_nowhere_to_go_is_rejected_naming_the_activity()
+    {
+        // UTOS-T004 rejects this at load; the interpreter is the backstop for a bundle that
+        // reached it anyway. An emit is not terminal, so a rule that emits and stops is a dead
+        // end rather than a return, and defaulting it to 'end' would invent a meaning.
+        var activity = Wf.Http("https://example.com",
+            onSuccess: [new TransitionRule(Emit: new EmitAction(Wf.Fields(("v", 1)), null))]);
+
+        var session = Wf.Session(Wf.Graph(("a", activity)));
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => _interpreter.Advance(session, "a", null, null));
+
+        Assert.Equal("Emit rule on activity 'a' has no transition target.", ex.Message);
     }
 
     private static Dictionary<string, object> Output(params (string Key, object Value)[] fields)

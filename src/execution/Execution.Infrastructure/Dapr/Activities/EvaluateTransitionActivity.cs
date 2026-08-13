@@ -30,8 +30,16 @@ public class EvaluateTransitionActivity(
         return decision switch
         {
             TransitionDecision.Goto go => new EvaluateTransitionOutput(go.ActivityName, go.Input, null),
+
             TransitionDecision.Return result => new EvaluateTransitionOutput(
                 ReservedKeywords.End, null, result.Value),
+
+            // The emitted value rides alongside the target rather than becoming a step of its
+            // own: the driver appends it and then continues, so one evaluation still yields one
+            // transition.
+            TransitionDecision.Emit emit => new EvaluateTransitionOutput(
+                emit.ActivityName, emit.Input, null, emit.Value),
+
             _ => new EvaluateTransitionOutput(ReservedKeywords.End, null, null)
         };
     }
@@ -46,9 +54,16 @@ public sealed record EvaluateTransitionInput(
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? ActivityOutput);
 
+/// <param name="EmittedValue">
+/// What an <c>emit</c> action produced, to be appended to the execution's output stream before
+/// the run continues to <paramref name="NextActivityName"/>. Null means the rule was not an emit:
+/// a rendered value is always a dictionary — empty at the least — so null is unambiguous.
+/// </param>
 public sealed record EvaluateTransitionOutput(
     string? NextActivityName,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? MappedInput,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
-    object? ReturnValue);
+    object? ReturnValue,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? EmittedValue = null);

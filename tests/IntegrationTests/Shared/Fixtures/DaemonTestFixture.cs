@@ -38,11 +38,10 @@ public class DaemonTestFixture : IAsyncLifetime
             {
                 ctx.EnvironmentVariables["Logging__ExecutionLog__LogLevel__Default"] = "Debug";
 
-                // Low loop limits so continue-as-new and the runaway ceiling are reachable
-                // in a test. Non-looping workflows are unaffected: continuation only kicks
-                // in once a back-edge has been detected.
+                // A low continuation threshold so a test can span several Dapr instances and
+                // prove the cursor survives them. Non-looping workflows are unaffected:
+                // continuation only kicks in once a back-edge has been detected.
                 ctx.EnvironmentVariables["Execution__ContinueAsNewAfterTransitions"] = "5";
-                ctx.EnvironmentVariables["Execution__MaxLoopedTransitions"] = "30";
             }));
 
         App = await appHost.BuildAsync();

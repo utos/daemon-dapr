@@ -47,9 +47,9 @@ internal static class Wf
         return new ScribanTemplateEngine(NullLogger<ScribanTemplateEngine>.Instance);
     }
 
-    public static ExecutionLimits Limits(int maxLooped = 10_000, int continueAsNewAfter = 100)
+    public static ExecutionLimits Limits(int continueAsNewAfter = 100)
     {
-        return new ExecutionLimits(maxLooped, continueAsNewAfter);
+        return new ExecutionLimits(continueAsNewAfter);
     }
 
     // ---- activities ----------------------------------------------------
@@ -125,6 +125,12 @@ internal static class Wf
     public static TransitionRule Result(ValueMap value, string? condition = null)
     {
         return TransitionRule.Returns(value, condition);
+    }
+
+    public static TransitionRule Emit(
+        ValueMap value, string target, ValueMap? input = null, string? condition = null)
+    {
+        return TransitionRule.Emits(value, target, input, condition);
     }
 
     // ---- values --------------------------------------------------------
