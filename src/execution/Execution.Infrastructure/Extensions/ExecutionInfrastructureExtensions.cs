@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Execution.Application.Models;
 using Execution.Application.Repositories;
+using Execution.Application.Services;
 using Execution.Domain.Interpreter;
 using Execution.Domain.Services;
 using Execution.Domain.Templating;
@@ -77,6 +78,10 @@ public static class ExecutionInfrastructureExtensions
         // The single path by which anything writes an execution's lifecycle
         builder.Services.AddScoped<ExecutionLifecycleWriter>();
 
+        // Reclaims sub-workflow output streams and contexts, from both the terminal transition
+        // and cancellation.
+        builder.Services.AddScoped<ExecutionSubtreeReclaimer>();
+
         // Add Templating engine
         builder.Services.AddSingleton<ITemplateEngine, ScribanTemplateEngine>();
 
@@ -114,6 +119,7 @@ public static class ExecutionInfrastructureExtensions
             options.RegisterActivity<ScheduleDetachedExecutionActivity>();
             options.RegisterActivity<ResolvePromiseActivity>();
             options.RegisterActivity<AppendOutputEntryActivity>();
+            options.RegisterActivity<DeleteOutputStreamActivity>();
         });
 
         // Projection engine and projections (idempotent read model updates)

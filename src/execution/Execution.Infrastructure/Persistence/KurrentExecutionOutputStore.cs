@@ -99,30 +99,4 @@ public sealed class KurrentExecutionOutputStore(
         return null;
     }
 
-    public async Task<IReadOnlyList<OutputEntryAt>> SnapshotAsync(
-        ExecutionId executionId,
-        CancellationToken cancellationToken = default)
-    {
-        var entries = new List<OutputEntryAt>();
-
-        var stream = client.ReadStreamAsync(
-            Direction.Forwards,
-            StreamNames.ExecutionOutput(executionId),
-            StreamPosition.Start,
-            cancellationToken: cancellationToken);
-
-        if (await stream.ReadState == ReadState.StreamNotFound)
-            return entries;
-
-        await foreach (var resolved in stream.WithCancellation(cancellationToken))
-        {
-            var deserialized = eventSerializer.DeserializeEvent(
-                resolved.Event.EventType, resolved.Event.Data.ToArray(), resolved.Event.Metadata.ToArray());
-
-            if (deserialized is ExecutionOutputEntry entry)
-                entries.Add(new OutputEntryAt(resolved.Event.EventNumber.ToInt64(), entry));
-        }
-
-        return entries;
-    }
 }

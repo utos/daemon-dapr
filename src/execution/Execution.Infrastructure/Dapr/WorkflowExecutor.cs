@@ -341,12 +341,21 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         // The child inherits the limits but starts with its own empty visited set — a
         // sub-workflow invoked twice from a parent loop is two separate executions, not a
         // back-edge.
-        return await context.CallChildWorkflowAsync<object?>(
+        var childOutput = await context.CallChildWorkflowAsync<object?>(
             nameof(WorkflowExecutor),
             new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
                 resolved.SubStartActivity!, input.ExecutionId,
                 ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
             new ChildWorkflowTaskOptions(childExecutionId.ToString()));
+
+        // The child's stream has served its only purpose. Reclaimed here rather than left to the
+        // terminal cleanup because a parent looping over a sub-workflow call need never reach a
+        // terminal state — and with no loop ceiling, "one stream per lap, forever" is a real
+        // shape. The result above replays from orchestration history, not from the stream.
+        await context.CallActivityAsync(nameof(DeleteOutputStreamActivity),
+            new DeleteOutputStreamInput(childExecutionId));
+
+        return childOutput;
     }
 
     private static async Task<object?> FanOutAsync(

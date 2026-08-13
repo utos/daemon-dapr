@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns nothing rather than blocking on an entry that can never arrive.
 - Readers here are **observers**: reading never gates the producer, however far behind the cursor
   falls. Gating belongs to a `workflow.call` parent that declared `on_emitted`, which does not
-  exist yet.
+  exist yet. `WatchOutput` on a sub-workflow's id reports NOT_FOUND: a `workflow.call` child has
+  no execution record, and its stream exists for its caller rather than for clients.
 - **`GetExecutionResponse.result`** — what a run returned, closing a gap that predates this work:
   there was previously no result field anywhere in `daemon/v1`, so a completed execution's value
   had nowhere to go over the wire. It is read back from the terminal entry of the output stream
@@ -41,10 +42,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CancelExecutionHandler` on cancellation, since cancelling tears the orchestration down and
   nothing else would ever close the stream. It carries `EXECUTION_CANCELLED` rather than
   `EXECUTION_FAILED`: a reader of the stream sees the entry and not the run's status.
-- `DeleteExecution` deletes the output stream alongside the lifecycle stream. **Known gap:** a
-  sub-workflow invoked with `workflow.call` writes its own output stream but has no execution
-  record of its own, so nothing reclaims it yet. It becomes reachable when the consumer side
-  lands.
+- `DeleteExecution` deletes the output stream alongside the lifecycle stream.
+- **Sub-workflow output streams are reclaimed**, at both ends a run can stop at. A
+  `workflow.call` child writes its own output stream — the consumer side reads it — but is a child
+  orchestration rather than an execution of its own, so it has no record to delete it by. The
+  caller drops the stream as each call returns, which is what bounds a parent that loops over a
+  sub-workflow call and may never terminate at all; the terminal transition reclaims whatever did
+  not get there, such as the child a run failed on. Cancellation reclaims too, since tearing the
+  orchestration down means the driver's terminal transition never runs.
+- `ExecutionContext.RootExecutionId`, with a migration — the only record anywhere that a
+  sub-workflow execution happened, and therefore the only way to find what it left behind. The
+  *root* rather than the immediate parent, so one query reaches a whole tree rather than one
+  level. Streams are always deleted before the rows that name them: the other order does not leak
+  a deletion, it makes the streams unreachable.
+- **Fixes a pre-existing leak this uncovered:** `IExecutionContextStore.DeleteAllAsync` deleted a
+  single row despite its name, so every sub-workflow's context row outlived the run that created
+  it, and a cancelled run's own row was never dropped at all — the driver that would have dropped
+  it had been terminated.
 - **`ExecutionService.CancelExecution`** — stop a running execution, optionally with a reason. The
   run reaches the new terminal status `Cancelled` and its orchestration is torn down. This closes
   a hole the daemon already depended on: `ExecutionLimitsOptions` notes that an endless loop

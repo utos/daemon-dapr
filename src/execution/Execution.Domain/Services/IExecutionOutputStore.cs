@@ -34,11 +34,6 @@ public interface IExecutionOutputStore
         long? afterSequence,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Every entry recorded so far, for callers that need the whole thing at once.</summary>
-    Task<IReadOnlyList<OutputEntryAt>> SnapshotAsync(
-        ExecutionId executionId,
-        CancellationToken cancellationToken = default);
-
     /// <summary>
     /// The last entry recorded, or null on an empty stream. Two questions a reader has to answer
     /// before it can start — where "the last N entries" begins, and whether the stream has already

@@ -47,7 +47,12 @@ namespace Execution.Infrastructure.Migrations
                         .HasColumnType("nvarchar(max)")
                         .HasColumnName("InputJson");
 
+                    b.Property<Guid?>("RootExecutionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("ExecutionId");
+
+                    b.HasIndex("RootExecutionId");
 
                     b.ToTable("ExecutionContexts", (string)null);
                 });

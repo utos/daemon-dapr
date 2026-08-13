@@ -35,6 +35,11 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
             b.HasKey(e => e.ExecutionId);
             b.Property(e => e.ExecutionId).ValueGeneratedNever();
 
+            // Indexed because it is queried as a set — "everything under this run" — on every
+            // terminal transition, not looked up one row at a time.
+            b.Property(e => e.RootExecutionId);
+            b.HasIndex(e => e.RootExecutionId);
+
             b.Property(e => e.EntryPoint)
                 .HasMaxLength(200)
                 .IsRequired();

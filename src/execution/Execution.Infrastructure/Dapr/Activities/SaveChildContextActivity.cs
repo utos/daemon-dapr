@@ -35,6 +35,9 @@ public class SaveChildContextActivity(IExecutionContextStore contextStore)
             var childContext = new ExecutionContext
             {
                 ExecutionId = child.ChildExecutionId,
+                // The root, not this parent: a grandchild records the same top-level run, so one
+                // query reaches the whole tree when it comes time to reclaim it.
+                RootExecutionId = parentContext.RootExecutionId ?? parentContext.ExecutionId,
                 Bundle = parentContext.Bundle,
                 EntryPoint = child.WorkflowKey,
                 Input = child.Input ?? new Dictionary<string, object>(),
