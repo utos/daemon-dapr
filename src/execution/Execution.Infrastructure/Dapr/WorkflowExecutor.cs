@@ -129,6 +129,13 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 "Workflow execution started from activity '{WorkflowStartActivity}' (execution {WorkflowExecutionId})",
                 input.StartActivity, logExecutionId);
 
+        // Per-segment state, resumed from the envelope. Mutated as the segment runs and written
+        // back by ContinueFrom — see the remarks there for why it is threaded rather than read
+        // off `input` at the continuation point. Declared outside the try because a failure
+        // abandons subscriptions just as a clean finish does, and the catch needs to see them.
+        var subscriptions = new Dictionary<string, ExecutionId>(
+            input.Subscriptions ?? [], StringComparer.Ordinal);
+
         try
         {
             // Load the workflow definition once at start (avoids per-activity DB lookups)
@@ -144,11 +151,6 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             var currentActivityInput = input.ActivityInput;
             object? workflowOutput = null;
 
-            // Per-segment state, resumed from the envelope. Mutated as the segment runs and
-            // written back by ContinueFrom — see the remarks there for why it is threaded rather
-            // than read off `input` at the continuation point.
-            var subscriptions = new Dictionary<string, ExecutionId>(
-                input.Subscriptions ?? [], StringComparer.Ordinal);
 
             while (currentActivityName != null)
             {
@@ -237,6 +239,11 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 currentActivityInput = transition.MappedInput;
             }
 
+            // Anything still subscribed is abandoned: this run left its consuming loop and is not
+            // coming back. Before the terminal entry, so a producer is stopped rather than left
+            // parked while its caller is recorded as finished.
+            await AbandonSubscriptionsAsync(context, logger, subscriptions, logExecutionId);
+
             var totalDuration = (context.CurrentUtcDateTime - startTime).TotalMilliseconds;
 
             logger.LogInformation(
@@ -271,6 +278,11 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             logger.LogError(
                 "Workflow execution failed: {ErrorMessage} (execution {WorkflowExecutionId})",
                 ex.Message, logExecutionId);
+
+            // A failure abandons a subscription just as surely as reaching the end does — more
+            // so, since the failure may be the very thing that stopped the run returning to its
+            // call activity.
+            await AbandonSubscriptionsAsync(context, logger, subscriptions, logExecutionId);
 
             await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
                 new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Error,
@@ -499,6 +511,46 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             new DeleteOutputStreamInput(childExecutionId));
 
         return ActivityOutcome.Completed(childOutput);
+    }
+
+    /// <summary>
+    /// Stops every producer still waiting on this run.
+    /// <para>
+    /// A subscription lives only while the run keeps coming back to its call activity. Leaving
+    /// that loop any other way ends it — an <c>on_emitted</c> handler that transitions to
+    /// <c>end</c> rather than back, a failure elsewhere in the graph, a rule that returns a
+    /// result. The child is parked on an acknowledgement at that moment, and nothing else in the
+    /// system would ever release it: it is a child orchestration, so it is torn down if its
+    /// caller is *cancelled*, but a caller that simply finishes leaves it waiting.
+    /// </para>
+    /// <para>
+    /// Ordered by activity name because each cancellation is an activity call recorded in
+    /// orchestration history, and a replay has to issue them in the same order it did the first
+    /// time.
+    /// </para>
+    /// </summary>
+    private static async Task AbandonSubscriptionsAsync(
+        WorkflowContext context,
+        ILogger logger,
+        Dictionary<string, ExecutionId> subscriptions,
+        ExecutionId logExecutionId)
+    {
+        if (subscriptions.Count == 0)
+            return;
+
+        foreach (var (activityName, childExecutionId) in
+                 subscriptions.OrderBy(entry => entry.Key, StringComparer.Ordinal))
+        {
+            logger.LogInformation(
+                "Subscription at activity '{WorkflowActivity}' was abandoned; cancelling its " +
+                "sub-workflow (execution {WorkflowExecutionId})",
+                activityName, logExecutionId);
+
+            await context.CallActivityAsync(nameof(CancelSubscribedChildActivity),
+                new CancelSubscribedChildInput(childExecutionId));
+        }
+
+        subscriptions.Clear();
     }
 
     /// <summary>

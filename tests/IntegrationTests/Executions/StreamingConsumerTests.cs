@@ -1,4 +1,5 @@
 using Google.Protobuf.WellKnownTypes;
+using IntegrationTests.Shared;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
@@ -163,9 +164,60 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
         Assert.Equal(["1", "2"], ValuesHandled(handlePath));
     }
 
+    [Fact]
+    public async Task A_handler_that_leaves_instead_of_returning_ends_the_subscription()
+    {
+        // The subscription lives only while the caller keeps coming back to its call activity.
+        // This handler takes the first value and goes to 'end' instead — at which point the
+        // producer is parked on an acknowledgement that will never arrive, and being a child
+        // orchestration does not save it: Dapr tears a child down when its parent is *cancelled*,
+        // not when its parent simply finishes. Nothing else in the system would ever stop it.
+        const string producePath = "/streaming-abandon-produce";
+        const string handlePath = "/streaming-abandon-handle";
+        StubJson(producePath);
+        StubJson(handlePath);
+
+        var request = new TestWorkflowBuilder("streaming-abandon", fixture.MockBaseUrl)
+            .WorkflowCall("watch", "producer-workflow", "produce",
+                input: Fields(("n", Value.ForNumber(1))),
+                onEmitted: HandleThenResume("handle"))
+            .HttpGet("handle", handlePath)
+            .WithHeader("X-Value", "{{ input.n }}")
+            .OnSuccess("end")
+            .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 5))
+            .Build("watch");
+
+        var scheduled = await fixture.ScheduleAsync(request);
+        var events = await WatchToCompletion(scheduled.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduled.Id });
+
+        // The caller finishes rather than hanging on a producer it stopped listening to.
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+
+        // It handled exactly one value and left, so the producer got nowhere near its five.
+        Assert.Equal(["1"], ValuesHandled(handlePath));
+
+        // The cancellation itself is only observable in the log: an abandoned child has no
+        // execution record of its own, so there is no status to query — and a producer parked
+        // forever and a producer terminated look identical from the outside, which is precisely
+        // why the distinction has to be asserted here rather than inferred from behaviour.
+        Assert.Contains(events, e =>
+            e.Message.Contains("Subscription at activity 'watch' was abandoned"));
+    }
+
     // ============================================================================
     // Helpers
     // ============================================================================
+
+    private async Task<List<WatchExecutionResponse>> WatchToCompletion(string executionId)
+    {
+        var call = fixture.ObservabilityClient.WatchExecution(
+            new WatchExecutionRequest { ExecutionId = executionId });
+
+        return await call.CollectUntilCompletion(Timeout);
+    }
 
     private List<string> ValuesHandled(string path) =>
         fixture.WireMockServer.LogEntries
