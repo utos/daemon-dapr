@@ -191,7 +191,10 @@ public static class WorkflowMapping
         source.ModeCase switch
         {
             Wire.WorkflowActivityConfig.ModeOneofCase.Call => new Domain.CallActivityConfig(
-                source.Workflow, source.StartActivity, source.Input?.ToDomain()),
+                source.Workflow, source.StartActivity, source.Input?.ToDomain(),
+                source.Call.OnEmitted.Count == 0
+                    ? null
+                    : source.Call.OnEmitted.Select(ToDomain).ToList()),
 
             Wire.WorkflowActivityConfig.ModeOneofCase.Spawn => new Domain.SpawnActivityConfig(
                 source.Workflow, source.StartActivity, source.Input?.ToDomain()),
@@ -222,8 +225,10 @@ public static class WorkflowMapping
 
         switch (source)
         {
-            case Domain.CallActivityConfig:
-                result.Call = new Wire.CallActivityConfig();
+            case Domain.CallActivityConfig call:
+                var callMode = new Wire.CallActivityConfig();
+                callMode.OnEmitted.AddRange(call.OnEmitted.Select(ToProto));
+                result.Call = callMode;
                 break;
             case Domain.SpawnActivityConfig:
                 result.Spawn = new Wire.SpawnActivityConfig();

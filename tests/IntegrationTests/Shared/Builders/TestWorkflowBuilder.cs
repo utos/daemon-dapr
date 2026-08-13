@@ -56,11 +56,22 @@ public class TestWorkflowBuilder
         return AddHttpActivity(name, path, "DELETE", null, customUrl);
     }
 
-    /// <summary>Awaits the sub-workflow; its result becomes the activity's output.</summary>
+    /// <summary>
+    /// Awaits the sub-workflow; its result becomes the activity's output.
+    /// <paramref name="onEmitted"/> makes this caller the child's privileged consumer — without
+    /// it the caller sees only the terminal value, and the child emits without waiting.
+    /// </summary>
     public ActivityBuilder WorkflowCall(string activityName, string targetWorkflow,
-        string startActivity, Struct? input = null) =>
+        string startActivity, Struct? input = null,
+        IEnumerable<TransitionRule>? onEmitted = null) =>
         SubWorkflow(activityName, targetWorkflow, startActivity, input,
-            config => config.Call = new CallActivityConfig());
+            config =>
+            {
+                var call = new CallActivityConfig();
+                if (onEmitted != null)
+                    call.OnEmitted.AddRange(onEmitted);
+                config.Call = call;
+            });
 
     /// <summary>
     /// Starts the sub-workflow and moves on. The activity's output is a handle to the run rather

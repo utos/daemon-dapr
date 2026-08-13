@@ -96,7 +96,19 @@ public class WorkflowMappingTests
             {
                 Workflow = "acme/send-email:1.0.0",
                 StartActivity = "send",
-                Call = new Wire.CallActivityConfig()
+                // Carried on the mode rather than the activity, so it cannot be set where it has
+                // no meaning. Dropping it in either direction would turn a streaming consumer
+                // into one that silently ignores what it subscribed to.
+                Call = new Wire.CallActivityConfig
+                {
+                    OnEmitted =
+                    {
+                        new Wire.TransitionRule
+                        {
+                            Transition = new Wire.TransitionTarget { Name = "await-sub" }
+                        }
+                    }
+                }
             }
         };
 
