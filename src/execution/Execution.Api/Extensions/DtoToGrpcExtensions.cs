@@ -2,6 +2,8 @@ using Google.Protobuf.WellKnownTypes;
 using Common.Constants;
 using Common.Workflow.Proto;
 using Execution.Application.Models;
+using Execution.Domain.Output;
+using Execution.Domain.Services;
 using DomainExecutionStatus = Execution.Domain.Aggregates.ExecutionStatus;
 using GrpcExecution = Utos.Daemon.V1.ScheduleExecutionResponse;
 using GrpcExecutionSummary = Utos.Daemon.V1.ExecutionSummary;
@@ -16,6 +18,7 @@ using GrpcExecutionPayload = Utos.Daemon.V1.ExecutionPayload;
 using GrpcTransitionTarget = Utos.Workflows.V1.TransitionTarget;
 using GrpcWorkflowReference = Utos.Daemon.V1.WorkflowReference;
 using GrpcWorkflowError = Utos.Workflows.V1.WorkflowError;
+using GrpcOutputEntry = Utos.Daemon.V1.WatchOutputResponse;
 
 namespace Execution.Api.Extensions;
 
@@ -131,4 +134,51 @@ public static class DtoToGrpcExtensions
     public static GrpcExecutionPayload? ToGrpc(this Dictionary<string, object> dictionary) =>
         dictionary.ToProto();
 
+    /// <summary>
+    /// One entry of an execution's output stream, with the sequence that doubles as a cursor.
+    /// </summary>
+    public static GrpcOutputEntry ToGrpc(this OutputEntryAt source)
+    {
+        var entry = new GrpcOutputEntry
+        {
+            Sequence = source.Sequence,
+            Timestamp = Timestamp.FromDateTime(source.Entry.DateOccurred.ToUniversalTime())
+        };
+
+        switch (source.Entry)
+        {
+            case ExecutionValueEmitted emitted:
+                entry.Value = ToStruct(emitted.Value);
+                break;
+
+            case ExecutionResultProduced produced:
+                entry.Result = ToStruct(produced.Result);
+                break;
+
+            case ExecutionErrorProduced error:
+                entry.Error = new GrpcWorkflowError { Code = error.Code, Message = error.Message };
+                break;
+
+            default:
+                throw new NotSupportedException(
+                    $"No wire mapping for output entry '{source.Entry.GetType().Name}'.");
+        }
+
+        return entry;
+    }
+
+    /// <summary>
+    /// A path that ended without returning becomes an empty structure rather than an unset field:
+    /// the stream always terminates, and a client should not have to tell "returned nothing" from
+    /// "no entry at all".
+    /// </summary>
+    private static Struct ToStruct(object? value)
+    {
+        if (value is null)
+            return new Struct();
+
+        return ValueMapping.ToProtoValue(value).StructValue
+               ?? throw new InvalidOperationException(
+                   $"An output entry must carry a structure, not {value.GetType().Name}.");
+    }
 }

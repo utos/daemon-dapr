@@ -63,8 +63,10 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
                 { Result: not null } =>
                     new TransitionDecision.Return(structRenderer.Render(rule.Result, scope)),
 
+                { Emit: not null } => Emit(rule.Emit, scope, output, activityName),
+
                 _ => throw new InvalidOperationException(
-                    "Transition rule has no action set (neither transition nor result)")
+                    "Transition rule has no action set (neither transition, result nor emit)")
             };
         }
 
@@ -163,6 +165,25 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     private TransitionDecision Goto(TransitionTarget target, TemplateScope scope, object? activityOutput)
     {
         return new TransitionDecision.Goto(target.Name, ResolveTransitionInput(target, scope, activityOutput));
+    }
+
+    /// <summary>
+    /// The value to append and where the run goes once it is durable. The target is required —
+    /// an emit is not a terminal action, so a rule that emits and goes nowhere is a dead end
+    /// rather than a return. <c>UTOS-T004</c> rejects that at load; this is the backstop for a
+    /// bundle that reached the interpreter without it.
+    /// </summary>
+    private TransitionDecision Emit(
+        EmitAction emit, TemplateScope scope, object? activityOutput, string activityName)
+    {
+        var target = emit.Transition
+                     ?? throw new InvalidOperationException(
+                         $"Emit rule on activity '{activityName}' has no transition target.");
+
+        return new TransitionDecision.Emit(
+            structRenderer.Render(emit.Value ?? ValueMap.Empty, scope),
+            target.Name,
+            ResolveTransitionInput(target, scope, activityOutput));
     }
 
     /// <summary>

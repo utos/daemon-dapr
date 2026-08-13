@@ -37,7 +37,7 @@ public record WorkflowExecutorInput(
     List<string>? Visited = null,
     int LoopedTransitions = 0,
     DateTime? StartedAt = null,
-    int MaxLoopedTransitions = 10_000,
+    int MaxLoopedTransitions = 0,
     int ContinueAsNewAfterTransitions = 100);
 
 /// <summary>
@@ -136,6 +136,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
                         run.ActivityName, currentActivityInput, activityOutput));
 
+                // An emit is emit-and-continue: the value becomes durable before the run moves
+                // on, so a consumer reading the stream in order can never see the effect of a
+                // value it has not been given yet.
+                if (transition.EmittedValue != null)
+                    await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
+                        new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Value,
+                            transition.EmittedValue));
+
                 if (transition.ReturnValue != null)
                 {
                     workflowOutput = transition.ReturnValue;
@@ -152,6 +160,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 "Workflow execution completed successfully in {DurationMs}ms (execution {WorkflowExecutionId})",
                 (long)totalDuration, logExecutionId);
 
+            // Every execution terminates its own stream, children included: a stream is
+            // per-execution, and the caller consuming a child's is what branch B is built on.
+            // Written before the lifecycle event, not after — a client that waits for the run to
+            // finish is waiting on that event, and must find the stream already closed when it
+            // reads it.
+            await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
+                new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Result, workflowOutput));
+
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
                     new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Completed, null));
@@ -163,6 +179,10 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             logger.LogError(
                 "Workflow execution failed: {ErrorMessage} (execution {WorkflowExecutionId})",
                 ex.Message, logExecutionId);
+
+            await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
+                new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Error,
+                    ErrorMessage: ex.Message));
 
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),

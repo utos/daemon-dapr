@@ -113,6 +113,7 @@ public static class ExecutionInfrastructureExtensions
             options.RegisterActivity<SaveChildContextActivity>();
             options.RegisterActivity<ScheduleDetachedExecutionActivity>();
             options.RegisterActivity<ResolvePromiseActivity>();
+            options.RegisterActivity<AppendOutputEntryActivity>();
         });
 
         // Projection engine and projections (idempotent read model updates)

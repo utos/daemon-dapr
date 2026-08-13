@@ -78,6 +78,35 @@ public class ExecutionGrpcService(IMediator mediator)
         return response;
     }
 
+    public override async Task WatchOutput(
+        WatchOutputRequest request,
+        IServerStreamWriter<WatchOutputResponse> responseStream,
+        ServerCallContext context)
+    {
+        if (!ExecutionId.TryParse(request.ExecutionId, out var executionId))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid execution ID format"));
+
+        // 'tail' and 'after' are a oneof, so the wire format already makes them exclusive.
+        var query = new WatchExecutionOutputQuery(
+            executionId,
+            request.HasAfter ? request.After : null,
+            request.HasTail ? request.Tail : null);
+
+        try
+        {
+            await foreach (var entry in mediator.CreateStream(query, context.CancellationToken))
+                await responseStream.WriteAsync(entry.ToGrpc());
+        }
+        catch (ExecutionNotFoundException ex)
+        {
+            throw new RpcException(new Status(StatusCode.NotFound, ex.Message));
+        }
+        catch (OperationCanceledException)
+        {
+            // The client stopped reading. That is how a follow ends, not a fault.
+        }
+    }
+
     public override async Task<CancelExecutionResponse> CancelExecution(
         CancelExecutionRequest request, ServerCallContext context)
     {

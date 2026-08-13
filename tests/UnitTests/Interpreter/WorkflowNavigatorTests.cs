@@ -131,6 +131,32 @@ public class WorkflowNavigatorTests
     }
 
     [Fact]
+    public void No_ceiling_is_the_default_so_a_loop_runs_until_it_is_cancelled()
+    {
+        // What the spec permits — "runs until the execution is cancelled" — and what a workflow
+        // consuming another's output stream needs: it re-enters its call activity once per
+        // emitted value, so any finite ceiling is a countdown to killing a long-lived watcher.
+        //
+        // The continuation threshold is pinned out of the way so every lap comes back as Run;
+        // it is checked before the ceiling and would otherwise end the loop first. Note which of
+        // the two is load-bearing: continuing as new is what keeps orchestration history bounded,
+        // and it still does that here. This ceiling only ever decided when to give up.
+        var graph = Wf.Graph(("poll", Wf.Http("https://example.com")));
+        var limits = Wf.Limits(continueAsNewAfter: int.MaxValue);
+
+        var cursor = Fresh();
+
+        // Well past the 10,000 that used to fail a run.
+        for (var lap = 0; lap < 20_000; lap++)
+        {
+            var step = WorkflowNavigator.Next(graph, "poll", cursor, limits);
+            cursor = Assert.IsType<WorkflowStep.Run>(step).Cursor;
+        }
+
+        Assert.Equal(19_999, cursor.LoopedTransitions);
+    }
+
+    [Fact]
     public void A_segment_continues_as_new_once_it_is_looping_and_has_done_enough_work()
     {
         var graph = Wf.Graph(("a", Wf.Http("https://example.com")));

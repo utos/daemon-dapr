@@ -56,7 +56,9 @@ public sealed record ExecutionCursor(
                 loopJustDetected = true;
             }
 
-            if (looped >= limits.MaxLoopedTransitions)
+            // A ceiling of zero or less is no ceiling: an endless loop is legal, and
+            // CancelExecution rather than a counter is what stops one.
+            if (limits.MaxLoopedTransitions > 0 && looped >= limits.MaxLoopedTransitions)
                 return CursorEntry.Exceeded;
         }
 

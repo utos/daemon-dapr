@@ -38,4 +38,14 @@ public interface IExecutionOutputStore
     Task<IReadOnlyList<OutputEntryAt>> SnapshotAsync(
         ExecutionId executionId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The last entry recorded, or null on an empty stream. Two questions a reader has to answer
+    /// before it can start — where "the last N entries" begins, and whether the stream has already
+    /// terminated — and both are answerable from one entry, without dragging the whole stream back
+    /// to count it.
+    /// </summary>
+    Task<OutputEntryAt?> LastEntryAsync(
+        ExecutionId executionId,
+        CancellationToken cancellationToken = default);
 }

@@ -1,6 +1,8 @@
+using Common.Constants;
 using Common.SeedWork;
 using Execution.Application.Exceptions;
 using Execution.Domain.Aggregates;
+using Execution.Domain.Output;
 using Execution.Domain.Services;
 using Mediator;
 using Microsoft.Extensions.Logging;
@@ -25,6 +27,7 @@ namespace Execution.Application.Commands;
 public class CancelExecutionHandler(
     IEventStoreRepository eventStore,
     IExecutionRuntime runtime,
+    IExecutionOutputStore outputStore,
     ILogger<CancelExecutionHandler> logger)
     : ICommandHandler<CancelExecutionCommand, CancelExecutionResult>
 {
@@ -52,6 +55,19 @@ public class CancelExecutionHandler(
             throw new ExecutionAlreadyTerminalException(command.ExecutionId, execution.Status.ToString());
 
         await runtime.TerminateAsync(command.ExecutionId, ct);
+
+        // The orchestration is gone, so nothing else will ever close this run's output stream.
+        // Terminated here for that reason, and before the lifecycle event for the same reason the
+        // driver writes its terminal entry first: whoever waits for the run to end must find the
+        // stream already ended, rather than blocking on an entry that is never coming.
+        await outputStore.AppendAsync(
+            command.ExecutionId,
+            new ExecutionErrorProduced(
+                command.ExecutionId,
+                WorkflowErrorCode.ExecutionCancelled,
+                command.Reason ?? "Execution cancelled",
+                DateTime.UtcNow),
+            ct);
 
         execution.Cancel(command.Reason);
 

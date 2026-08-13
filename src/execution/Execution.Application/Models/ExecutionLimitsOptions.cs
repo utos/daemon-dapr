@@ -31,9 +31,12 @@ public class ExecutionLimitsOptions
     /// you can only walk as many activities as are defined — so a long non-looping workflow
     /// is never failed for its length.
     ///
-    /// The spec permits an endless loop ("runs until the execution is cancelled"), but the
-    /// daemon has no cancellation yet, so an endless loop would be unstoppable short of
-    /// purging the Dapr instance. Raise or remove this once cancellation exists.
+    /// **Zero — the default — is no ceiling.** The spec permits an endless loop ("runs until the
+    /// execution is cancelled"), and since `CancelExecution` there is a way to stop one, which is
+    /// what a ceiling stood in for. A workflow consuming a sub-workflow's output stream re-enters
+    /// its call activity once per emitted value, so any finite ceiling is a countdown to killing
+    /// a long-lived watcher for doing exactly its job. The knob stays so an operator can re-impose
+    /// one without a code change; cancellation, not a counter, is what stops a runaway.
     /// </summary>
-    public int MaxLoopedTransitions { get; set; } = 10_000;
+    public int MaxLoopedTransitions { get; set; }
 }

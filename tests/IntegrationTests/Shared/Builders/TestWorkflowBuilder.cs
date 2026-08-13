@@ -335,6 +335,27 @@ public class ActivityBuilder
         return this;
     }
 
+    /// <summary>
+    /// Appends <paramref name="value"/> to the run's output stream and carries on to
+    /// <paramref name="targetActivity"/>. Emit-and-continue, as against <see cref="OnResult"/>'s
+    /// emit-and-terminate.
+    /// </summary>
+    public ActivityBuilder OnEmit(Struct value, string targetActivity,
+        Struct? input = null, string? when = null)
+    {
+        var target = new TransitionTarget { Name = targetActivity };
+        if (input != null)
+            target.Input = input;
+
+        var rule = new TransitionRule { Emit = new EmitAction { Value = value, Transition = target } };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnSuccess.Add(rule);
+        return this;
+    }
+
     public ActivityBuilder WithHeader(string name, string value)
     {
         _activity.Http.Headers.Add(name, value);

@@ -34,8 +34,10 @@ public class DeleteExecutionHandler(
                 throw new ExecutionNotTerminalException(command.ExecutionId);
         }
 
-        // Stream first (see class remarks).
+        // Streams first (see class remarks). An execution owns two: its lifecycle stream and the
+        // output stream holding what it produced.
         await eventStore.DeleteStreamAsync(StreamNames.Execution(command.ExecutionId), ct);
+        await eventStore.DeleteStreamAsync(StreamNames.ExecutionOutput(command.ExecutionId), ct);
 
         await repository.DeleteAsync([command.ExecutionId], ct);
 

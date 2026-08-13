@@ -12,4 +12,11 @@ public static class WorkflowErrorCode
     /// causes of its own.
     /// </summary>
     public const string ExecutionFailed = "EXECUTION_FAILED";
+
+    /// <summary>
+    /// The run was stopped on purpose. Distinct from <see cref="ExecutionFailed"/> everywhere the
+    /// two could be confused — the terminal entry of a cancelled execution's output stream is one
+    /// such place, since a reader sees only the entry and not the run's status.
+    /// </summary>
+    public const string ExecutionCancelled = "EXECUTION_CANCELLED";
 }
