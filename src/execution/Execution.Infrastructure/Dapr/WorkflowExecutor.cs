@@ -279,6 +279,25 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 "Workflow execution failed: {ErrorMessage} (execution {WorkflowExecutionId})",
                 ex.Message, logExecutionId);
 
+            // A failure is a terminal message too, and it goes out *first* — ahead of the
+            // abandonment sweep and ahead of recording the entry.
+            //
+            // This is the one ordering in the class that is inverted deliberately. Everywhere
+            // else the durable record is written before anyone is told, so a client that hears a
+            // run finished can rely on finding it recorded. Here there is a consumer blocked on
+            // this exact message, and every step taken before sending it is a step that can throw
+            // and strand it forever — appending to an event store that is already unwell is a
+            // realistic way to fail at precisely this moment. The entry below is a record nobody
+            // is waiting on; the message is one somebody is.
+            //
+            // Safe against a duplicate terminal message because the success path sends its result
+            // only after its append succeeded: exactly one of the two runs to completion.
+            if (input.OutputEventName != null)
+                await context.CallActivityAsync(nameof(RaiseChildOutputActivity),
+                    new RaiseChildOutputInput(
+                        input.ParentExecutionId!.Value, input.OutputEventName,
+                        new ChildOutputMessage(ChildOutputKind.Error, null, ex.Message)));
+
             // A failure abandons a subscription just as surely as reaching the end does — more
             // so, since the failure may be the very thing that stopped the run returning to its
             // call activity.
@@ -287,14 +306,6 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
                 new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Error,
                     ErrorMessage: ex.Message));
-
-            // A failure is a terminal message too. Reported to the consumer rather than left to
-            // be inferred from a child that simply stops speaking.
-            if (input.OutputEventName != null)
-                await context.CallActivityAsync(nameof(RaiseChildOutputActivity),
-                    new RaiseChildOutputInput(
-                        input.ParentExecutionId!.Value, input.OutputEventName,
-                        new ChildOutputMessage(ChildOutputKind.Error, null, ex.Message)));
 
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
