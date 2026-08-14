@@ -76,6 +76,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has not errored, and a client should not have to read the status to know how to interpret a
   field. `finished_at` now derives from the cancellation time too, so a cancelled run reports when
   it stopped.
+- **`on_emitted` — a caller consumes a sub-workflow's output stream as it is produced**, rather
+  than only its one terminal value. `CallActivityConfig.OnEmitted` makes the caller that child's
+  privileged consumer, and every value is a rendezvous: the child appends its entry, hands the
+  value over, and parks until the caller says it has been consumed, so the unconsumed buffer never
+  exceeds one entry however much faster the producer is. The handler path must transition back to
+  the call activity — that is both the acknowledgement and the request for the next value — and
+  leaving it any other way ends the subscription and cancels the child.
+  Two decisions are load-bearing and easy to undo by accident. The parent waits on **events, not
+  on the child's task**: a task cannot survive re-entering the activity, nor a continue-as-new,
+  and the subscription must survive both. And on the child's failure path the terminal message is
+  raised **before** the entry is appended — the one inverted ordering in the class, because a
+  consumer is blocked on that message and the append is a step that can throw and strand it.
+  A caller that declares no handler is unaffected: the child never waits, and only the terminal
+  value crosses. `UnconsumedEmissionTests` pins that ungated contract.
 
 ### Changed
 
@@ -114,6 +128,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejects these at load, and guessing would silently change what an activity returns, or when it
   resolves.
 - Bumped the Utos SDK packages to `0.0.12`.
+- **Cancelling waits for the orchestration to actually stop.** Dapr's `TerminateWorkflowAsync`
+  completes once the termination has been *enqueued*, which says nothing about whether anything
+  stopped — while `CancelExecutionHandler` goes straight on to write the run's terminal output
+  entry and delete the execution context rows its activities read on every step. `TerminateAsync`
+  now confirms a terminal status before returning, which is what makes that assumption true, and
+  passes the caller's cancellation token so an abandoned request no longer leaves the daemon
+  waiting on a call nobody wants. How long a cancellation may take stays the caller's policy:
+  the wait is bounded by that token and by nothing this repository invents.
+  It cannot promise more than it says. Dapr lets in-flight activities run to completion after an
+  instance is terminated, and a queued work item can still be dispatched, so "terminal" means the
+  orchestration will schedule no more work — not that nothing is still touching the run's state.
 
 ### Added
 
@@ -128,6 +153,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   abstract declaration, which System.Text.Json does not honour for the derived overrides), and
   `HttpActivityConfig.HeaderMap` — a computed convenience property — lands there too. Both are
   write-only and harmless, and both are now visible.
+- **Every gRPC call the integration suite makes now carries a deadline**, applied by an
+  interceptor on the fixture's channel rather than at two hundred call sites — 30s for a
+  request/response call, 120s for a server stream, and a call that sets its own keeps it. Without
+  one, a daemon that stopped answering was indistinguishable from a hung run: the call never
+  returned, so the polling helpers that wrap it never got back round to checking their own
+  timeouts, and the suite died with no test named. That is why an intermittent cancellation fault
+  took a session to locate. Four stream timeouts of 300–3000 seconds — long enough to be no
+  timeout at all — came down to 30 with it.
+- `CancelExecution_StopsAnEndlessPoller_AndRecordsTheReason` asserts the poller **stopped**. It
+  previously checked only the recorded status, so it passed against a cancellation that recorded
+  itself and stopped nothing — which is the failure the test is named for.
+
+### Known issues
+
+- **Five cancellation tests are skipped**, carrying
+  `SkipReasons.DaprDropsTerminationsSharingAWorkItem`. Dapr drops a termination that is not the
+  last event in the work item it arrives in — `[ExecutionTerminated, TaskCompleted]` is lost while
+  `[ExecutionTerminated]` is honoured — leaving the workflow RUNNING forever. The event is consumed
+  with the work item, so the terminate can never be re-delivered and the instance is permanently
+  unstoppable; retrying does not help. Measured at roughly 3% of cancellations of a running
+  workflow on runtimes 1.16.8 and 1.18.2. Fixed upstream in `dapr/durabletask-go#124` and confirmed
+  for Dapr **1.18.3**: re-enable the tests and delete the constant once the daemon runs on it. The
+  tests need no changes — they pass whenever the termination happens to arrive alone.
 
 ### Breaking
 
