@@ -92,7 +92,7 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
             ExecutionId = response.Id
         });
 
-        await call.CollectUntilCompletion(TimeSpan.FromSeconds(3000));
+        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
         // Assert - Verify only check-value was called, high-value was skipped
         var logEntries = fixture.WireMockServer.LogEntries.ToList();

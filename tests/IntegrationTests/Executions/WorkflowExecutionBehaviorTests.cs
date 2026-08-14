@@ -38,7 +38,7 @@ public class WorkflowExecutionBehaviorTests(DaemonTestFixture fixture)
             ExecutionId = response.Id
         });
 
-        await call.CollectUntilCompletion(TimeSpan.FromSeconds(300));
+        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
         // Assert - Verify WireMock received the HTTP call
         var logEntries = fixture.WireMockServer.LogEntries;
