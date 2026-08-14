@@ -77,6 +77,66 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task A_subscription_survives_the_consumers_continuation()
+    {
+        // The highest-risk case in the design. A consumer re-enters its call activity once per
+        // value, so a stream of any length crosses ContinueAsNew — every five transitions under
+        // this fixture, so roughly every other value. WorkflowExecutorInput *is* the continuation
+        // envelope, and the subscription (which activity is subscribed, and to which child) rides
+        // in it: drop it and the next segment does not fail, it starts a second child and consumes
+        // from the beginning again. So the assertion that matters is not "it completed" but
+        // "every value arrived exactly once, in order" — a rewind shows up as a repeat, a reset as
+        // a duplicate child re-polling from 1.
+        //
+        // Verified by breaking it: emptying the subscription carry in ContinueFrom makes this fail
+        // on the completion wait rather than on an assertion, because a caller that forgets its
+        // subscription starts a fresh child at every continuation and the run never ends at all.
+        // A timeout here is the expected shape of that failure, not a flaky test.
+        const string producePath = "/streaming-continued-produce";
+        const string handlePath = "/streaming-continued-handle";
+        StubJson(producePath);
+        StubJson(handlePath);
+
+        const int values = 8;
+
+        var request = new TestWorkflowBuilder("streaming-continued", fixture.MockBaseUrl)
+            .WorkflowCall("watch", "producer-workflow", "produce",
+                input: Fields(("n", Value.ForNumber(1))),
+                onEmitted: HandleThenResume("handle"))
+            .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
+            .HttpGet("handle", handlePath)
+            .WithHeader("X-Value", "{{ input.n }}")
+            .OnSuccess("watch")
+            .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, values))
+            .Build("watch");
+
+        var scheduled = await fixture.ScheduleAsync(request);
+        var events = await WatchToCompletion(scheduled.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduled.Id });
+
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+
+        // The run really did span several Dapr instances rather than fitting in one, which is what
+        // makes the rest of this test mean anything.
+        Assert.Contains(events, e => e.Message.Contains("Continuing as new"));
+
+        // Every value, exactly once, in order — across those continuations.
+        Assert.Equal(
+            Enumerable.Range(1, values).Select(value => value.ToString()),
+            ValuesHandled(handlePath));
+
+        // The child produced them from one run rather than being restarted: a second child would
+        // have polled its way from 1 again, so the stub would show more laps than values.
+        Assert.Equal(values + 1, CallCount(producePath));
+
+        // And the terminal value still arrives through on_success once the stream ends.
+        Assert.NotNull(details.Result);
+        Assert.Equal((double)values, details.Result.Fields["produced"].NumberValue);
+    }
+
+    [Fact]
     public async Task The_producer_never_runs_ahead_of_the_consumer()
     {
         // Backpressure, observed rather than asserted about. The producer does no work per lap
@@ -218,6 +278,9 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
 
         return await call.CollectUntilCompletion(Timeout);
     }
+
+    private int CallCount(string path) =>
+        fixture.WireMockServer.LogEntries.Count(entry => entry.RequestMessage.Path == path);
 
     private List<string> ValuesHandled(string path) =>
         fixture.WireMockServer.LogEntries
