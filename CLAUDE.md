@@ -73,10 +73,16 @@ These are easy to break silently — see the notes in `Common.Workflow` and the 
 - **An event's stored name comes from `[EventType]`, never from its CLR type.** It used to be the
   `AssemblyQualifiedName`, so renaming an event, moving its namespace, or moving it to another
   assembly silently orphaned every event written before the move.
-  `tests/UnitTests/Persistence/EventTypeRegistryTests.cs` pins the five names as literal strings —
-  a rename is a failing build, not a lost stream. Two consequences: every `IDomainEvent` must carry
-  the attribute or `EventTypeRegistry` throws at startup, and every name must keep the
-  `utos.execution.` prefix that `WorkflowExecutionEventProcessor` filters its subscription on.
+  `tests/UnitTests/Persistence/EventTypeRegistryTests.cs` pins every name as a literal string — a
+  rename is a failing build, not a lost stream. Every `IDomainEvent` must carry the attribute or
+  `EventTypeRegistry` throws at startup.
+- **The name decides what the read model sees.** `WorkflowExecutionEventProcessor` filters its
+  `$all` subscription on `utos.execution.`, so a lifecycle event is named under that prefix and an
+  `ExecutionOutputEntry` deliberately is not — `utos.output.*` keeps emitted values off the
+  projection pipeline. That separation used to rest on which namespace the file sat in, which made
+  moving a file a behaviour change; both halves are now asserted in `EventTypeRegistryTests`.
+  Changing the prefix means bumping the group name in `SubscriptionName` too, because a persistent
+  subscription stores its filter server-side at creation and the daemon swallows `AlreadyExists`.
 - **Changing an event's JSON shape means bumping `[EventType(Version = n)]` and registering an
   `IEventUpcaster` for the step.** The version rides in the KurrentDB event metadata (`{"v":n}`);
   absent or unreadable metadata reads as v1. Adding an optional nullable field needs neither — that

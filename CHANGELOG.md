@@ -267,6 +267,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change would keep the old filter and quietly match nothing — the group name is bumped to
   `workflow-event-processor-v2` so a stale one cannot linger.
 
+  That filter is also what keeps output entries off the projection pipeline, and the names make the
+  rule say so. An `ExecutionOutputEntry` is named `utos.output.*`, outside the prefix, where it
+  previously depended on the file living outside the `Execution.Domain.Events` namespace — a rule
+  a routine file move could have broken with no failure, only a projection engine woken on every
+  emitted value. Both halves are now asserted rather than commented.
+
   The JSON body of every event is unchanged, which `EventJsonShapeTests` still pins; only the name
   it is filed under moves. See **Breaking** for what that costs an existing stream.
 
