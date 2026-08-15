@@ -13,6 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Execution.Application.Models;
 using Execution.Application.Repositories;
 using Execution.Application.Services;
+using Execution.Domain.Events;
 using Execution.Domain.Interpreter;
 using Execution.Domain.Services;
 using Execution.Domain.Templating;
@@ -68,8 +69,10 @@ public static class ExecutionInfrastructureExtensions
                 KurrentDB.Client.KurrentDBClientSettings.Create(connectionString!));
         });
 
-        // Add EventStore Serializer
-        builder.Services.AddSingleton<IEventSerializer, EventSerializer>();
+        // Add EventStore Serializer, over the events this module declares. Any IDomainEvent in
+        // that assembly without an [EventType] fails here rather than being written under a name
+        // no reader resolves.
+        builder.Services.AddEventStoreSerialization(typeof(WorkflowExecutionCreatedEvent).Assembly);
 
         // Add repositories
         builder.Services.AddScoped<IEventStoreRepository, EventStoreRepository>();

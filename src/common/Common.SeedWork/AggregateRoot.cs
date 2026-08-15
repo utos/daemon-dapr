@@ -34,8 +34,8 @@ public abstract class AggregateRoot<TId> where TId : notnull
 
     /// <param name="streamRevision">
     /// The revision of the last event in the stream. Supplied by the store rather than counted
-    /// from <paramref name="events"/>, because an event the store cannot deserialize is dropped
-    /// from that sequence but still occupies a revision.
+    /// from <paramref name="events"/>: the revision is the store's own fact, and it is what the
+    /// next append is checked against.
     /// </param>
     public void LoadFromHistory(IEnumerable<IDomainEvent> events, long streamRevision)
     {

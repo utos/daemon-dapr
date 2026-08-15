@@ -65,10 +65,29 @@ These are easy to break silently — see the notes in `Common.Workflow` and the 
   in `DefinitionGrpcService.LoadWorkflow` while the bundle is still proto, then passed inward as a
   string. Recomputing it anywhere else would stop matching the CLI and registry.
 - **Any value object that touches persisted state must carry a `[JsonConverter]`** writing the
-  same scalar the primitive wrote. `EventSerializer.DeserializeEvent` catches every exception,
-  logs, and returns `null`, and the repository then drops that event while still counting its
-  stream revision — so a changed JSON shape does not fail loudly, it rehydrates aggregates with
-  holes. `tests/UnitTests/Persistence/EventJsonShapeTests.cs` pins the shape as text.
+  same scalar the primitive wrote. `EventSerializer` serializes with no options, so the shape rests
+  entirely on the converters the types carry, and a change to it makes every event written before
+  it unreadable. Unreadable now *fails* — a load throws and a subscription parks the event — but
+  the run is still dead either way, so the shape is a contract, not a preference.
+  `tests/UnitTests/Persistence/EventJsonShapeTests.cs` pins it as text.
+- **An event's stored name comes from `[EventType]`, never from its CLR type.** It used to be the
+  `AssemblyQualifiedName`, so renaming an event, moving its namespace, or moving it to another
+  assembly silently orphaned every event written before the move.
+  `tests/UnitTests/Persistence/EventTypeRegistryTests.cs` pins every name as a literal string — a
+  rename is a failing build, not a lost stream. Every `IDomainEvent` must carry the attribute or
+  `EventTypeRegistry` throws at startup.
+- **The name decides what the read model sees.** `WorkflowExecutionEventProcessor` filters its
+  `$all` subscription on `utos.execution.`, so a lifecycle event is named under that prefix and an
+  `ExecutionOutputEntry` deliberately is not — `utos.output.*` keeps emitted values off the
+  projection pipeline. That separation used to rest on which namespace the file sat in, which made
+  moving a file a behaviour change; both halves are now asserted in `EventTypeRegistryTests`.
+  Changing the prefix means bumping the group name in `SubscriptionName` too, because a persistent
+  subscription stores its filter server-side at creation and the daemon swallows `AlreadyExists`.
+- **Changing an event's JSON shape means bumping `[EventType(Version = n)]` and registering an
+  `IEventUpcaster` for the step.** The version rides in the KurrentDB event metadata (`{"v":n}`);
+  absent or unreadable metadata reads as v1. Adding an optional nullable field needs neither — that
+  is still the cheapest evolution, and what `AmbientEnv` and `Digest` are. A gap in the chain
+  throws rather than being skipped.
 - **Bundles are persisted in three places** — `WorkflowExecutionCreatedEvent.Bundle`,
   `ExecutionContexts.BundleJson`, and `WorkflowExecutions.WorkflowDefinitionJson`. All three
   change together.
@@ -86,7 +105,7 @@ These are easy to break silently — see the notes in `Common.Workflow` and the 
 ## Tests
 
 - `tests/UnitTests` — no Docker, no sidecar, no database. Interpreter, aggregate, mapping,
-  value objects, event JSON shape.
+  value objects, event JSON shape, event names and versions.
 - `tests/IntegrationTests` — black-box gRPC clients against the real Aspire host; needs Docker.
   These are what prove the proto mapping and the service surface end to end. Validation failures
   are asserted by **rule code** (`UTOS-A005`), never by wording: the spec pins the code and leaves

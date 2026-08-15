@@ -5,6 +5,7 @@ using Common.Workflow.Serialization;
 
 namespace Execution.Domain.Events;
 
+[EventType("utos.execution.created")]
 public record WorkflowExecutionCreatedEvent(
     ExecutionId ExecutionId,
     WorkflowBundle Bundle,
@@ -16,13 +17,13 @@ public record WorkflowExecutionCreatedEvent(
     Dictionary<string, object> Input,
     string StartActivity,
     DateTime DateOccurred,
-    // Ambient environment for the run. Nullable because events persisted before this
-    // field existed carry no value and the serializer does no upcasting — read it
-    // through Env rather than directly.
+    // Ambient environment for the run. Nullable rather than upcast: an added optional field is
+    // the cheaper of the two evolutions, and it costs no version bump. Events persisted before
+    // this field existed carry no value — read it through Env rather than directly.
     Dictionary<string, string>? AmbientEnv = null,
     // Content digest of the snapshotted bundle, resolved at schedule time. Not derivable
-    // from the bundle itself. Nullable because events persisted before this field existed
-    // carry no value (and sub-workflow runs never set it).
+    // from the bundle itself. Nullable for the same reason as AmbientEnv (and because
+    // sub-workflow runs never set it).
     string? Digest = null) : IDomainEvent
 {
     /// <summary>Ambient environment, empty for events written before the field existed.</summary>

@@ -10,6 +10,7 @@ namespace Execution.Domain.Events;
 /// failure with no reason reads as a bug in the daemon and needs standing in for, whereas
 /// "cancelled, no reason given" is an ordinary thing for a caller to mean.
 /// </param>
+[EventType("utos.execution.cancelled")]
 public record WorkflowExecutionCancelledEvent(
     ExecutionId ExecutionId,
     string? Reason,
