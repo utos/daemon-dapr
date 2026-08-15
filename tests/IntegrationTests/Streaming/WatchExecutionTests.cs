@@ -32,7 +32,7 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
             ExecutionId = executionId
         });
 
-        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(1000));
+        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
         // Assert - Should receive log events
         Assert.NotEmpty(events);
@@ -54,7 +54,7 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
             ExecutionId = executionId
         });
 
-        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(1000));
+        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
         // Assert - a structured terminal frame with COMPLETED status and no error
         var terminal = events.FirstOrDefault(e => e.Status == ExecutionStatus.Completed);

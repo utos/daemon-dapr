@@ -93,10 +93,28 @@ public abstract record SubWorkflowActivityConfig(
 /// Awaits the sub-workflow: the activity completes when the child terminates, the child's result
 /// becomes its output, and <c>on_failure</c> catches the child's runtime failures.
 /// </summary>
+/// <param name="OnEmitted">
+/// Evaluated once per value the child emits, in stream order, before its terminal result reaches
+/// <c>on_success</c>. Declaring it makes this caller the child's <em>privileged consumer</em>: the
+/// child's emit does not complete until the value has been consumed here, which bounds the
+/// unconsumed buffer to one entry. Empty means this caller awaits only the terminal value, and
+/// the child emits without waiting for anyone.
+/// </param>
 public sealed record CallActivityConfig(
     string Workflow,
     string StartActivity,
-    ValueMap? Input = null) : SubWorkflowActivityConfig(Workflow, StartActivity, Input);
+    ValueMap? Input = null,
+    IReadOnlyList<TransitionRule>? OnEmitted = null) : SubWorkflowActivityConfig(Workflow, StartActivity, Input)
+{
+    public IReadOnlyList<TransitionRule> OnEmitted { get; init; } = OnEmitted ?? [];
+
+    /// <summary>
+    /// Whether this caller consumes what the child emits. The child is told at start, so the
+    /// decision is made once from the bundle rather than by asking at emit time who is listening.
+    /// </summary>
+    [JsonIgnore]
+    public bool ConsumesOutput => OnEmitted.Count > 0;
+}
 
 /// <summary>
 /// Starts the sub-workflow and moves on. The child becomes its own top-level execution with an

@@ -25,7 +25,7 @@ public class EvaluateTransitionActivity(
         var session = WorkflowSession.From(executionContext, input.WorkflowKey);
 
         var decision = interpreter.Advance(
-            session, input.ActivityName, input.ActivityInput, input.ActivityOutput);
+            session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Emitted);
 
         return decision switch
         {
@@ -45,6 +45,10 @@ public class EvaluateTransitionActivity(
     }
 }
 
+/// <param name="Emitted">
+/// The output is a value a sub-workflow emitted rather than its result, so <c>on_emitted</c>
+/// applies. Only the driver can tell the two apart — by value they are identical.
+/// </param>
 public sealed record EvaluateTransitionInput(
     ExecutionId ExecutionId,
     string WorkflowKey,
@@ -52,7 +56,8 @@ public sealed record EvaluateTransitionInput(
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? ActivityInput,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
-    object? ActivityOutput);
+    object? ActivityOutput,
+    bool Emitted = false);
 
 /// <param name="EmittedValue">
 /// What an <c>emit</c> action produced, to be appended to the execution's output stream before

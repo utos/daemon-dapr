@@ -2,6 +2,8 @@ using Grpc.Core;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
+using WireMock.RequestBuilders;
+using WireMock.ResponseBuilders;
 
 namespace IntegrationTests.Executions;
 
@@ -37,10 +39,19 @@ public class CancelExecutionTests(DaemonTestFixture fixture)
     [Fact]
     public async Task CancelExecution_StopsAnEndlessPoller_AndRecordsTheReason()
     {
+        // The poller calls a stub each lap, so the run's own laps are observable from out here.
+        // Asserting only on the recorded status would pass against a cancellation that recorded
+        // itself and stopped nothing — which is exactly the failure this test is named for, and
+        // exactly what it used to miss.
+        const string path = "/cancel-endless-poller";
+        StubJson(path);
+
         var request = new TestWorkflowBuilder("cancel-endless-poller", fixture.MockBaseUrl)
+            .HttpGet("poll", path)
+            .OnSuccess("wait")
             .Timer("wait", TimeSpan.FromSeconds(1))
-            .OnSuccess("wait")          // back-edge with no exit: runs until cancelled
-            .Build();
+            .OnSuccess("poll")          // back-edge with no exit: runs until cancelled
+            .Build("poll");
 
         var scheduled = await fixture.ScheduleAsync(request);
         await WaitForStatus(scheduled.Id, ExecutionStatus.Active, TimeSpan.FromSeconds(20));
@@ -49,6 +60,12 @@ public class CancelExecutionTests(DaemonTestFixture fixture)
             new CancelExecutionRequest { ExecutionId = scheduled.Id, Reason = "no longer needed" });
 
         Assert.Equal(ExecutionStatus.Cancelled, response.Status);
+
+        // Three laps of a one-second timer: a run still going would certainly have polled again.
+        var lapsAtCancellation = CallCount(path);
+        await Task.Delay(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(lapsAtCancellation, CallCount(path));
 
         await WaitForStatus(scheduled.Id, ExecutionStatus.Cancelled, TimeSpan.FromSeconds(20));
 
@@ -143,6 +160,17 @@ public class CancelExecutionTests(DaemonTestFixture fixture)
 
         Assert.Equal(StatusCode.NotFound, exception.StatusCode);
     }
+
+    private int CallCount(string path) =>
+        fixture.WireMockServer.LogEntries.Count(entry => entry.RequestMessage.Path == path);
+
+    private void StubJson(string path) =>
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath(path).UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"ok": true}"""));
 
     private async Task WaitForStatus(string executionId, ExecutionStatus expected, TimeSpan timeout)
     {

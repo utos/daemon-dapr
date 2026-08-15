@@ -28,9 +28,32 @@ public class ActivityConfigJsonShapeTests
     [Fact]
     public void An_awaited_sub_workflow_is_discriminated_as_workflow_call()
     {
+        // OnEmitted leads: System.Text.Json writes the most-derived type's own properties before
+        // those it inherits, so declaring it on CallActivityConfig moved it ahead of the shared
+        // identity fields. Recorded rather than fought — the order is part of what is pinned.
         Assert.Equal(
-            """{"type":"workflow.call","Workflow":"acme/send-email:1.0.0","StartActivity":"send","Input":null,"Kind":2}""",
+            """{"type":"workflow.call","OnEmitted":[],"Workflow":"acme/send-email:1.0.0","StartActivity":"send","Input":null,"Kind":2}""",
             Serialize(new CallActivityConfig("acme/send-email:1.0.0", "send")));
+    }
+
+    [Fact]
+    public void An_on_emitted_handler_persists_with_the_call_it_belongs_to()
+    {
+        // It decides whether the child gates on its caller, so losing it on the way to disk
+        // would turn a streaming consumer into one that silently drops what it was sent.
+        var config = new CallActivityConfig("acme/mailbox:1.0.0", "poll",
+            OnEmitted: [TransitionRule.Goto("handle")]);
+
+        var json = Serialize(config);
+
+        Assert.Contains("""
+                        "OnEmitted":[{"Transition":{"Name":"handle","Input":null},"Result":null,"Emit":null,"Condition":null,"HasAction":true}]
+                        """, json);
+
+        var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
+
+        Assert.Equal("handle", Assert.Single(restored.OnEmitted).Transition!.Name);
+        Assert.True(restored.ConsumesOutput);
     }
 
     [Fact]

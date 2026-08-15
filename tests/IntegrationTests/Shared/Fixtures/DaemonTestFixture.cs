@@ -1,6 +1,8 @@
 using Aspire.Hosting;
 using Common.Constants;
+using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
+using Microsoft.Extensions.Logging;
 using IntegrationTests.Shared.Builders;
 using Utos.Daemon.V1;
 using WireMock.RequestBuilders;
@@ -15,6 +17,20 @@ namespace IntegrationTests.Shared.Fixtures;
 /// </summary>
 public class DaemonTestFixture : IAsyncLifetime
 {
+    /// <summary>
+    /// Backstop deadline for a request/response call. Every one of them talks to a daemon on
+    /// this machine and should answer in well under a second; this is sized for a loaded box, not
+    /// for a slow operation, because there are none.
+    /// </summary>
+    private static readonly TimeSpan UnaryDeadline = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Backstop deadline for a server stream, which legitimately stays open for a whole run.
+    /// Above the longest wait any test asks for, so it only ever fires on a stream that has
+    /// stopped producing entirely. See <see cref="DeadlineInterceptor"/>.
+    /// </summary>
+    private static readonly TimeSpan StreamDeadline = TimeSpan.FromSeconds(120);
+
     public DistributedApplication App { get; private set; } = null!;
     public ExecutionService.ExecutionServiceClient DaemonClient { get; private set; } = null!;
     public DefinitionService.DefinitionServiceClient DefinitionClient { get; private set; } = null!;
@@ -29,6 +45,7 @@ public class DaemonTestFixture : IAsyncLifetime
         {
             clientBuilder.AddStandardResilienceHandler();
         });
+
 
         // Allow the ExecutionLog provider to receive Debug-level logs so that WatchExecution
         // clients can observe HTTP request details emitted by activities during test runs.
@@ -55,9 +72,14 @@ public class DaemonTestFixture : IAsyncLifetime
         var httpClient = App.CreateHttpClient(ServiceName.App.MainApi);
         var serviceAddress = httpClient.BaseAddress?.ToString().TrimEnd('/');
         var channel = GrpcChannel.ForAddress(serviceAddress!);
-        DaemonClient = new ExecutionService.ExecutionServiceClient(channel);
-        DefinitionClient = new DefinitionService.DefinitionServiceClient(channel);
-        ObservabilityClient = new ObservabilityService.ObservabilityServiceClient(channel);
+
+        // Every client goes through the deadline interceptor, so no call any test makes can wait
+        // forever on a daemon that has stopped answering.
+        var invoker = channel.Intercept(new DeadlineInterceptor(UnaryDeadline, StreamDeadline));
+
+        DaemonClient = new ExecutionService.ExecutionServiceClient(invoker);
+        DefinitionClient = new DefinitionService.DefinitionServiceClient(invoker);
+        ObservabilityClient = new ObservabilityService.ObservabilityServiceClient(invoker);
 
         // Setup WireMock
         WireMockServer = WireMockServer.Start();
