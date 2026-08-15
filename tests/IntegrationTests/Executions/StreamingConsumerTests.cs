@@ -182,6 +182,68 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task A_consumer_can_relay_what_it_consumes_to_its_own_caller()
+    {
+        // Three levels: a producer, a middle workflow that consumes it *and* emits to its own
+        // caller, and a top-level run consuming that. Each link is its own rendezvous, so the
+        // middle one is parked in both directions at once — waiting on its caller's
+        // acknowledgement before it can acknowledge its child.
+        //
+        // Worth proving rather than assuming, because the nearest piece of machinery is
+        // deliberately one level deep: log lines route to `ParentExecutionId ?? ExecutionId`, so a
+        // grandchild's logs land in a buffer nobody watches. Output streams are per-execution and
+        // addressed by their own id, and this is what says they did not inherit that shape.
+        const string producePath = "/nested-produce";
+        const string relayPath = "/nested-relay";
+        const string handlePath = "/nested-handle";
+        StubJson(producePath);
+        StubJson(relayPath);
+        StubJson(handlePath);
+
+        const int values = 3;
+
+        var request = new TestWorkflowBuilder("nested-top", fixture.MockBaseUrl)
+            .WorkflowCall("watch-middle", "middle-workflow", "watch-child",
+                onEmitted: HandleThenResume("handle"))
+            .OnResult(Fields(("done", Value.ForString("{{ output.relayed }}"))))
+            .HttpGet("handle", handlePath)
+            .WithHeader("X-Value", "{{ input.n }}")
+            .OnSuccess("watch-middle")
+            .AddDependentWorkflow("middle-workflow", middle => middle
+                .WorkflowCall("watch-child", "producer-workflow", "produce",
+                    input: Fields(("n", Value.ForNumber(1))),
+                    onEmitted: HandleThenResume("relay"))
+                .OnResult(Fields(("relayed", Value.ForString("{{ output.produced }}"))))
+                .HttpGet("relay", relayPath)
+                .WithHeader("X-Value", "{{ input.n }}")
+                // Emit-and-continue: hand the value up, then go back to the call activity, which
+                // is what acknowledges the child and asks it for the next one.
+                .OnEmit(Fields(("n", Value.ForString("{{ input.n }}"))), "watch-child"))
+            .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, values))
+            .Build("watch-middle");
+
+        var scheduled = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduled.Id, Timeout);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduled.Id });
+
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+
+        // Every value reached the top in order, having crossed two subscriptions to get there.
+        Assert.Equal(["1", "2", "3"], ValuesHandled(handlePath));
+
+        // And the middle relayed each one exactly once rather than batching or dropping.
+        Assert.Equal(["1", "2", "3"], ValuesHandled(relayPath));
+
+        // The terminal value travels the same chain: the child's result becomes the middle's,
+        // which becomes the top's — and stays a number across both hops, since each is a whole
+        // expression rather than an interpolation.
+        Assert.NotNull(details.Result);
+        Assert.Equal((double)values, details.Result.Fields["done"].NumberValue);
+    }
+
+    [Fact]
     public async Task A_producer_that_fails_mid_stream_surfaces_to_its_caller()
     {
         // The values already handed over stand; the failure arrives as the terminal message and
