@@ -165,17 +165,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previously checked only the recorded status, so it passed against a cancellation that recorded
   itself and stopped nothing — which is the failure the test is named for.
 
-### Known issues
+### Requirements
 
-- **Five cancellation tests are skipped**, carrying
-  `SkipReasons.DaprDropsTerminationsSharingAWorkItem`. Dapr drops a termination that is not the
-  last event in the work item it arrives in — `[ExecutionTerminated, TaskCompleted]` is lost while
-  `[ExecutionTerminated]` is honoured — leaving the workflow RUNNING forever. The event is consumed
-  with the work item, so the terminate can never be re-delivered and the instance is permanently
-  unstoppable; retrying does not help. Measured at roughly 3% of cancellations of a running
-  workflow on runtimes 1.16.8 and 1.18.2. Fixed upstream in `dapr/durabletask-go#124` and confirmed
-  for Dapr **1.18.3**: re-enable the tests and delete the constant once the daemon runs on it. The
-  tests need no changes — they pass whenever the termination happens to arrive alone.
+- **Dapr runtime 1.18.3 or later is now required for cancellation to be reliable.** Earlier
+  runtimes silently drop a termination that is not the last event in the work item it arrives in —
+  `[ExecutionTerminated, TaskCompleted]` is lost while `[ExecutionTerminated]` alone is honoured —
+  leaving the workflow RUNNING forever. The event is consumed with the work item, so the terminate
+  can never be re-delivered and the instance is permanently unstoppable; retrying does not help,
+  and no daemon-side handling can recover it. Measured at roughly 3% of cancellations of a running
+  workflow on 1.16.8 and 1.18.2, and higher under dense activity traffic. Fixed upstream in
+  `dapr/durabletask-go#124`, released in Dapr **1.18.3**, and verified here: the failing
+  arrangement still occurs and is now honoured every time.
+  What the daemon does about it is confirm the outcome rather than trust the request —
+  `TerminateAsync` waits for a terminal status — so on an older runtime a lost termination
+  surfaces as a failed `CancelExecution` rather than a run recorded as cancelled while it keeps
+  working.
 
 ### Breaking
 

@@ -167,7 +167,7 @@ public class LoopTests(DaemonTestFixture fixture)
         await AssertCompleted(response.Id);
     }
 
-    [Fact(Skip = SkipReasons.DaprDropsTerminationsSharingAWorkItem)]
+    [Fact]
     public async Task Loop_WithNoExit_KeepsRunningUntilItIsCancelled()
     {
         // Arrange - an unconditional back-edge, so nothing ever leaves the loop. This used to

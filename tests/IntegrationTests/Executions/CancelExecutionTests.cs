@@ -1,5 +1,4 @@
 using Grpc.Core;
-using IntegrationTests.Shared;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
@@ -37,7 +36,7 @@ public class CancelExecutionTests(DaemonTestFixture fixture)
         Assert.Equal(StatusCode.NotFound, exception.StatusCode);
     }
 
-    [Fact(Skip = SkipReasons.DaprDropsTerminationsSharingAWorkItem)]
+    [Fact]
     public async Task CancelExecution_StopsAnEndlessPoller_AndRecordsTheReason()
     {
         // The poller calls a stub each lap, so the run's own laps are observable from out here.
@@ -83,7 +82,7 @@ public class CancelExecutionTests(DaemonTestFixture fixture)
         Assert.NotNull(details.Summary.FinishedAt);
     }
 
-    [Fact(Skip = SkipReasons.DaprDropsTerminationsSharingAWorkItem)]
+    [Fact]
     public async Task CancelExecution_IsIdempotent()
     {
         var request = new TestWorkflowBuilder("cancel-twice", fixture.MockBaseUrl)
@@ -135,7 +134,7 @@ public class CancelExecutionTests(DaemonTestFixture fixture)
         Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
     }
 
-    [Fact(Skip = SkipReasons.DaprDropsTerminationsSharingAWorkItem)]
+    [Fact]
     public async Task A_cancelled_execution_can_be_deleted()
     {
         // DeleteExecution requires a terminal execution, and cancellation is one — otherwise a

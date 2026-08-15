@@ -1,6 +1,5 @@
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
-using IntegrationTests.Shared;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
@@ -216,7 +215,7 @@ public class OutputStreamTests(DaemonTestFixture fixture)
         Assert.Empty(terminal.Result.Fields);
     }
 
-    [Fact(Skip = SkipReasons.DaprDropsTerminationsSharingAWorkItem)]
+    [Fact]
     public async Task ACancelledRun_TerminatesItsStreamWithACancellationError()
     {
         var request = new TestWorkflowBuilder("emit-cancelled", fixture.MockBaseUrl)
