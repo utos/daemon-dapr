@@ -26,7 +26,8 @@ public class ExecuteActivity(IEnumerable<IActivityHandler> handlers)
                 input.Body,
                 input.Headers));
 
-        return new ExecuteActivityOutput(result.StatusCode, result.Success, result.Output);
+        return new ExecuteActivityOutput(
+            result.StatusCode, result.Success, result.Output, result.Headers, result.BodyText);
     }
 }
 
@@ -39,8 +40,14 @@ public sealed record ExecuteActivityInput(
     string? Body,
     Dictionary<string, string>? Headers);
 
+/// <param name="Headers">
+/// Plain string-to-string, so no custom converter is needed — unlike <paramref name="Output"/>,
+/// which carries arbitrary workflow values and would come back as JsonElement without one.
+/// </param>
 public sealed record ExecuteActivityOutput(
     int StatusCode,
     bool Success,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
-    object? Output);
+    object? Output,
+    Dictionary<string, string> Headers,
+    string? BodyText);

@@ -18,17 +18,26 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     /// Where <paramref name="activityName"/> sends the execution, given what it produced.
     /// Rules are evaluated in order and the first whose condition matches wins.
     /// </summary>
-    /// <param name="emitted">
-    /// The output is a value a sub-workflow emitted rather than its result, so the activity's
-    /// <c>on_emitted</c> rules apply instead of <c>on_success</c>. Those rules must lead back to
-    /// the call activity — leaving any other way ends the subscription.
+    /// <param name="outcome">
+    /// Which rule list applies. Only the driver knows: an emitted value and a returned result are
+    /// identical by value, and a failure carries none at all.
+    /// </param>
+    /// <param name="response">
+    /// The HTTP response this activity produced, when it was an HTTP activity. Surfaced as
+    /// <c>{{ response.x }}</c> on every path, so a rule can branch on a status code.
+    /// </param>
+    /// <param name="error">
+    /// Why the activity failed, surfaced as <c>{{ error.x }}</c>. Set only when
+    /// <paramref name="outcome"/> is <see cref="ActivityOutcomeKind.Failed"/>.
     /// </param>
     public TransitionDecision Advance(
         WorkflowSession session,
         string activityName,
         IReadOnlyDictionary<string, object>? activityInput,
         object? activityOutput,
-        bool emitted = false)
+        ActivityOutcomeKind outcome = ActivityOutcomeKind.Succeeded,
+        HttpResponseContext? response = null,
+        WorkflowErrorContext? error = null)
     {
         var activity = Require(session, activityName);
         var input = session.InputFor(activityInput);
@@ -42,21 +51,36 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             ? input
             : activityOutput;
 
+        // What a transition with no explicit input transform hands the next activity. On success
+        // that is the output; on failure there is no output, and falling through to null would
+        // make WorkflowSession.InputFor substitute the *run* input — silently rewinding a failure
+        // handler to the state the workflow started in. The failing activity's own input is what
+        // a handler actually needs to see.
+        var passThrough = outcome == ActivityOutcomeKind.Failed ? input : output;
+
         // An emitted value is dispatched by the caller's on_emitted rules, which live on the call
         // configuration rather than on the activity — they only mean anything for an awaited
         // sub-workflow, so they cannot be authored anywhere they would be ignored.
-        var rules = emitted
-            ? (activity.Config as CallActivityConfig)?.OnEmitted ?? []
-            : activity.OnSuccess;
+        var rules = outcome switch
+        {
+            ActivityOutcomeKind.Emitted => (activity.Config as CallActivityConfig)?.OnEmitted ?? [],
+            ActivityOutcomeKind.Failed => activity.OnFailure,
+            _ => activity.OnSuccess
+        };
 
-        // If no transitions, workflow ends
+        // Exhausting the rules means opposite things on the two paths. On success the run is
+        // finished; on failure the error is simply unhandled and must keep travelling, per
+        // activity.proto: "If no transitions match or list is empty, the error propagates".
+        // Returning End here instead would report a failed run as Completed.
         if (rules.Count == 0)
-            return new TransitionDecision.End();
+            return Exhausted(outcome);
 
         var scope = new TemplateScope()
             .WithInput(input)
             .WithOutput(output)
-            .WithEnv(session.Env);
+            .WithEnv(session.Env)
+            .WithResponse(response)
+            .WithError(error);
 
         foreach (var rule in rules)
         {
@@ -71,20 +95,31 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             // Condition matched (or no condition) — execute the action
             return rule switch
             {
-                { Transition: not null } => Goto(rule.Transition, scope, output),
+                { Transition: not null } => Goto(rule.Transition, scope, passThrough),
 
                 { Result: not null } =>
                     new TransitionDecision.Return(structRenderer.Render(rule.Result, scope)),
 
-                { Emit: not null } => Emit(rule.Emit, scope, output, activityName),
+                { Emit: not null } => Emit(rule.Emit, scope, passThrough, activityName),
 
                 _ => throw new InvalidOperationException(
                     "Transition rule has no action set (neither transition, result nor emit)")
             };
         }
 
-        // No transitions matched - workflow ends
-        return new TransitionDecision.End();
+        // Every rule was evaluated and none matched — same meaning as having none at all.
+        return Exhausted(outcome);
+    }
+
+    /// <summary>
+    /// What an unmatched rule list means. The success and emitted paths finish; the failure path
+    /// keeps the error travelling, which is the one asymmetry in the whole dispatch.
+    /// </summary>
+    private static TransitionDecision Exhausted(ActivityOutcomeKind outcome)
+    {
+        return outcome == ActivityOutcomeKind.Failed
+            ? new TransitionDecision.Propagate()
+            : new TransitionDecision.End();
     }
 
     /// <summary>

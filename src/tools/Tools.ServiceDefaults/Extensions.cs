@@ -25,10 +25,19 @@ public static class Extensions
 
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            // TODO: Re-activate the default resilience handler once we either defined the default behavior or we found a way to disable it specifically for HttpActivity
-
-            // Turn on resilience by default
-            // http.AddStandardResilienceHandler();
+            // Turn on resilience by default.
+            //
+            // This was previously commented out to keep the standard retry strategy away from
+            // workflow HTTP activities, where retrying is wrong: an author's POST may create an
+            // order or send an email, and the daemon has no idempotency key that would make a
+            // silent second attempt safe. But ConfigureHttpClientDefaults applies to every
+            // HttpClient in the process, so disabling it here also stripped timeouts, circuit
+            // breaking and concurrency limiting from the daemon's own internal clients — a far
+            // wider blast radius than the problem.
+            //
+            // Workflow HTTP now opts itself out instead, in ExecutionInfrastructureExtensions:
+            // it removes this pipeline and adds back a timeout-only one.
+            http.AddStandardResilienceHandler();
 
             // Turn on service discovery by default
             http.AddServiceDiscovery();

@@ -9,6 +9,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`on_failure` is executed.** It was specified, validated, authored in the shipped examples and
+  present in the conformance corpus — and read nowhere, so every `onFailure` block written to date
+  validated cleanly and did nothing. Rules are now evaluated in order, first match wins, exactly as
+  `on_success`. The asymmetry is the part to remember: on the success path an unmatched rule list
+  means the run finished, while on the failure path it means the error was never handled and must
+  keep travelling. `TransitionDecision.Propagate` exists so those two cannot be confused — folding
+  them together would report a failed run as Completed, which no existing test would have caught.
+- **`error` template context** — `code` and `message`, on the failure path. Deliberately not folded
+  into `output`: a failed activity produced no output, and overloading the name would let a
+  condition written for the success path silently read error fields on the failure path. Codes stay
+  coarse (`EXECUTION_FAILED`) until the pipeline records structured causes; a rule branches on
+  `response.status`, which is where the detail actually is.
+- **`response` template context** — `status`, `headers`, `bodyText` for an http activity, on **both**
+  paths. This is what lets a failure rule tell a 429 from a 401. `bodyText` is always present, and
+  is the only way to read a non-JSON body at all: `output` is null unless the content type is
+  exactly `application/json`, so `text/plain`, `text/csv` and `application/vnd.api+json` responses
+  were previously unreadable.
+- Both new contexts, and every key inside them, are **always defined**, with nulls where they do not
+  apply. An empty context is not enough: the template engine throws on a missing *member*, not only
+  on an undefined root, so `response.status == 429` on an activity that made no request — or a
+  request that timed out — would otherwise raise *while a failure is being handled*.
+- Egress policy for workflow HTTP (`HttpEgressOptions`). Link-local (`169.254.0.0/16` and the IPv6
+  equivalents) is denied with no override, because it is the cloud instance-metadata range and
+  reaching it turns "can author a workflow" into "holds the cloud account's credentials". Loopback
+  and private ranges stay allowed by default, since denying them would break every self-hosted
+  daemon calling an internal API. Enforced in `SocketsHttpHandler.ConnectCallback` rather than a
+  `DelegatingHandler`: auto-redirect means a message handler never sees the redirected hop, and
+  resolving then dialling the same approved address leaves no window for DNS rebinding.
+
+### Fixed
+
+- **Workflow HTTP was using an unconfigured `HttpClient`.** `ExecuteActivity` resolves
+  `IEnumerable<IActivityHandler>`, which bound to the `AddScoped<IActivityHandler, …>` registration
+  and received the default unnamed client, while `AddHttpClient<HttpActivityHandler>()` configured a
+  named client nothing resolved. Any timeout or handler attached there would have been silently
+  inert. Collapsed into `AddHttpClient<IActivityHandler, HttpActivityHandler>()`.
+- **An author-declared `content-type` is honoured.** Every body was sent as `application/json`
+  because `Content-Type` is a content header and `request.Headers.TryAddWithoutValidation` silently
+  drops it. `application/x-www-form-urlencoded` was therefore inexpressible, which made a standard
+  OAuth token refresh impossible — and so made any long-running workflow that must renew its own
+  credential impossible with it. Defaults to `application/json`, so existing workflows are unchanged.
+- **Resilience is on again, minus retry for workflow HTTP.** The standard handler had been commented
+  out in `ServiceDefaults` to keep retries away from workflow activities, but
+  `ConfigureHttpClientDefaults` applies to every client in the process, so that also stripped
+  timeouts and circuit breaking from the daemon's own internal calls. It is restored, and the
+  workflow client opts out on its own with `RemoveAllResilienceHandlers()` plus a timeout-only
+  pipeline. Retry is wrong *there* specifically: a workflow's POST may create an order or charge a
+  card, there is no idempotency key to make a second attempt safe, and with `on_failure` the author
+  is now the one who decides whether to retry.
+- Workflow HTTP has an explicit timeout (30 s, configurable) instead of the `HttpClient` default of
+  100 s. Uses the Polly strategy so a timeout raises `TimeoutRejectedException` rather than the
+  `TaskCanceledException` a genuine cancellation also raises.
+- A non-2xx no longer throws from inside the activity. An exception flattens to a message string at
+  the Dapr boundary, taking the status and headers with it; the handler now reports the failure and
+  the executor raises it, which is what keeps `response` available to a failure rule.
+- A failure-path transition with no `input` transform passes the **failing activity's own input**
+  through. It previously fell through to the activity's absent output, which
+  `WorkflowSession.InputFor` then replaced with the *run* input — silently rewinding a handler to
+  the state the workflow started in.
+
 - **Every execution has a durable output stream.** Ordered, cursor-addressable, its own KurrentDB
   stream (`executionoutput-{id}`), surviving daemon restart and orchestrator replay — see
   `api/docs/execution-output-stream.md`. A stream is zero or more `value` entries followed by
