@@ -14,6 +14,7 @@
         <PackageReference Include="Dapr.AspNetCore" />
         <PackageReference Include="Dapr.Workflow" />
         <PackageReference Include="Mediator.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
         <PackageReference Include="Scriban" />
     </ItemGroup>
 

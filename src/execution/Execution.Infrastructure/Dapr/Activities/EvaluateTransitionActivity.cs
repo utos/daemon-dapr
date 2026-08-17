@@ -25,7 +25,8 @@ public class EvaluateTransitionActivity(
         var session = WorkflowSession.From(executionContext, input.WorkflowKey);
 
         var decision = interpreter.Advance(
-            session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Emitted);
+            session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Outcome,
+            input.Response, input.Error);
 
         return decision switch
         {
@@ -40,14 +41,20 @@ public class EvaluateTransitionActivity(
             TransitionDecision.Emit emit => new EvaluateTransitionOutput(
                 emit.ActivityName, emit.Input, null, emit.Value),
 
+            // Nothing handled the failure, so the driver must rethrow rather than continue.
+            // Matched explicitly: folding it into the fallback below would turn an unhandled
+            // failure into a normally completed run.
+            TransitionDecision.Propagate => new EvaluateTransitionOutput(
+                null, null, null, null, Unhandled: true),
+
             _ => new EvaluateTransitionOutput(ReservedKeywords.End, null, null)
         };
     }
 }
 
-/// <param name="Emitted">
-/// The output is a value a sub-workflow emitted rather than its result, so <c>on_emitted</c>
-/// applies. Only the driver can tell the two apart — by value they are identical.
+/// <param name="Outcome">
+/// Which rule list applies. Only the driver can tell these apart — an emitted value and a result
+/// are identical by value, and a failure carries neither.
 /// </param>
 public sealed record EvaluateTransitionInput(
     ExecutionId ExecutionId,
@@ -57,12 +64,21 @@ public sealed record EvaluateTransitionInput(
     Dictionary<string, object>? ActivityInput,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? ActivityOutput,
-    bool Emitted = false);
+    ActivityOutcomeKind Outcome = ActivityOutcomeKind.Succeeded,
+    // Plain ints, strings and a string map — no converter needed, unlike ActivityOutput, which
+    // carries arbitrary workflow values.
+    HttpResponseContext? Response = null,
+    WorkflowErrorContext? Error = null);
 
 /// <param name="EmittedValue">
 /// What an <c>emit</c> action produced, to be appended to the execution's output stream before
 /// the run continues to <paramref name="NextActivityName"/>. Null means the rule was not an emit:
 /// a rendered value is always a dictionary — empty at the least — so null is unambiguous.
+/// </param>
+/// <param name="Unhandled">
+/// No <c>on_failure</c> rule matched, so the driver must rethrow rather than continue. Carried as
+/// a flag rather than as a null <paramref name="NextActivityName"/> because "go nowhere" already
+/// means the run finished normally, and the two outcomes must not be confusable.
 /// </param>
 public sealed record EvaluateTransitionOutput(
     string? NextActivityName,
@@ -71,4 +87,5 @@ public sealed record EvaluateTransitionOutput(
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? ReturnValue,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
-    Dictionary<string, object>? EmittedValue = null);
+    Dictionary<string, object>? EmittedValue = null,
+    bool Unhandled = false);

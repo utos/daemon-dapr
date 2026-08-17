@@ -10,6 +10,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Polly;
+using System.Net.Http;
 using Execution.Application.Models;
 using Execution.Application.Repositories;
 using Execution.Application.Services;
@@ -23,6 +26,7 @@ using Execution.Infrastructure.Dapr.Activities;
 using Execution.Infrastructure.Dapr.ActivityHandlers;
 using Execution.Infrastructure.Data;
 using Execution.Infrastructure.EventProcessing;
+using Execution.Infrastructure.Http;
 using Execution.Infrastructure.Persistence;
 using Execution.Infrastructure.EventHandling;
 using Execution.Infrastructure.Projections;
@@ -102,9 +106,55 @@ public static class ExecutionInfrastructureExtensions
         // Add the execution output stream — the durable log of what a workflow produced.
         builder.Services.AddScoped<IExecutionOutputStore, KurrentExecutionOutputStore>();
 
+        // Outbound HTTP policy for workflow activities: which destinations are reachable, and
+        // how long a request may take.
+        builder.Services.Configure<HttpEgressOptions>(
+            builder.Configuration.GetSection(HttpEgressOptions.SectionName));
+        builder.Services.AddSingleton<HttpEgressGuard>();
+
         // Add Activity Handlers (strategy pattern for activity type dispatch)
-        builder.Services.AddScoped<IActivityHandler, HttpActivityHandler>();
-        builder.Services.AddHttpClient<HttpActivityHandler>();
+        //
+        // Registered as a typed client *against the interface*, which is the only thing that
+        // resolves: ExecuteActivity injects IEnumerable<IActivityHandler>. Registering the
+        // handler separately (AddScoped<IActivityHandler, …> plus AddHttpClient<Handler>) built
+        // it from the default unnamed HttpClient and left every bit of configuration below
+        // attached to a named client nothing ever asked for — silently inert.
+        var workflowHttp = builder.Services.AddHttpClient<IActivityHandler, HttpActivityHandler>();
+
+        // Drop the standard pipeline inherited from ConfigureHttpClientDefaults. Its retry
+        // strategy is wrong here specifically: a workflow's POST may create an order or charge a
+        // card, the daemon has no idempotency key to make that safe, and after on_failure routing
+        // the author is the one who decides whether to retry. Adding a second handler instead of
+        // removing this one would stack two pipelines rather than replace one.
+        //
+        // EXTEXP0001: RemoveAllResilienceHandlers is still marked experimental upstream. It is the
+        // only supported way to drop an inherited pipeline for one client, and the alternative —
+        // not applying resilience globally at all — is precisely what this change undoes. If it is
+        // ever withdrawn, the fallback is to stop using ConfigureHttpClientDefaults for resilience
+        // and opt each client in individually.
+#pragma warning disable EXTEXP0001
+        workflowHttp.RemoveAllResilienceHandlers();
+#pragma warning restore EXTEXP0001
+
+        workflowHttp.AddResilienceHandler("workflow-http", (pipeline, context) =>
+        {
+            var egress = context.ServiceProvider
+                .GetRequiredService<IOptions<HttpEgressOptions>>().Value;
+
+            // Timeout only. Polly's strategy rather than HttpClient.Timeout, so a timeout surfaces
+            // as TimeoutRejectedException instead of the TaskCanceledException a real cancellation
+            // also raises — the two need telling apart now that CancelExecution exists.
+            pipeline.AddTimeout(egress.RequestTimeout);
+        });
+
+        // Egress policy runs at connect time, not as a DelegatingHandler: auto-redirect is on by
+        // default, so a message handler never sees a 302 into an internal address, and validating
+        // a hostname then handing the hostname to the socket leaves a rebinding window. A connect
+        // callback resolves and dials the same approved address.
+        workflowHttp.ConfigurePrimaryHttpMessageHandler(serviceProvider => new SocketsHttpHandler
+        {
+            ConnectCallback = serviceProvider.GetRequiredService<HttpEgressGuard>().ConnectAsync
+        });
 
         // Add Dapr Workflow services
         builder.Services.AddDaprWorkflow(options =>

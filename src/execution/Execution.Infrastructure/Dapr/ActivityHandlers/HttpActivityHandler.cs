@@ -28,12 +28,24 @@ public class HttpActivityHandler(
         var startTime = DateTimeOffset.UtcNow;
         var request = new HttpRequestMessage(httpMethod, url);
 
+        // Content-Type is a content header, so TryAddWithoutValidation on request.Headers silently
+        // drops it. Reading it here is what makes application/x-www-form-urlencoded expressible —
+        // without which a workflow cannot perform a standard OAuth token refresh.
+        var requestContentType = ResolveContentType(input.Headers);
+
         if (!string.IsNullOrEmpty(input.Body))
-            request.Content = new StringContent(input.Body, Encoding.UTF8, "application/json");
+            request.Content = new StringContent(input.Body, Encoding.UTF8, requestContentType);
 
         if (input.Headers != null)
             foreach (var (key, value) in input.Headers)
+            {
+                // Already applied to the content above; adding it here would either be dropped or
+                // duplicate the header.
+                if (string.Equals(key, "content-type", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 request.Headers.TryAddWithoutValidation(key, value);
+            }
 
         var response = await httpClient.SendAsync(request, ct);
         var responseContent = await response.Content.ReadAsStringAsync(ct);
@@ -54,13 +66,9 @@ public class HttpActivityHandler(
             "HTTP {HttpMethod} {Url} completed: {StatusCode} {StatusText} in {DurationMs}ms (execution {WorkflowExecutionId})",
             httpMethod.Method, url, statusCode, statusText, (long)duration, input.LogExecutionId);
 
-        // TODO: Add on-error handler support - check if status code should be handled before throwing
-        if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException(
-                $"HTTP {httpMethod} request failed with status {statusCode}: {responseContent}",
-                null,
-                response.StatusCode);
-
+        // A non-2xx is reported, not thrown. Throwing here would flatten to a message string at the
+        // Dapr boundary and lose the status and headers that on_failure rules branch on, so the
+        // executor decides what the status means.
         // Parse response body as output
         var contentType = response.Content.Headers.ContentType?.MediaType;
         var parsedBody = contentType switch
@@ -69,7 +77,48 @@ public class HttpActivityHandler(
             _ => null
         };
 
-        return new ActivityHandlerResult(statusCode, true, parsedBody);
+        return new ActivityHandlerResult(
+            statusCode,
+            response.IsSuccessStatusCode,
+            parsedBody,
+            CollectHeaders(response),
+            responseContent);
+    }
+
+    /// <summary>
+    /// The content type an author declared, defaulting to JSON so workflows written before this was
+    /// honoured behave exactly as they did.
+    /// </summary>
+    private static string ResolveContentType(Dictionary<string, string>? headers)
+    {
+        if (headers == null)
+            return "application/json";
+
+        foreach (var (key, value) in headers)
+            if (string.Equals(key, "content-type", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(value))
+                // StringContent appends its own charset, so hand it the media type alone.
+                return value.Split(';')[0].Trim();
+
+        return "application/json";
+    }
+
+    /// <summary>
+    /// Response and content headers merged into one map. Repeated headers are joined with ", " as
+    /// RFC 9110 §5.3 allows, so a template sees one string per name rather than a shape that varies
+    /// with how many values arrived.
+    /// </summary>
+    private static Dictionary<string, string> CollectHeaders(HttpResponseMessage response)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (key, values) in response.Headers)
+            headers[key] = string.Join(", ", values);
+
+        foreach (var (key, values) in response.Content.Headers)
+            headers[key] = string.Join(", ", values);
+
+        return headers;
     }
 
     private object? ParseJsonResponse(string responseContent)

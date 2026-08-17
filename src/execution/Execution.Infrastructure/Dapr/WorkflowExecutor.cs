@@ -1,10 +1,13 @@
+using Common.Constants;
 using Common.SeedWork;
+using System.Runtime.ExceptionServices;
 using System.Text.Json.Serialization;
 using Common.Workflow.Serialization;
 using Dapr.Workflow;
 using Execution.Domain.Aggregates;
 using Execution.Domain.Interpreter;
 using Execution.Infrastructure.Dapr.Activities;
+using Execution.Infrastructure.Http;
 using Microsoft.Extensions.Logging;
 using Common.Workflow;
 
@@ -93,9 +96,16 @@ public record WorkflowExecutorInput(
 /// finished activity, routing through <c>on_success</c>. The two are indistinguishable by value
 /// alone, which is why they are not carried as one.
 /// </summary>
-public readonly record struct ActivityOutcome(object? Output, bool IsEmission)
+public readonly record struct ActivityOutcome(
+    object? Output,
+    bool IsEmission,
+    HttpResponseContext? Response = null)
 {
     public static ActivityOutcome Completed(object? output) => new(output, false);
+
+    /// <summary>An HTTP activity, which additionally surfaces its response to templates.</summary>
+    public static ActivityOutcome Completed(object? output, HttpResponseContext? response) =>
+        new(output, false, response);
 
     public static ActivityOutcome Emitted(object? value) => new(value, true);
 }
@@ -191,16 +201,58 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                         "Loop detected at activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
                         run.ActivityName, logExecutionId);
 
-                var outcome = await PerformAsync(
-                    context, logger, input, run, currentActivityInput, logExecutionId, subscriptions);
+                ActivityOutcome outcome;
+                var outcomeKind = ActivityOutcomeKind.Succeeded;
+                WorkflowErrorContext? activityError = null;
+                ExceptionDispatchInfo? unhandledFailure = null;
+
+                try
+                {
+                    outcome = await PerformAsync(
+                        context, logger, input, run, currentActivityInput, logExecutionId, subscriptions);
+
+                    outcomeKind = outcome.IsEmission
+                        ? ActivityOutcomeKind.Emitted
+                        : ActivityOutcomeKind.Succeeded;
+                }
+                // Filtered on the activity actually declaring on_failure rules, so a workflow that
+                // does not opt in keeps exactly today's path — the exception is never caught, and
+                // no orchestration-internal control flow can be swallowed by this block. When the
+                // filter is false the stack is not even unwound.
+                catch (Exception activityEx) when (run.Activity.OnFailure.Count > 0)
+                {
+                    logger.LogInformation(
+                        "Activity '{WorkflowActivity}' failed and has on_failure rules: {ErrorMessage} (execution {WorkflowExecutionId})",
+                        run.ActivityName, activityEx.Message, logExecutionId);
+
+                    unhandledFailure = ExceptionDispatchInfo.Capture(activityEx);
+                    outcomeKind = ActivityOutcomeKind.Failed;
+
+                    // Codes stay coarse until the pipeline records structured causes; a rule
+                    // branches on response.status, which is the part that carries real detail.
+                    activityError = new WorkflowErrorContext(
+                        WorkflowErrorCode.ExecutionFailed, activityEx.Message);
+
+                    // A failed HTTP activity still has a response, and it is the whole reason
+                    // on_failure can tell a 429 from a 401.
+                    outcome = activityEx is HttpActivityFailedException httpFailure
+                        ? new ActivityOutcome(null, false, httpFailure.ToResponseContext())
+                        : default;
+                }
 
                 // An emission routes through on_emitted rather than on_success: the child has
                 // produced a value, not finished. Which rule list applies is the interpreter's
-                // call; that it was an emission is only knowable here.
+                // call; that it was an emission — or a failure — is only knowable here.
                 var transition = await context.CallActivityAsync<EvaluateTransitionOutput>(
                     nameof(EvaluateTransitionActivity),
                     new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
-                        run.ActivityName, currentActivityInput, outcome.Output, outcome.IsEmission));
+                        run.ActivityName, currentActivityInput, outcome.Output, outcomeKind,
+                        outcome.Response, activityError));
+
+                // No rule matched the failure, so it was never handled — rethrow it as it was,
+                // rather than letting the run fall through to a normal completion.
+                if (transition.Unhandled)
+                    unhandledFailure!.Throw();
 
                 // An emit is emit-and-continue: the value becomes durable before the run moves
                 // on, so a consumer reading the stream in order can never see the effect of a
@@ -336,8 +388,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     context, logger, input, run, activityInput, logExecutionId, subscriptions);
 
             case HttpActivityConfig:
-                return ActivityOutcome.Completed(
-                    await CallHttpAsync(context, logger, input, run, activityInput, logExecutionId));
+                return await CallHttpAsync(context, logger, input, run, activityInput, logExecutionId);
 
             case PromiseActivityConfig:
                 return ActivityOutcome.Completed(
@@ -373,7 +424,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         }
     }
 
-    private static async Task<object?> CallHttpAsync(
+    private static async Task<ActivityOutcome> CallHttpAsync(
         WorkflowContext context,
         ILogger logger,
         WorkflowExecutorInput input,
@@ -405,11 +456,19 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             var activityDuration = (context.CurrentUtcDateTime - activityStartTime).TotalMilliseconds;
 
+            // The handler reports a non-2xx rather than throwing, so that the status and headers
+            // survive the Dapr boundary. Turning that into a failure is this side's decision.
+            if (!result.Success)
+                throw new HttpActivityFailedException(
+                    run.ActivityName, result.StatusCode, result.Headers, result.BodyText);
+
             logger.LogInformation(
                 "Activity '{WorkflowActivity}' completed in {DurationMs}ms (execution {WorkflowExecutionId})",
                 run.ActivityName, (long)activityDuration, logExecutionId);
 
-            return result.Output;
+            return ActivityOutcome.Completed(
+                result.Output,
+                new HttpResponseContext(result.StatusCode, result.Headers, result.BodyText));
         }
         catch (Exception activityEx)
         {

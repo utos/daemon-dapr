@@ -347,6 +347,38 @@ public class ActivityBuilder
     }
 
     /// <summary>
+    /// Where the run goes when this activity fails. Note the asymmetry with
+    /// <see cref="OnSuccess"/>: if no rule here matches, the failure is unhandled and keeps
+    /// travelling, rather than the run completing.
+    /// </summary>
+    public ActivityBuilder OnFailure(string targetActivity, Struct? input = null, string? when = null)
+    {
+        var target = new TransitionTarget { Name = targetActivity };
+        if (input != null)
+            target.Input = input;
+
+        var rule = new TransitionRule { Transition = target };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnFailure.Add(rule);
+        return this;
+    }
+
+    /// <summary>Ends the run with <paramref name="resultValue"/> when this activity fails.</summary>
+    public ActivityBuilder OnFailureResult(Struct resultValue, string? when = null)
+    {
+        var rule = new TransitionRule { Result = resultValue };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnFailure.Add(rule);
+        return this;
+    }
+
+    /// <summary>
     /// Appends <paramref name="value"/> to the run's output stream and carries on to
     /// <paramref name="targetActivity"/>. Emit-and-continue, as against <see cref="OnResult"/>'s
     /// emit-and-terminate.
