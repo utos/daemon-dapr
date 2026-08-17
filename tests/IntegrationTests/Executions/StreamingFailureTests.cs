@@ -78,7 +78,7 @@ public class StreamingFailureTests(DaemonTestFixture fixture)
         Assert.Contains(recoverPath, paths);
 
         // The producer stopped at its failure rather than looping.
-        Assert.Single(paths.Where(path => path == boomPath));
+        Assert.Single(paths, path => path == boomPath);
     }
 
     [Fact]
