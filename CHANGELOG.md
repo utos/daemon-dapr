@@ -40,6 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Routing a failure to the reserved `error` keyword now fails with the cause.** It reached the
+  navigator, which fails the run with a hardcoded "Workflow transitioned to 'error'" and discards
+  what went wrong — making the explicit fallback strictly worse than omitting it, since declaring
+  no matching rule propagates the original exception. Adopting `on_failure` therefore made failures
+  *harder* to diagnose than leaving it alone. On the failure path `error` now rethrows the captured
+  exception, so stating "fail the run" and saying nothing mean the same thing. The keyword keeps its
+  own meaning on the success path, where it turns an acceptable response into a failure and there is
+  no cause to carry.
 - **Workflow HTTP was using an unconfigured `HttpClient`.** `ExecuteActivity` resolves
   `IEnumerable<IActivityHandler>`, which bound to the `AddScoped<IActivityHandler, …>` registration
   and received the default unnamed client, while `AddHttpClient<HttpActivityHandler>()` configured a

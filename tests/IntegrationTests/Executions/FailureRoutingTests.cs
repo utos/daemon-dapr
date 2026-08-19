@@ -50,8 +50,7 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
         Assert.Equal(ExecutionStatus.Completed, TerminalStatus(events));
 
         // The handler actually ran, rather than the run merely surviving.
-        Assert.Single(fixture.WireMockServer.LogEntries
-            .Where(e => e.RequestMessage.Path == "/recovered"));
+        Assert.Single(fixture.WireMockServer.LogEntries, e => e.RequestMessage.Path == "/recovered");
     }
 
     [Fact]
@@ -121,6 +120,40 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task Routing_a_failure_to_error_reports_the_original_cause()
+    {
+        // `transition: { name: error }` as a failure fallback is redundant with declaring no rule
+        // — both fail the run — but an author will write it, and it must not be the worse of the
+        // two. Letting it reach the navigator would replace the real diagnostic with the generic
+        // "Workflow transitioned to 'error'", so adopting on_failure would make failures *harder*
+        // to diagnose than leaving it out.
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/teapot").UsingGet())
+            .RespondWith(Response.Create().WithStatusCode(418));
+
+        var request = new TestWorkflowBuilder("explicit-error", fixture.MockBaseUrl)
+            .HttpGet("call", "/teapot")
+                .OnFailure("never", when: "{{ response.status == 429 }}")
+                .OnFailure("error")
+            .HttpGet("never", "/teapot")
+            .Build();
+
+        var response = await fixture.ScheduleAsync(request);
+
+        var events = await fixture.ObservabilityClient
+            .WatchExecution(new WatchExecutionRequest { ExecutionId = response.Id })
+            .CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(ExecutionStatus.Failed, TerminalStatus(events));
+
+        var terminal = events.Last(e => e.Status == ExecutionStatus.Failed);
+
+        Assert.NotNull(terminal.Error);
+        Assert.Contains("418", terminal.Error.Message);
+        Assert.DoesNotContain("transitioned to", terminal.Error.Message);
+    }
+
+    [Fact]
     public async Task Workflow_http_is_attempted_exactly_once()
     {
         // Guards the resilience split: the workflow client must not inherit the standard retry
@@ -139,8 +172,7 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
             .WatchExecution(new WatchExecutionRequest { ExecutionId = response.Id })
             .CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
-        Assert.Single(fixture.WireMockServer.LogEntries
-            .Where(e => e.RequestMessage.Path == "/once"));
+        Assert.Single(fixture.WireMockServer.LogEntries, e => e.RequestMessage.Path == "/once");
     }
 
     [Fact]
@@ -162,8 +194,7 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
             .WatchExecution(new WatchExecutionRequest { ExecutionId = response.Id })
             .CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
-        var received = Assert.Single(fixture.WireMockServer.LogEntries
-            .Where(e => e.RequestMessage.Path == "/form"));
+        var received = Assert.Single(fixture.WireMockServer.LogEntries, e => e.RequestMessage.Path == "/form");
 
         Assert.Contains("application/x-www-form-urlencoded",
             received.RequestMessage.Headers!["Content-Type"].ToString());

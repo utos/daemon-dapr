@@ -106,6 +106,59 @@ public static class ExecutionInfrastructureExtensions
         // Add the execution output stream — the durable log of what a workflow produced.
         builder.Services.AddScoped<IExecutionOutputStore, KurrentExecutionOutputStore>();
 
+        builder.AddWorkflowHttpClient();
+
+        // Add Dapr Workflow services
+        builder.Services.AddDaprWorkflow(options =>
+        {
+            // Register workflow executor
+            options.RegisterWorkflow<WorkflowExecutor>();
+
+            // Register activities
+            options.RegisterActivity<WriteLifecycleEventActivity>();
+            options.RegisterActivity<LoadWorkflowActivity>();
+            options.RegisterActivity<ResolveActivityInputActivity>();
+            options.RegisterActivity<ExecuteActivity>();
+            options.RegisterActivity<EvaluateTransitionActivity>();
+            options.RegisterActivity<SaveChildContextActivity>();
+            options.RegisterActivity<ScheduleDetachedExecutionActivity>();
+            options.RegisterActivity<ResolvePromiseActivity>();
+            options.RegisterActivity<AppendOutputEntryActivity>();
+            options.RegisterActivity<DeleteOutputStreamActivity>();
+            options.RegisterActivity<RaiseChildOutputActivity>();
+            options.RegisterActivity<AckChildOutputActivity>();
+            options.RegisterActivity<CancelSubscribedChildActivity>();
+        });
+
+        // Projection engine and projections (idempotent read model updates)
+        builder.Services.AddScoped<IProjectionEngine, ProjectionEngine>();
+        builder.Services.AddScoped<IProjection, WorkflowExecutionReadModelProjection>();
+
+        // Event handlers (side-effect-producing reactions)
+        builder.Services.AddScoped<IEventHandler, WorkflowSchedulingProcessManager>();
+        builder.Services.AddScoped<IEventHandler, ExecutionLifecycleNotifier>();
+
+        // Execution limits (loop ceiling, continue-as-new threshold)
+        builder.Services.Configure<ExecutionLimitsOptions>(
+            builder.Configuration.GetSection(ExecutionLimitsOptions.SectionName));
+
+        // Add Hosted Services
+        builder.Services.AddHostedService<WorkflowExecutionEventProcessor>();
+
+        return builder;
+    }
+
+    /// <summary>
+    /// The HTTP client workflow activities make their requests with, and the policy around it:
+    /// where it may connect, how long a request may take, and that it does not retry.
+    ///
+    /// Separate from the rest of the module so it can be registered — and asserted — without a
+    /// database, an event store or a Dapr sidecar. That matters more here than elsewhere: the
+    /// failure mode this shape exists to prevent is silent.
+    /// </summary>
+    public static TBuilder AddWorkflowHttpClient<TBuilder>(this TBuilder builder)
+        where TBuilder : IHostApplicationBuilder
+    {
         // Outbound HTTP policy for workflow activities: which destinations are reachable, and
         // how long a request may take.
         builder.Services.Configure<HttpEgressOptions>(
@@ -155,43 +208,6 @@ public static class ExecutionInfrastructureExtensions
         {
             ConnectCallback = serviceProvider.GetRequiredService<HttpEgressGuard>().ConnectAsync
         });
-
-        // Add Dapr Workflow services
-        builder.Services.AddDaprWorkflow(options =>
-        {
-            // Register workflow executor
-            options.RegisterWorkflow<WorkflowExecutor>();
-
-            // Register activities
-            options.RegisterActivity<WriteLifecycleEventActivity>();
-            options.RegisterActivity<LoadWorkflowActivity>();
-            options.RegisterActivity<ResolveActivityInputActivity>();
-            options.RegisterActivity<ExecuteActivity>();
-            options.RegisterActivity<EvaluateTransitionActivity>();
-            options.RegisterActivity<SaveChildContextActivity>();
-            options.RegisterActivity<ScheduleDetachedExecutionActivity>();
-            options.RegisterActivity<ResolvePromiseActivity>();
-            options.RegisterActivity<AppendOutputEntryActivity>();
-            options.RegisterActivity<DeleteOutputStreamActivity>();
-            options.RegisterActivity<RaiseChildOutputActivity>();
-            options.RegisterActivity<AckChildOutputActivity>();
-            options.RegisterActivity<CancelSubscribedChildActivity>();
-        });
-
-        // Projection engine and projections (idempotent read model updates)
-        builder.Services.AddScoped<IProjectionEngine, ProjectionEngine>();
-        builder.Services.AddScoped<IProjection, WorkflowExecutionReadModelProjection>();
-
-        // Event handlers (side-effect-producing reactions)
-        builder.Services.AddScoped<IEventHandler, WorkflowSchedulingProcessManager>();
-        builder.Services.AddScoped<IEventHandler, ExecutionLifecycleNotifier>();
-
-        // Execution limits (loop ceiling, continue-as-new threshold)
-        builder.Services.Configure<ExecutionLimitsOptions>(
-            builder.Configuration.GetSection(ExecutionLimitsOptions.SectionName));
-
-        // Add Hosted Services
-        builder.Services.AddHostedService<WorkflowExecutionEventProcessor>();
 
         return builder;
     }

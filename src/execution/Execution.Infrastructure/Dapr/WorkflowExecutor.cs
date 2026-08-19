@@ -251,7 +251,17 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
                 // No rule matched the failure, so it was never handled — rethrow it as it was,
                 // rather than letting the run fall through to a normal completion.
-                if (transition.Unhandled)
+                //
+                // Routing a failure to `error` is rethrown the same way. It says "fail the run",
+                // and the most useful thing to fail it with is the cause; letting it reach the
+                // navigator instead would replace a real diagnostic with the generic "workflow
+                // transitioned to 'error'". This makes an explicit terminal rule on the failure
+                // path mean exactly what omitting one means, rather than a strictly worse way of
+                // writing it.
+                if (transition.Unhandled
+                    || (outcomeKind == ActivityOutcomeKind.Failed
+                        && string.Equals(transition.NextActivityName, ReservedKeywords.Error,
+                            StringComparison.OrdinalIgnoreCase)))
                     unhandledFailure!.Throw();
 
                 // An emit is emit-and-continue: the value becomes durable before the run moves
