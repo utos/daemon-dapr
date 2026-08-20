@@ -17,6 +17,11 @@ namespace IntegrationTests.Executions;
 /// value is a rendezvous — the child appends its entry, hands the value over, and parks until the
 /// caller says it has been consumed — so the unconsumed buffer never exceeds one entry however
 /// much faster the producer is.
+///
+/// Every handler here transitions back to the call activity by name, and that is deliberate: it is
+/// no longer required — a handler that runs out of rules goes back on its own, which
+/// <see cref="HandlerResumeTests"/> covers — so this suite doubles as the guarantee that the
+/// explicit form still means exactly what it always did.
 /// </summary>
 [Collection(DaemonTestCollection.Name)]
 public class StreamingConsumerTests(DaemonTestFixture fixture)
@@ -289,11 +294,13 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
     [Fact]
     public async Task A_handler_that_leaves_instead_of_returning_ends_the_subscription()
     {
-        // The subscription lives only while the caller keeps coming back to its call activity.
-        // This handler takes the first value and goes to 'end' instead — at which point the
-        // producer is parked on an acknowledgement that will never arrive, and being a child
-        // orchestration does not save it: Dapr tears a child down when its parent is *cancelled*,
-        // not when its parent simply finishes. Nothing else in the system would ever stop it.
+        // How a consumer stops early, and the reason it has to be explicit. This handler takes the
+        // first value and transitions to 'end' — a rule that matched, not a rule list that ran out,
+        // so it terminates rather than going back for the next value.
+        //
+        // At which point the producer is parked on an acknowledgement that will never arrive, and
+        // being a child orchestration does not save it: Dapr tears a child down when its parent is
+        // *cancelled*, not when its parent simply finishes. Nothing else would ever stop it.
         const string producePath = "/streaming-abandon-produce";
         const string handlePath = "/streaming-abandon-handle";
         StubJson(producePath);

@@ -89,6 +89,22 @@ internal static class Wf
         return new WorkflowActivity(config, onSuccess);
     }
 
+    /// <summary>
+    /// A <c>workflow.call</c> that consumes what its child emits. Separate from
+    /// <see cref="SubWorkflow"/> because <c>on_emitted</c> selects a different rule list entirely,
+    /// and only a call — never a spawn — can carry one.
+    /// </summary>
+    public static WorkflowActivity ConsumingCall(
+        string workflowKey,
+        string startActivity,
+        TransitionRule[] onEmitted,
+        params TransitionRule[] onSuccess)
+    {
+        return new WorkflowActivity(
+            new CallActivityConfig(workflowKey, startActivity, null, onEmitted),
+            onSuccess);
+    }
+
     public static WorkflowActivity Promise(
         PromiseMode mode,
         int requiredCount,

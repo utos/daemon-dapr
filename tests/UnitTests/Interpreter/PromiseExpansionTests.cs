@@ -131,16 +131,37 @@ public class PromiseExpansionTests
     }
 
     [Fact]
-    public void A_branch_pointing_at_a_non_workflow_activity_is_rejected()
+    public void A_branch_pointing_at_a_plain_activity_runs_this_workflow_from_there()
     {
+        // Every branch is a child execution — that is how the driver fans out, not a shape the
+        // author has to arrange. A workflow-kind target names some *other* workflow to run; any
+        // other target is the work itself, so the branch runs this same workflow from that
+        // activity. Requiring a workflow.call here made the daemon throw on documents the shared
+        // validator accepts: PromiseBranch.target asks only "which activity to start", and no
+        // UTOS rule constrains its kind.
         var graph = Wf.Graph(
             ("fan", Wf.Promise(PromiseMode.All, 0, [Wf.Branch("pricing", "fetch")])),
             ("fetch", Wf.Http("https://example.com")));
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => _interpreter.ExpandPromise(Wf.Session(graph), "fan", null));
+        var expansion = _interpreter.ExpandPromise(Wf.Session(graph), "fan", null);
 
-        Assert.Equal("Branch target activity 'fetch' must be a workflow-type activity", ex.Message);
+        var branch = Assert.Single(expansion.Branches);
+        Assert.Equal("pricing", branch.BranchName);
+        Assert.Equal("test:1.0.0", branch.WorkflowKey);
+        Assert.Equal("fetch", branch.StartActivity);
+    }
+
+    [Fact]
+    public void A_workflow_kind_target_still_resolves_to_the_workflow_it_names()
+    {
+        // The other half of the same rule, so relaxing it cannot quietly redirect a sub-workflow
+        // branch at the parent.
+        var graph = GraphWith(Wf.Branch("pricing", "price"));
+
+        var branch = Assert.Single(_interpreter.ExpandPromise(Wf.Session(graph), "fan", null).Branches);
+
+        Assert.Equal("pricing:1.0.0", branch.WorkflowKey);
+        Assert.Equal("quote", branch.StartActivity);
     }
 
     // This suite used to own both "every documented mode parses" and "an unknown mode is
