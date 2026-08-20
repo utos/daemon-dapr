@@ -39,7 +39,8 @@ public class PromiseBranchTargetTests(DaemonTestFixture fixture)
             .ForEachBranch("fetch-one", "fetch", "{{ input.ids }}", "id",
                 Fields(("id", Value.ForString("{{ id }}"))))
             .OnResult(Fields(("done", Value.ForBool(true))))
-            .WithInput("ids", new List<object?> { "a", "b", "c" })
+            .WithInput("ids", Value.ForList(
+                Value.ForString("a"), Value.ForString("b"), Value.ForString("c")))
             .Build("fan-out");
 
         var scheduled = await fixture.ScheduleAsync(request);
