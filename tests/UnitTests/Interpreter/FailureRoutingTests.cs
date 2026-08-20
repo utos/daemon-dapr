@@ -5,8 +5,13 @@ using UnitTests.Support;
 namespace UnitTests.Interpreter;
 
 /// <summary>
-/// <c>on_failure</c> routing. The propagate cases matter most: on the success path an unmatched
-/// rule list means the run finished, and on the failure path it must mean the opposite.
+/// <c>on_failure</c> routing. The propagate cases matter most: on an ordinary success path an
+/// unmatched rule list means the run finished, and on the failure path it must mean the opposite.
+///
+/// It is no longer the only path that reads an exhausted list its own way — a handler consuming a
+/// sub-workflow's output goes back for the next value instead. See
+/// <see cref="HandlerResumeTests"/>, which asserts the case where the two meet: a failure inside a
+/// handler propagates rather than resuming.
 /// </summary>
 public class FailureRoutingTests
 {

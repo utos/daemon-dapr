@@ -26,7 +26,7 @@ public class EvaluateTransitionActivity(
 
         var decision = interpreter.Advance(
             session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Outcome,
-            input.Response, input.Error);
+            input.Response, input.Error, input.DispatchedBy);
 
         return decision switch
         {
@@ -56,6 +56,11 @@ public class EvaluateTransitionActivity(
 /// Which rule list applies. Only the driver can tell these apart — an emitted value and a result
 /// are identical by value, and a failure carries neither.
 /// </param>
+/// <param name="DispatchedBy">
+/// The call activity whose <c>on_emitted</c> handler this path is running, or null when it is not
+/// running one. The top of the driver's dispatch stack: a handler activity is an ordinary peer in
+/// a flat graph, so how control reached it is knowable only here.
+/// </param>
 public sealed record EvaluateTransitionInput(
     ExecutionId ExecutionId,
     string WorkflowKey,
@@ -68,7 +73,8 @@ public sealed record EvaluateTransitionInput(
     // Plain ints, strings and a string map — no converter needed, unlike ActivityOutput, which
     // carries arbitrary workflow values.
     HttpResponseContext? Response = null,
-    WorkflowErrorContext? Error = null);
+    WorkflowErrorContext? Error = null,
+    string? DispatchedBy = null);
 
 /// <param name="EmittedValue">
 /// What an <c>emit</c> action produced, to be appended to the execution's output stream before

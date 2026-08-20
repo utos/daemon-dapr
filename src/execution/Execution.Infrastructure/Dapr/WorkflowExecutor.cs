@@ -41,6 +41,24 @@ namespace Execution.Infrastructure.Dapr;
 /// acknowledgement that would never come. Decided once, at start, from the caller's
 /// <c>on_emitted</c> — never by asking at emit time who is listening, which could not replay.
 /// </param>
+/// <param name="DispatchStack">
+/// The call activities whose <c>on_emitted</c> handlers this path is currently inside, innermost
+/// last. A handler that runs out of rules has finished, and control returns to the top of this
+/// stack for the next value — which is what makes an explicit back-edge optional.
+/// <para>
+/// A stack rather than a single name because handlers nest: a handler may itself enter a second
+/// consuming <c>workflow.call</c>, and when the inner one finishes the outer subscription must
+/// still be there to go back to. It is not about concurrency — one cursor means one handler runs
+/// at a time — but depth is real.
+/// </para>
+/// <para>
+/// It has to live in the envelope rather than as a segment local. Re-entering the call activity
+/// makes <see cref="ExecutionCursor.Enter"/> fail to add a name it has already seen, which sets
+/// <c>LoopDetected</c>, which is exactly what <see cref="ExecutionCursor.ShouldContinueAsNew"/>
+/// requires — so every consumer loop continues as new, and a stack held only in memory would be
+/// empty on the other side.
+/// </para>
+/// </param>
 public record WorkflowExecutorInput(
     ExecutionId ExecutionId,
     string WorkflowKey,
@@ -53,7 +71,8 @@ public record WorkflowExecutorInput(
     DateTime? StartedAt = null,
     int ContinueAsNewAfterTransitions = 100,
     Dictionary<string, ExecutionId>? Subscriptions = null,
-    string? OutputEventName = null)
+    string? OutputEventName = null,
+    List<string>? DispatchStack = null)
 {
     /// <summary>
     /// The envelope for the next segment of this execution — everything that must survive a
@@ -78,7 +97,8 @@ public record WorkflowExecutorInput(
         Dictionary<string, object>? activityInput,
         ExecutionCursor cursor,
         DateTime startedAt,
-        Dictionary<string, ExecutionId> subscriptions) =>
+        Dictionary<string, ExecutionId> subscriptions,
+        List<string> dispatchStack) =>
         this with
         {
             StartActivity = activityName,
@@ -86,7 +106,8 @@ public record WorkflowExecutorInput(
             Visited = [..cursor.Visited],
             LoopDetected = cursor.LoopDetected,
             StartedAt = startedAt,
-            Subscriptions = subscriptions
+            Subscriptions = subscriptions,
+            DispatchStack = [..dispatchStack]
         };
 }
 
@@ -146,6 +167,10 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         var subscriptions = new Dictionary<string, ExecutionId>(
             input.Subscriptions ?? [], StringComparer.Ordinal);
 
+        // Which handlers this path is inside, innermost last. Pushed when a consumed value is
+        // dispatched to a handler, popped when the path comes back.
+        var dispatchStack = new List<string>(input.DispatchStack ?? []);
+
         try
         {
             // Load the workflow definition once at start (avoids per-activity DB lookups)
@@ -187,7 +212,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     context.ContinueAsNew(
                         input.ContinueFrom(
                             currentActivityName, currentActivityInput, continuation.Cursor,
-                            startTime, subscriptions),
+                            startTime, subscriptions, dispatchStack),
                         preserveUnprocessedEvents: true);
 
                     return null;
@@ -247,7 +272,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     nameof(EvaluateTransitionActivity),
                     new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
                         run.ActivityName, currentActivityInput, outcome.Output, outcomeKind,
-                        outcome.Response, activityError));
+                        outcome.Response, activityError,
+                        dispatchStack.Count > 0 ? dispatchStack[^1] : null));
 
                 // No rule matched the failure, so it was never handled — rethrow it as it was,
                 // rather than letting the run fall through to a normal completion.
@@ -296,6 +322,29 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     workflowOutput = transition.ReturnValue;
                     break;
                 }
+
+                // Track which handler the path is inside, so that running out of rules can mean
+                // "this handler is done" rather than "the run is over". Both edges are decided
+                // here, and both before the advance, so the envelope written at ContinueAsNew —
+                // which happens at the *top* of a later lap — always reflects a settled depth.
+                //
+                // A dispatch is an emitted value going somewhere other than back to the call
+                // activity. Going straight back is an author's own back-edge: nothing was entered,
+                // so there is nothing to push, and such a workflow behaves exactly as it did
+                // before any of this existed.
+                if (outcomeKind == ActivityOutcomeKind.Emitted
+                    && transition.NextActivityName != null
+                    && !string.Equals(transition.NextActivityName, run.ActivityName,
+                        StringComparison.Ordinal))
+                    dispatchStack.Add(run.ActivityName);
+
+                // And the path is back at the call activity it was dispatched from — whether the
+                // interpreter sent it there for want of a matching rule, or the author wrote the
+                // transition by hand. Either way that handler is finished.
+                else if (dispatchStack.Count > 0
+                         && string.Equals(transition.NextActivityName, dispatchStack[^1],
+                             StringComparison.Ordinal))
+                    dispatchStack.RemoveAt(dispatchStack.Count - 1);
 
                 currentActivityName = transition.NextActivityName;
                 currentActivityInput = transition.MappedInput;
@@ -560,7 +609,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
         // The child inherits the limits but starts with its own empty visited set — a
         // sub-workflow invoked twice from a parent loop is two separate executions, not a
-        // back-edge.
+        // back-edge. Its dispatch stack starts empty for the same reason: the caller's handlers
+        // are the caller's, and a child running out of rules ends the child.
         var childTask = context.CallChildWorkflowAsync<object?>(
             nameof(WorkflowExecutor),
             new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,

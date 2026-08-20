@@ -30,6 +30,11 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     /// Why the activity failed, surfaced as <c>{{ error.x }}</c>. Set only when
     /// <paramref name="outcome"/> is <see cref="ActivityOutcomeKind.Failed"/>.
     /// </param>
+    /// <param name="dispatchedBy">
+    /// The call activity whose <c>on_emitted</c> handler this path is running, when it is running
+    /// one. Only the driver knows — a handler activity is an ordinary peer in a flat graph, so
+    /// nothing about <paramref name="activityName"/> reveals how control reached it.
+    /// </param>
     public TransitionDecision Advance(
         WorkflowSession session,
         string activityName,
@@ -37,7 +42,8 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         object? activityOutput,
         ActivityOutcomeKind outcome = ActivityOutcomeKind.Succeeded,
         HttpResponseContext? response = null,
-        WorkflowErrorContext? error = null)
+        WorkflowErrorContext? error = null,
+        string? dispatchedBy = null)
     {
         var activity = Require(session, activityName);
         var input = session.InputFor(activityInput);
@@ -68,12 +74,9 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             _ => activity.OnSuccess
         };
 
-        // Exhausting the rules means opposite things on the two paths. On success the run is
-        // finished; on failure the error is simply unhandled and must keep travelling, per
-        // activity.proto: "If no transitions match or list is empty, the error propagates".
-        // Returning End here instead would report a failed run as Completed.
+        // Exhausting the rules means something different on each path — see Exhausted.
         if (rules.Count == 0)
-            return Exhausted(outcome);
+            return Exhausted(outcome, activityName, dispatchedBy, passThrough);
 
         var scope = new TemplateScope()
             .WithInput(input)
@@ -108,18 +111,59 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         }
 
         // Every rule was evaluated and none matched — same meaning as having none at all.
-        return Exhausted(outcome);
+        return Exhausted(outcome, activityName, dispatchedBy, passThrough);
     }
 
     /// <summary>
-    /// What an unmatched rule list means. The success and emitted paths finish; the failure path
-    /// keeps the error travelling, which is the one asymmetry in the whole dispatch.
+    /// What an unmatched rule list means. Not one answer but four, because "carry on as before"
+    /// is a different sentence on each path:
+    ///
+    /// <list type="bullet">
+    /// <item>A <b>failure</b> was never handled, so it keeps travelling outward — per
+    /// <c>activity.proto</c>, "If no transitions match or list is empty, the error propagates".
+    /// Checked first, and deliberately: a failure inside a handler must kill the run rather than
+    /// quietly go back for the next value, which would swallow it.</item>
+    /// <item>An <b>emission</b> nothing wanted is still an emission that was consumed, so the
+    /// caller returns to its own call activity for the next one. Ending here instead is what made
+    /// a filtering <c>on_emitted</c> — every condition missing on one uninteresting value —
+    /// silently cancel the producer and report the run Completed.</item>
+    /// <item>A <b>handler path that ran out of rules</b> is a handler that finished. Control
+    /// returns to the call activity that dispatched it, the way a promise branch returns to its
+    /// promise. This is what makes the back-edge optional rather than load-bearing.</item>
+    /// <item>Anything else is an ordinary path with nowhere left to go: the run is done.</item>
+    /// </list>
+    ///
+    /// The resumed target is reached with a plain <see cref="TransitionDecision.Goto"/>, so it is
+    /// indistinguishable from the back-edge an author writes by hand — which is precisely why
+    /// workflows that already write one keep behaving exactly as they did.
     /// </summary>
-    private static TransitionDecision Exhausted(ActivityOutcomeKind outcome)
+    private static TransitionDecision Exhausted(
+        ActivityOutcomeKind outcome,
+        string activityName,
+        string? dispatchedBy,
+        object? passThrough)
     {
-        return outcome == ActivityOutcomeKind.Failed
-            ? new TransitionDecision.Propagate()
+        if (outcome == ActivityOutcomeKind.Failed)
+            return new TransitionDecision.Propagate();
+
+        // The call activity's own handler rules matched nothing: go back to it for the next value.
+        if (outcome == ActivityOutcomeKind.Emitted)
+            return Resume(activityName, passThrough);
+
+        return dispatchedBy != null
+            ? Resume(dispatchedBy, passThrough)
             : new TransitionDecision.End();
+    }
+
+    /// <summary>
+    /// Back to <paramref name="callActivityName"/> to take the next emitted value. The input is
+    /// carried for symmetry with every other transition and is not read: re-entering a live
+    /// subscription acknowledges and waits rather than resolving the activity's configuration.
+    /// </summary>
+    private static TransitionDecision Resume(string callActivityName, object? passThrough)
+    {
+        return new TransitionDecision.Goto(
+            callActivityName, passThrough as Dictionary<string, object>);
     }
 
     /// <summary>
@@ -299,22 +343,28 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         TemplateScope scope,
         IReadOnlyDictionary<string, object>? activityInput)
     {
-        // The target.Name references an activity in the current workflow.
-        // That activity must be a workflow-type activity.
+        // The target names an activity in the current workflow. Which one it is decides only
+        // *what* the branch runs, not whether it is allowed to.
         var targetActivity = session.Graph.Find(target.Name)
                              ?? throw new InvalidOperationException(
                                  $"Branch target activity '{target.Name}' not found in workflow");
-
-        if (targetActivity.Config is not SubWorkflowActivityConfig config)
-            throw new InvalidOperationException(
-                $"Branch target activity '{target.Name}' must be a workflow-type activity");
 
         // Render branch input from target.Input if set, otherwise pass through activity input
         var branchInput = target.Input != null
             ? structRenderer.Render(target.Input, scope)
             : AsMutable(activityInput);
 
-        return new PromiseBranchPlan(branchName, config.Workflow, config.StartActivity, branchInput);
+        // A workflow-kind target names the sub-workflow to run, and is a pointer rather than the
+        // work itself. Any other target *is* the work: run this same workflow from that activity.
+        //
+        // That every branch is a child execution is how the driver fans out, not something the
+        // spec asks an author to arrange. PromiseBranch.target requires only "which activity to
+        // start", and no UTOS rule constrains its kind — so demanding a workflow.call here made
+        // the daemon reject documents the shared validator accepts, which is the one divergence
+        // the two are supposed to be incapable of.
+        return targetActivity.Config is SubWorkflowActivityConfig config
+            ? new PromiseBranchPlan(branchName, config.Workflow, config.StartActivity, branchInput)
+            : new PromiseBranchPlan(branchName, session.Graph.WorkflowKey, target.Name, branchInput);
     }
 
     private static WorkflowActivity Require(WorkflowSession session, string activityName)

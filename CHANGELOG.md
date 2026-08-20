@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **An `on_emitted` handler that runs out of transitions goes back for the next value.** Consuming
+  was a loop the author had to close by hand, transitioning to the call activity by name from the
+  end of the handler. Omitting that ended the subscription, cancelled the producer and completed the
+  run — so a watcher written to poll for weeks exited after one value and reported success. The
+  handler is the body of the loop and now behaves like one, the way a promise branch already returns
+  to its promise without being told to. `TransitionDecision.Propagate` gained a sibling rather than
+  a special case: `Exhausted` answers "carry on as before", which is a different sentence per path.
+  A failure is checked first and still propagates, because resuming there would swallow it.
+- **A rule list where nothing matches skips that value.** The same rule, and the case that made a
+  filtering consumer unwritable: conditions that all miss exhaust the list, which used to mean the
+  run was over. One uninteresting value shut the producer down.
+- Writing the back-edge by hand still works and means the same thing, so **every existing workflow
+  behaves exactly as it did** — the driver sees the target is the handler it dispatched from and
+  pops, rather than treating it as a fresh dispatch.
+- Which handler a path is inside rides in the continuation envelope as `DispatchStack`. It has to:
+  re-entering the call activity is what sets `LoopDetected`, and `LoopDetected` is what makes a
+  segment eligible to continue as new — so *every* consumer loop crosses that boundary, and a stack
+  held only in memory would be empty on the other side. A stack rather than one name because
+  handlers nest; not for concurrency, since one cursor means one handler runs at a time.
+- **A promise branch may target any activity.** It had to name a `workflow.call`, so fanning out
+  over an HTTP request meant wrapping it in a second document that did nothing else. The spec never
+  said so — `PromiseBranch.target` asks only which activity to start, and `PromiseActivityConfig`
+  already documents targets naming a promise or an ancestor — so this was the daemon rejecting
+  bundles the shared validator accepts, which is the one thing the two must not do. A non-workflow
+  target runs this same workflow from that activity. Branches are still child executions; that is
+  how fan-out works here, not something an author has to arrange.
+
 ### Added
 
 - **`on_failure` is executed.** It was specified, validated, authored in the shipped examples and
