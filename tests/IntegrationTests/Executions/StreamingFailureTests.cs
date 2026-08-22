@@ -23,14 +23,17 @@ public class StreamingFailureTests(DaemonTestFixture fixture)
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(90);
 
-    private static DispatchRule[] HandleThenResume(string handlerActivity) =>
+    /// <summary>
+    /// Hand each value to <paramref name="startActivity"/> of the handler document. A handler is
+    /// always another document — `self` is rejected here (UTOS-S011) — which is what makes it
+    /// structurally unable to transition back into the consumer's flow and open a second producer.
+    /// </summary>
+    private static DispatchRule[] HandleThenResume(string startActivity) =>
     [
-        new DispatchRule
-        {
-            Workflow = TestWorkflowBuilder.SelfReference,
-            StartActivity = handlerActivity
-        }
+        new DispatchRule { Workflow = HandlerWorkflow, StartActivity = startActivity }
     ];
+
+    private const string HandlerWorkflow = "handler-workflow";
 
     [Fact]
     public async Task A_producer_that_fails_mid_stream_reaches_the_consumers_on_failure()
@@ -56,7 +59,7 @@ public class StreamingFailureTests(DaemonTestFixture fixture)
             // Reached only if the child's terminal entry is a result rather than an error.
             .OnResult(Fields(("outcome", Value.ForString("completed"))))
             .OnFailure("recover")
-            .HttpGet("handle", handlePath)
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler.HttpGet("handle", handlePath))
             .HttpGet("recover", recoverPath)
             .OnResult(Fields(("outcome", Value.ForString("recovered"))))
             .AddDependentWorkflow("failing-producer", child =>
@@ -106,7 +109,7 @@ public class StreamingFailureTests(DaemonTestFixture fixture)
             .WorkflowCall("watch", "failing-producer-2", "produce",
                 onEmitted: HandleThenResume("handle"))
             .OnResult(Fields(("outcome", Value.ForString("completed"))))
-            .HttpGet("handle", handlePath)
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler.HttpGet("handle", handlePath))
             .AddDependentWorkflow("failing-producer-2", child =>
                 child.HttpGet("produce", emitPath)
                     .OnEmit(Fields(("n", Value.ForNumber(1))), "boom")

@@ -43,14 +43,18 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
     }
 
     /// <summary>The handler path a consumed value takes, and back to the call activity.</summary>
-    private static DispatchRule[] HandleThenResume(string handlerActivity) =>
+    /// <summary>
+    /// Hand each value to <paramref name="startActivity"/> of the handler document. A handler is
+    /// always another document — `self` is rejected here (UTOS-S011) — which is what makes it
+    /// structurally unable to transition back into the consumer's flow and open a second producer.
+    /// </summary>
+    private static DispatchRule[] HandleThenResume(string startActivity) =>
     [
-        new DispatchRule
-        {
-            Workflow = TestWorkflowBuilder.SelfReference,
-            StartActivity = handlerActivity
-        }
+        new DispatchRule { Workflow = HandlerWorkflow, StartActivity = startActivity }
     ];
+
+    private const string HandlerWorkflow = "handler-workflow";
+    private const string RelayWorkflow = "relay-workflow";
 
     [Fact]
     public async Task Each_emitted_value_reaches_the_callers_handler_in_order()
@@ -67,8 +71,9 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
             // The handler marks each value, then transitions back to the call activity — which is
             // what both acknowledges the value and asks for the next.
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 3))
             .Build("watch");
 
@@ -116,8 +121,9 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: HandleThenResume("handle"))
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, values))
             .Build("watch");
 
@@ -164,10 +170,11 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: HandleThenResume("slow"))
             .OnResult(Fields(("done", Value.ForBool(true))))
-            .Timer("slow", TimeSpan.FromSeconds(1))
-            .OnSuccess("handle")
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .Timer("slow", TimeSpan.FromSeconds(1))
+                .OnSuccess("handle")
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 3))
             .Build("watch");
 
@@ -216,19 +223,24 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .WorkflowCall("watch-middle", "middle-workflow", "watch-child",
                 onEmitted: HandleThenResume("handle"))
             .OnResult(Fields(("done", Value.ForString("{{ output.relayed }}"))))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("middle-workflow", middle => middle
                 .WorkflowCall("watch-child", "producer-workflow", "produce",
                     input: Fields(("n", Value.ForNumber(1))),
-                    onEmitted: HandleThenResume("relay"))
-                .OnResult(Fields(("relayed", Value.ForString("{{ output.produced }}"))))
+                    onEmitted: [new DispatchRule
+                    {
+                        Workflow = RelayWorkflow,
+                        StartActivity = "relay"
+                    }])
+                .OnResult(Fields(("relayed", Value.ForString("{{ output.produced }}")))))
+            // The middle document's handler, which is where the relay happens. Emit-and-end: hand
+            // the value up, then finish. Finishing is what acknowledges the producer and asks for
+            // the next value; `emit` still needs a target (UTOS-T004), and `end` means "done".
+            .AddDependentWorkflow(RelayWorkflow, relay => relay
                 .HttpGet("relay", relayPath)
                 .WithHeader("X-Value", "{{ input.n }}")
-                // Emit-and-end: hand the value up, then finish. The handler is its own execution
-                // now, so finishing is what acknowledges the producer and asks for the next value
-                // — transitioning back to the call activity would open a second producer here.
-                // `emit` still needs a target (UTOS-T004), and `end` is the one that means "done".
                 .OnEmit(Fields(("n", Value.ForString("{{ input.n }}"))), "end"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, values))
             .Build("watch-middle");
@@ -273,8 +285,9 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .WorkflowCall("watch", "producer-workflow", "produce",
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: HandleThenResume("handle"))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child =>
                 child.HttpGet("produce", producePath)
                     .OnEmit(
@@ -319,9 +332,10 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .WorkflowCall("watch", "producer-workflow", "produce",
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: HandleThenResume("handle"))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
-            .OnSuccess("end")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}")
+                .OnSuccess("end"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 5))
             .Build("watch");
 

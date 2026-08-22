@@ -229,7 +229,20 @@ public class TestWorkflowBuilder
 
                     if (activity.Workflow.ModeCase == WorkflowActivityConfig.ModeOneofCase.Call)
                         foreach (var rule in activity.Workflow.Call.OnEmitted)
+                        {
+                            // The CLI rejects this (UTOS-S011), so a fixture that writes it is
+                            // testing a document no author could build. Worth failing loudly here
+                            // rather than at the far end: a handler in the consumer's own graph can
+                            // transition back to the call activity, which in the handler's own
+                            // execution starts a second producer instead of resuming the first —
+                            // once per value, which presents as the suite hanging.
+                            if (rule.Workflow == SelfReference)
+                                throw new InvalidOperationException(
+                                    "An onEmitted rule may not dispatch 'self' (UTOS-S011). "
+                                    + "Give the handler its own document with AddDependentWorkflow.");
+
                             rule.Workflow = Resolve(rule.Workflow);
+                        }
 
                     break;
 
