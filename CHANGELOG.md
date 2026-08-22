@@ -82,8 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The same on the failure path: `all` fails fast, and its siblings carried on after the run had
   already failed. This is the class of bug `AbandonSubscriptionsAsync` exists to fix for streaming
   producers; branches never got the equivalent. They do now, on every path and before the promise
-  returns — so a settled promise means no branch of it is still running, which is what a caller
-  would assume anyway. Cancellations are ordered by branch name for the same reason the
+  returns — a satisfied mode, a branch's own failure, or a `count` that enough failures have put
+  out of reach — so a settled promise means no branch of it is still running, which is what a
+  caller would assume anyway. Cancellations are ordered by branch name for the same reason the
   subscription sweep is: each one is a history-recorded activity call, and an unordered sweep
   replays in a different order than it ran. A branch that finishes inside the settle/cancel race is
   not an error — termination already treats a missing or finished instance as an ordinary outcome.

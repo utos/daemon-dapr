@@ -143,6 +143,54 @@ public class PromiseCancellationTests(DaemonTestFixture fixture)
     }
 
     /// <summary>
+    /// A <c>count</c> can fail without any single branch deciding it: enough branches have failed
+    /// that the ones still running could not make up the shortfall even if every one of them
+    /// succeeded. <c>PromiseResolver</c> has always given up at that point rather than
+    /// waiting out branches whose results it has already stopped being able to use — and those
+    /// branches are precisely the ones that were left running.
+    /// <para>
+    /// The distinct case here is <c>PromiseProgress.Failed</c>: no branch's own error is the
+    /// outcome, so this reaches the sweep by a different route than
+    /// <see cref="A_failing_all_cancels_the_siblings_that_are_still_running"/> does.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_count_that_can_no_longer_be_reached_cancels_the_branches_still_running()
+    {
+        const string firstFailurePath = "/cancel-shortfall-first";
+        const string secondFailurePath = "/cancel-shortfall-second";
+        const string outstandingPath = "/cancel-shortfall-outstanding";
+
+        StubServerError(firstFailurePath);
+        StubServerError(secondFailurePath);
+        StubJson(outstandingPath);
+
+        // Two of the three must succeed. Once two have failed the third cannot carry the count
+        // on its own, so the promise fails with that third branch still running.
+        var request = new TestWorkflowBuilder("cancel-shortfall", fixture.MockBaseUrl)
+            .HttpGet("first-failure-call", firstFailurePath)
+            .HttpGet("second-failure-call", secondFailurePath)
+            .Timer("outstanding-wait", BranchDelay)
+            .OnSuccess("outstanding-call")
+            .HttpGet("outstanding-call", outstandingPath)
+            .Timer("hold", HoldOpen)
+            .Promise("fan-out", "count", requiredCount: 2)
+            .Branch("first-failure", "first-failure-call")
+            .Branch("second-failure", "second-failure-call")
+            .Branch("outstanding", "outstanding-wait")
+            .OnFailure("hold")
+            .Build("fan-out");
+
+        var scheduled = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduled.Id, Timeout);
+
+        await AssertStatusAsync(scheduled.Id, ExecutionStatus.Completed);
+        Assert.Equal(1, CallsTo(firstFailurePath));
+        Assert.Equal(1, CallsTo(secondFailurePath));
+        Assert.Equal(0, CallsTo(outstandingPath));
+    }
+
+    /// <summary>
     /// The failure path is the same rule, not an exception to it. <c>all</c> fails fast, so a
     /// surviving sibling's result can never be read — and it is the sibling, not the branch that
     /// failed, that would otherwise still be spending.
@@ -158,10 +206,7 @@ public class PromiseCancellationTests(DaemonTestFixture fixture)
         const string failingPath = "/cancel-all-failing";
         const string siblingPath = "/cancel-all-sibling";
 
-        fixture.WireMockServer
-            .Given(Request.Create().WithPath(failingPath).UsingGet())
-            .RespondWith(Response.Create().WithStatusCode(500).WithBody("Internal Server Error"));
-
+        StubServerError(failingPath);
         StubJson(siblingPath);
 
         var request = new TestWorkflowBuilder("cancel-all", fixture.MockBaseUrl)
@@ -206,4 +251,11 @@ public class PromiseCancellationTests(DaemonTestFixture fixture)
                 .WithStatusCode(200)
                 .WithHeader("Content-Type", "application/json")
                 .WithBody("""{"ok": true}"""));
+
+    private void StubServerError(string path) =>
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath(path).UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(500)
+                .WithBody("Internal Server Error"));
 }
