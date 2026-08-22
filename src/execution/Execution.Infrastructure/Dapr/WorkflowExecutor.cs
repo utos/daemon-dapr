@@ -676,8 +676,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 "sub-workflow (execution {WorkflowExecutionId})",
                 activityName, logExecutionId);
 
-            await context.CallActivityAsync(nameof(CancelSubscribedChildActivity),
-                new CancelSubscribedChildInput(childExecutionId));
+            await context.CallActivityAsync(nameof(CancelChildExecutionActivity),
+                new CancelChildExecutionInput(childExecutionId));
         }
 
         subscriptions.Clear();
@@ -757,18 +757,26 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                         .Select(b => new ChildContextSpec(b.ExecutionId, b.Branch.WorkflowKey, b.Branch.Input))
                         .ToList()));
 
-        // 4. Fan out — launch all branches as child workflows
+        // 4. Fan out — launch all branches as child workflows. The ids are kept alongside the
+        //    tasks because settling has to be able to *name* the branches it did not wait for,
+        //    and a task is not an address.
         var branchTasks = new Dictionary<string, Task<object?>>(StringComparer.Ordinal);
+        var branchExecutionIds = new Dictionary<string, ExecutionId>(StringComparer.Ordinal);
         foreach (var (branch, branchExecutionId) in branches)
+        {
+            branchExecutionIds[branch.BranchName] = branchExecutionId;
+
             branchTasks[branch.BranchName] = context.CallChildWorkflowAsync<object?>(
                 nameof(WorkflowExecutor),
                 new WorkflowExecutorInput(branchExecutionId, branch.WorkflowKey,
                     branch.StartActivity, input.ExecutionId,
                     ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
                 new ChildWorkflowTaskOptions(branchExecutionId.ToString()));
+        }
 
-        // 5. Settle by mode
-        var promiseOutput = await SettleAsync(resolved.Mode, resolved.RequiredCount, branchTasks);
+        // 5. Settle by mode, stopping whatever the mode turned out not to need
+        var promiseOutput = await SettleAsync(context, logger, run.ActivityName, logExecutionId,
+            resolved.Mode, resolved.RequiredCount, branchTasks, branchExecutionIds);
 
         logger.LogInformation(
             "Promise activity '{WorkflowActivity}' resolved ({PromiseMode} mode, {BranchCount} branches) (execution {WorkflowExecutionId})",
@@ -781,11 +789,23 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
     /// Awaits branches one settlement at a time, letting <see cref="PromiseResolver"/> say
     /// when the mode is satisfied. The awaiting is this layer's; which branches decide the
     /// outcome is not.
+    /// <para>
+    /// Whatever is still running when the mode is satisfied is cancelled before the promise
+    /// returns, on every path — a <c>race</c> loser, an <c>any</c> also-ran, the siblings of the
+    /// branch whose failure sank an <c>all</c>. Dropping their tasks, which is all this used to
+    /// do, stops nobody: the branch is a live child orchestration and carries on issuing requests
+    /// and writing entries whether or not its result can still be read.
+    /// </para>
     /// </summary>
     private static async Task<Dictionary<string, object?>> SettleAsync(
+        WorkflowContext context,
+        ILogger logger,
+        string activityName,
+        ExecutionId logExecutionId,
         PromiseMode mode,
         int requiredCount,
-        Dictionary<string, Task<object?>> branchTasks)
+        Dictionary<string, Task<object?>> branchTasks,
+        IReadOnlyDictionary<string, ExecutionId> branchExecutionIds)
     {
         var resolver = new PromiseResolver(mode, requiredCount, branchTasks.Count);
         var progress = resolver.Start();
@@ -805,6 +825,11 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             progress = resolver.Observe(settled.Key, outcome);
         }
 
+        // Before the switch, so it happens on the failure paths too, and before anything is
+        // thrown.
+        await CancelOutstandingBranchesAsync(
+            context, logger, activityName, logExecutionId, remaining.Keys, branchExecutionIds);
+
         switch (progress)
         {
             case PromiseProgress.Resolved resolved:
@@ -823,6 +848,34 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             default:
                 throw new InvalidOperationException(
                     $"Promise did not settle (mode: {mode}, {branchTasks.Count} branches)");
+        }
+    }
+
+    /// <summary>
+    /// Stops the branches a settled promise is no longer waiting on.
+    /// <para>
+    /// Ordered explicitly, for the same reason <see cref="AbandonSubscriptionsAsync"/> is: each
+    /// cancellation is a history-recorded activity call, and a dictionary's iteration order is
+    /// not a promise, so an unordered sweep would replay in a different order than it ran.
+    /// </para>
+    /// </summary>
+    private static async Task CancelOutstandingBranchesAsync(
+        WorkflowContext context,
+        ILogger logger,
+        string activityName,
+        ExecutionId logExecutionId,
+        IEnumerable<string> branchNames,
+        IReadOnlyDictionary<string, ExecutionId> branchExecutionIds)
+    {
+        foreach (var branchName in branchNames.OrderBy(name => name, StringComparer.Ordinal))
+        {
+            logger.LogInformation(
+                "Promise activity '{WorkflowActivity}' settled without branch '{PromiseBranch}'; " +
+                "cancelling it (execution {WorkflowExecutionId})",
+                activityName, branchName, logExecutionId);
+
+            await context.CallActivityAsync(nameof(CancelChildExecutionActivity),
+                new CancelChildExecutionInput(branchExecutionIds[branchName]));
         }
     }
 }

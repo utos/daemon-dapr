@@ -553,6 +553,21 @@ public class PromiseBranchListBuilder
         return this;
     }
 
+    /// <summary>Where the run goes when the promise itself fails — a mode that cannot be satisfied.</summary>
+    public PromiseBranchListBuilder OnFailure(string targetActivity, Struct? input = null, string? when = null)
+    {
+        var target = new TransitionTarget { Name = targetActivity };
+        if (input != null)
+            target.Input = input;
+
+        var rule = new TransitionRule { Transition = target };
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnFailure.Add(rule);
+        return this;
+    }
+
     public TestWorkflowBuilder AddDependentWorkflow(string workflowName, Action<TestWorkflowBuilder> configure)
     {
         return _parent.AddDependentWorkflow(workflowName, configure);
