@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bundles the shared validator accepts, which is the one thing the two must not do. A non-workflow
   target runs this same workflow from that activity. Branches are still child executions; that is
   how fan-out works here, not something an author has to arrange.
+- `CancelSubscribedChildActivity` is now `CancelChildExecutionActivity`. It has two callers rather
+  than one — an abandoned subscription and a promise branch nobody is waiting on — and "subscribed"
+  was only ever true of the first. An orchestration in flight across the upgrade that is inside a
+  promise fan-out cannot resume regardless: the settle path now schedules cancellations that its
+  recorded history does not contain.
 
 ### Added
 
@@ -69,6 +74,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A promise now cancels the branches it did not wait for.** `SettleAsync` stopped awaiting once
+  the mode was satisfied and simply dropped whatever was left in `remaining` — but a branch is a
+  child orchestration, not a task, and dropping the task stops nothing. The loser of a `race`
+  between two mirrors ran to completion, issued its requests and wrote its output entries, spending
+  everything the branch was going to spend, with the parent already several activities further on.
+  The same on the failure path: `all` fails fast, and its siblings carried on after the run had
+  already failed. This is the class of bug `AbandonSubscriptionsAsync` exists to fix for streaming
+  producers; branches never got the equivalent. They do now, on every path and before the promise
+  returns — so a settled promise means no branch of it is still running, which is what a caller
+  would assume anyway. Cancellations are ordered by branch name for the same reason the
+  subscription sweep is: each one is a history-recorded activity call, and an unordered sweep
+  replays in a different order than it ran. A branch that finishes inside the settle/cancel race is
+  not an error — termination already treats a missing or finished instance as an ordinary outcome.
 - **Routing a failure to the reserved `error` keyword now fails with the cause.** It reached the
   navigator, which fails the run with a hardcoded "Workflow transitioned to 'error'" and discards
   what went wrong — making the explicit fallback strictly worse than omitting it, since declaring

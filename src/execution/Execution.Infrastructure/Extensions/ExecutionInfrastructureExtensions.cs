@@ -127,7 +127,7 @@ public static class ExecutionInfrastructureExtensions
             options.RegisterActivity<DeleteOutputStreamActivity>();
             options.RegisterActivity<RaiseChildOutputActivity>();
             options.RegisterActivity<AckChildOutputActivity>();
-            options.RegisterActivity<CancelSubscribedChildActivity>();
+            options.RegisterActivity<CancelChildExecutionActivity>();
         });
 
         // Projection engine and projections (idempotent read model updates)
