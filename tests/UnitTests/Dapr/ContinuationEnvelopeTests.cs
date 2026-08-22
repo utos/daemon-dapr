@@ -43,14 +43,14 @@ public class ContinuationEnvelopeTests
 
     private static WorkflowExecutorInput Continued(
         Dictionary<string, ExecutionId>? subscriptions = null,
-        List<string>? dispatchStack = null) =>
+        int dispatchSequence = 3) =>
         Original().ContinueFrom(
             "handle",
             new Dictionary<string, object> { ["fresh"] = 2 },
             Cursor(),
             Started,
             subscriptions ?? new Dictionary<string, ExecutionId> { ["watch"] = ChildId },
-            dispatchStack ?? ["watch"]);
+            dispatchSequence);
 
     [Fact]
     public void The_next_segment_resumes_at_the_activity_the_last_one_stopped_on()
@@ -94,40 +94,9 @@ public class ContinuationEnvelopeTests
         var continued = Original() with { Subscriptions = new Dictionary<string, ExecutionId> { ["watch"] = ChildId } };
 
         var ended = continued.ContinueFrom(
-            "handle", null, Cursor(), Started, new Dictionary<string, ExecutionId>(), []);
+            "handle", null, Cursor(), Started, new Dictionary<string, ExecutionId>(), 0);
 
         Assert.Empty(ended.Subscriptions!);
-    }
-
-    [Fact]
-    public void The_handler_a_segment_is_inside_carries_forward()
-    {
-        // A consumer loop *always* reaches this boundary: re-entering the call activity is what
-        // sets LoopDetected, and LoopDetected is what makes a continuation eligible. So a stack
-        // that lived only in the segment would be empty on the other side, and the handler would
-        // end the run instead of going back for the next value.
-        Assert.Equal(["watch"], Continued(dispatchStack: ["watch"]).DispatchStack!);
-    }
-
-    [Fact]
-    public void A_handler_the_segment_returned_from_does_not_come_back()
-    {
-        // The mirror image, and the reason this is segment state rather than carried: a resurrected
-        // entry would send a finished path back to a call activity it already left.
-        var inside = Original() with { DispatchStack = ["watch"] };
-
-        var returned = inside.ContinueFrom(
-            "handle", null, Cursor(), Started, new Dictionary<string, ExecutionId>(), []);
-
-        Assert.Empty(returned.DispatchStack!);
-    }
-
-    [Fact]
-    public void Nested_handlers_keep_their_order_innermost_last()
-    {
-        var continued = Continued(dispatchStack: ["watch-outer", "watch-inner"]);
-
-        Assert.Equal(["watch-outer", "watch-inner"], continued.DispatchStack!);
     }
 
     [Fact]
@@ -168,7 +137,7 @@ public class ContinuationEnvelopeTests
             nameof(WorkflowExecutorInput.LoopDetected),
             nameof(WorkflowExecutorInput.StartedAt),
             nameof(WorkflowExecutorInput.Subscriptions),
-            nameof(WorkflowExecutorInput.DispatchStack)
+            nameof(WorkflowExecutorInput.DispatchSequence)
         ];
 
         string[] carriedUnchanged =
@@ -196,6 +165,17 @@ public class ContinuationEnvelopeTests
     /// used to be.
     /// </summary>
     [Fact]
+    public void The_handler_count_carries_forward_rather_than_restarting()
+    {
+        // The one that cost a day. Handler ids are derived from this counter, and the
+        // orchestrator's own GUID sequence restarts with the history — so a counter that reset
+        // here would re-mint the id the live producer child already holds, Dapr would decline to
+        // start the handler, and the consumer would wait on a rendezvous that never happens.
+        // Silently: no exception reaches the orchestrator, the child simply never runs.
+        Assert.Equal(9, Continued(dispatchSequence: 9).DispatchSequence);
+    }
+
+    [Fact]
     public void The_envelope_round_trips_through_the_Dapr_boundary()
     {
         var json = JsonSerializer.Serialize(Continued());
@@ -209,6 +189,5 @@ public class ContinuationEnvelopeTests
         Assert.Equal("child-output:upstream", restored.OutputEventName);
         Assert.Equal(2, restored.ActivityInput!["fresh"]);
         Assert.True(restored.LoopDetected);
-        Assert.Equal(["watch"], restored.DispatchStack!);
     }
 }

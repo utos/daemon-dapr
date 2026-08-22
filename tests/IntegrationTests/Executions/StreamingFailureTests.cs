@@ -23,8 +23,14 @@ public class StreamingFailureTests(DaemonTestFixture fixture)
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(90);
 
-    private static TransitionRule[] HandleThenResume(string handlerActivity) =>
-        [new TransitionRule { Transition = new TransitionTarget { Name = handlerActivity } }];
+    private static DispatchRule[] HandleThenResume(string handlerActivity) =>
+    [
+        new DispatchRule
+        {
+            Workflow = TestWorkflowBuilder.SelfReference,
+            StartActivity = handlerActivity
+        }
+    ];
 
     [Fact]
     public async Task A_producer_that_fails_mid_stream_reaches_the_consumers_on_failure()
@@ -51,7 +57,6 @@ public class StreamingFailureTests(DaemonTestFixture fixture)
             .OnResult(Fields(("outcome", Value.ForString("completed"))))
             .OnFailure("recover")
             .HttpGet("handle", handlePath)
-            .OnSuccess("watch")
             .HttpGet("recover", recoverPath)
             .OnResult(Fields(("outcome", Value.ForString("recovered"))))
             .AddDependentWorkflow("failing-producer", child =>
@@ -102,7 +107,6 @@ public class StreamingFailureTests(DaemonTestFixture fixture)
                 onEmitted: HandleThenResume("handle"))
             .OnResult(Fields(("outcome", Value.ForString("completed"))))
             .HttpGet("handle", handlePath)
-            .OnSuccess("watch")
             .AddDependentWorkflow("failing-producer-2", child =>
                 child.HttpGet("produce", emitPath)
                     .OnEmit(Fields(("n", Value.ForNumber(1))), "boom")

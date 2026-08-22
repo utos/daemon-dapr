@@ -65,8 +65,8 @@ public class PromiseCancellationTests(DaemonTestFixture fixture)
             .HttpGet("loser-call", loserPath)
             .Timer("hold", HoldOpen)
             .Promise("fan-out", "race")
-            .Branch("winner", "winner-call")
-            .Branch("loser", "loser-wait")
+            .Branch("winner", "self", "winner-call")
+            .Branch("loser", "self", "loser-wait")
             .OnSuccess("hold")
             .Build("fan-out");
 
@@ -94,8 +94,8 @@ public class PromiseCancellationTests(DaemonTestFixture fixture)
             .HttpGet("also-ran-call", alsoRanPath)
             .Timer("hold", HoldOpen)
             .Promise("fan-out", "any")
-            .Branch("quick", "quick-call")
-            .Branch("also-ran", "also-ran-wait")
+            .Branch("quick", "self", "quick-call")
+            .Branch("also-ran", "self", "also-ran-wait")
             .OnSuccess("hold")
             .Build("fan-out");
 
@@ -127,9 +127,9 @@ public class PromiseCancellationTests(DaemonTestFixture fixture)
             .Timer("hold", HoldOpen)
             // Two of the three suffice, so the third is still running when the promise resolves.
             .Promise("fan-out", "count", requiredCount: 2)
-            .Branch("first", "first-call")
-            .Branch("second", "second-call")
-            .Branch("outstanding", "outstanding-wait")
+            .Branch("first", "self", "first-call")
+            .Branch("second", "self", "second-call")
+            .Branch("outstanding", "self", "outstanding-wait")
             .OnSuccess("hold")
             .Build("fan-out");
 
@@ -175,9 +175,9 @@ public class PromiseCancellationTests(DaemonTestFixture fixture)
             .HttpGet("outstanding-call", outstandingPath)
             .Timer("hold", HoldOpen)
             .Promise("fan-out", "count", requiredCount: 2)
-            .Branch("first-failure", "first-failure-call")
-            .Branch("second-failure", "second-failure-call")
-            .Branch("outstanding", "outstanding-wait")
+            .Branch("first-failure", "self", "first-failure-call")
+            .Branch("second-failure", "self", "second-failure-call")
+            .Branch("outstanding", "self", "outstanding-wait")
             .OnFailure("hold")
             .Build("fan-out");
 
@@ -216,8 +216,8 @@ public class PromiseCancellationTests(DaemonTestFixture fixture)
             .HttpGet("sibling-call", siblingPath)
             .Timer("hold", HoldOpen)
             .Promise("fan-out", "all")
-            .Branch("failing", "failing-call")
-            .Branch("sibling", "sibling-wait")
+            .Branch("failing", "self", "failing-call")
+            .Branch("sibling", "self", "sibling-wait")
             .OnFailure("hold")
             .Build("fan-out");
 

@@ -63,7 +63,7 @@ public class TestWorkflowBuilder
     /// </summary>
     public ActivityBuilder WorkflowCall(string activityName, string targetWorkflow,
         string startActivity, Struct? input = null,
-        IEnumerable<TransitionRule>? onEmitted = null) =>
+        IEnumerable<DispatchRule>? onEmitted = null) =>
         SubWorkflow(activityName, targetWorkflow, startActivity, input,
             config =>
             {
@@ -174,14 +174,15 @@ public class TestWorkflowBuilder
             dependent => dependent.Key,
             dependent => WorkflowIdentity.FormatMetadata(dependent.Value.Metadata));
 
-        ResolveSubWorkflowReferences(spec, identities);
-        foreach (var dependent in _dependentWorkflows.Values)
-            ResolveSubWorkflowReferences(dependent.Spec, identities);
-
         // Keyed by canonical identity rather than by name: UTOS-B005 requires every key to equal
         // the identity derived from that workflow's own metadata, which is what makes a bundle
         // self-describing.
         var identity = WorkflowIdentity.FormatMetadata(workflow.Metadata);
+
+        ResolveSubWorkflowReferences(spec, identities, identity);
+        foreach (var (name, dependent) in _dependentWorkflows)
+            ResolveSubWorkflowReferences(dependent.Spec, identities, identities[name]);
+
         var bundle = new WorkflowBundle { EntryPoint = identity };
         bundle.Workflows.Add(identity, workflow);
 
@@ -196,21 +197,56 @@ public class TestWorkflowBuilder
     }
 
     /// <summary>
-    /// Rewrites each sub-workflow activity's target from a workflow name to the canonical identity
-    /// it resolves to, leaving anything unrecognised alone so a test can still assert on a
-    /// deliberately dangling reference.
+    /// Rewrites every place a document is named — a sub-workflow activity, a promise branch, an
+    /// <c>onEmitted</c> rule — from a workflow name to the canonical identity it resolves to,
+    /// standing in for what the CLI does to a dependency alias.
+    /// <para>
+    /// <c>self</c> resolves to <paramref name="ownIdentity"/>, the identity of the document the
+    /// reference is written in, which is why this is called once per document rather than over
+    /// the bundle. That is also the only reason a daemon test may write <c>self</c> at all: the
+    /// word never reaches a bundle, so resolving it here is what keeps these fixtures readable
+    /// without pretending the daemon understands it.
+    /// </para>
+    /// <para>
+    /// Anything unrecognised is left alone, so a test can still assert on a deliberately dangling
+    /// reference.
+    /// </para>
     /// </summary>
     private static void ResolveSubWorkflowReferences(
-        WorkflowSpec spec, IReadOnlyDictionary<string, string> identities)
+        WorkflowSpec spec, IReadOnlyDictionary<string, string> identities, string ownIdentity)
     {
+        string Resolve(string reference) =>
+            reference == SelfReference ? ownIdentity
+            : identities.TryGetValue(reference, out var identity) ? identity
+            : reference;
+
         foreach (var activity in spec.Activities.Values)
         {
-            if (activity.ConfigCase != WorkflowActivity.ConfigOneofCase.Workflow) continue;
+            switch (activity.ConfigCase)
+            {
+                case WorkflowActivity.ConfigOneofCase.Workflow:
+                    activity.Workflow.Workflow = Resolve(activity.Workflow.Workflow);
 
-            if (identities.TryGetValue(activity.Workflow.Workflow, out var identity))
-                activity.Workflow.Workflow = identity;
+                    if (activity.Workflow.ModeCase == WorkflowActivityConfig.ModeOneofCase.Call)
+                        foreach (var rule in activity.Workflow.Call.OnEmitted)
+                            rule.Workflow = Resolve(rule.Workflow);
+
+                    break;
+
+                case WorkflowActivity.ConfigOneofCase.Promise:
+                    foreach (var branch in activity.Promise.Branches)
+                        branch.Workflow = Resolve(branch.Workflow);
+
+                    break;
+            }
         }
     }
+
+    /// <summary>
+    /// What a test writes to dispatch the document under construction. Resolved away in
+    /// <see cref="Build"/>, exactly as the CLI resolves it before a bundle exists.
+    /// </summary>
+    public const string SelfReference = "self";
 
     public TestWorkflowRequest BuildSequential(string? startActivity = null)
     {
@@ -489,17 +525,27 @@ public class PromiseBranchListBuilder
         _activity = activity;
     }
 
-    public PromiseBranchListBuilder Branch(string name, string targetActivity,
+    /// <summary>
+    /// A branch dispatching <paramref name="startActivity"/> of <paramref name="workflow"/>.
+    /// <para>
+    /// <paramref name="workflow"/> is a canonical identity, not an alias: these fixtures are
+    /// bundles, and the CLI has already resolved every alias — including <c>self</c> — by the time
+    /// one exists. Fanning out over the document under construction means passing its own key,
+    /// which <see cref="TestWorkflowBuilder.SelfKey"/> supplies.
+    /// </para>
+    /// </summary>
+    public PromiseBranchListBuilder Branch(string name, string workflow, string startActivity,
         Struct? input = null, string? condition = null)
     {
         var branch = new PromiseBranch
         {
             Name = name,
-            Target = new TransitionTarget { Name = targetActivity }
+            Workflow = workflow,
+            StartActivity = startActivity
         };
 
         if (input != null)
-            branch.Target.Input = input;
+            branch.Input = input;
 
         if (condition != null)
             branch.Condition = condition;
@@ -508,13 +554,14 @@ public class PromiseBranchListBuilder
         return this;
     }
 
-    public PromiseBranchListBuilder ForEachBranch(string name, string targetActivity,
-        string collection, string alias, Struct? input = null)
+    public PromiseBranchListBuilder ForEachBranch(string name, string workflow,
+        string startActivity, string collection, string alias, Struct? input = null)
     {
         var branch = new PromiseBranch
         {
             Name = name,
-            Target = new TransitionTarget { Name = targetActivity },
+            Workflow = workflow,
+            StartActivity = startActivity,
             ForEach = new ForEachConfig
             {
                 Collection = collection,
@@ -523,7 +570,7 @@ public class PromiseBranchListBuilder
         };
 
         if (input != null)
-            branch.Target.Input = input;
+            branch.Input = input;
 
         _activity.Promise.Branches.Add(branch);
         return this;

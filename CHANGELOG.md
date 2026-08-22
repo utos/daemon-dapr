@@ -7,34 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **Dispatched work is its own document** (spec `v0.0.13`, `Utos.Workflow` pins bumped `0.0.12` →
+  `0.0.13`). A promise branch and an `on_emitted` rule name a *document* — `workflow`,
+  `startActivity`, `input` — rather than pointing at an activity in the dispatching one.
+  `PromiseBranch.Target` is gone and `CallActivityConfig.OnEmitted` holds `DispatchRule` instead of
+  `TransitionRule`, which changes the persisted shape in all three places a bundle is stored, so
+  **existing streams cannot be replayed — drop the KurrentDB volume and the SQL database.** There is
+  no upcaster; the daemon is pre-1.0. `ActivityConfigJsonShapeTests` pins the new text.
+- **A handler can no longer stop its consumer.** It used to: a handler transitioning to `end` ended
+  the consuming run, which was how a consumer stopped early. A handler is a separate execution now,
+  so `end` ends the handler and the consumer takes the next value. Nothing dispatched can reach into
+  the flow that dispatched it — that is the property the document boundary exists to provide — but
+  it means a consumer runs until its producer terminates, with no way to say "enough" based on what
+  it consumed. `A_handler_that_ends_finishes_only_itself` records the gap rather than hiding it.
+  Closing it needs a spec decision, not a daemon workaround.
+
+### Fixed
+
+- **A child started after a continue-as-new could collide with a live one, and hang the run.**
+  `WorkflowContext.NewGuid` is replay-safe but not continuation-safe: its counter restarts with the
+  history, so the first id minted in the second segment is the same one the first segment minted.
+  Harmless when that child has finished, fatal when it has not — and a consumer's producer survives
+  every continuation by design. Dapr declines to start an instance whose id already exists, so the
+  handler never ran and the consumer waited forever on a rendezvous that could not happen. Nothing
+  threw; the trace simply stopped. Handler ids now come from `DeterministicExecutionId` — a pure
+  function of (execution, activity, dispatch sequence) — with the sequence carried in the
+  continuation envelope, so they replay identically and cannot repeat across segments.
+
 ### Changed
 
-- **An `on_emitted` handler that runs out of transitions goes back for the next value.** Consuming
-  was a loop the author had to close by hand, transitioning to the call activity by name from the
-  end of the handler. Omitting that ended the subscription, cancelled the producer and completed the
-  run — so a watcher written to poll for weeks exited after one value and reported success. The
-  handler is the body of the loop and now behaves like one, the way a promise branch already returns
-  to its promise without being told to. `TransitionDecision.Propagate` gained a sibling rather than
-  a special case: `Exhausted` answers "carry on as before", which is a different sentence per path.
-  A failure is checked first and still propagates, because resuming there would swallow it.
+- **A promise branch name is rendered**, so a `for_each` expansion can be named after the item it
+  processes. The proto has documented `{{ alias.x }}` here since the field existed, and the
+  interpreter never honoured it — names were built from the raw string plus `_{index}`, so the
+  shipped conformance fixture produced keys of the literal text `addon-{{ item.sku }}_0`. The
+  ordinal survives as a **fallback**, applied only when the rendered names within one expansion are
+  not distinct: a literal name renders to itself every time, so dropping it outright would have made
+  every existing `for_each` collide — at run time, on documents the shared validator accepts, which
+  is the divergence this whole change exists to close.
+- **An `on_emitted` handler completes one iteration by finishing.** Consuming was a loop the author
+  had to close by hand, transitioning to the call activity by name from the end of the handler.
+  Omitting that ended the subscription, cancelled the producer and completed the run — so a watcher
+  written to poll for weeks exited after one value and reported success. The handler is the body of
+  the loop and now behaves like one; being a document, what "finishing" means is its execution
+  terminating, which the consumer learns of by the child ending.
 - **A rule list where nothing matches skips that value.** The same rule, and the case that made a
   filtering consumer unwritable: conditions that all miss exhaust the list, which used to mean the
   run was over. One uninteresting value shut the producer down.
-- Writing the back-edge by hand still works and means the same thing, so **every existing workflow
-  behaves exactly as it did** — the driver sees the target is the handler it dispatched from and
-  pops, rather than treating it as a fresh dispatch.
-- Which handler a path is inside rides in the continuation envelope as `DispatchStack`. It has to:
-  re-entering the call activity is what sets `LoopDetected`, and `LoopDetected` is what makes a
-  segment eligible to continue as new — so *every* consumer loop crosses that boundary, and a stack
-  held only in memory would be empty on the other side. A stack rather than one name because
-  handlers nest; not for concurrency, since one cursor means one handler runs at a time.
-- **A promise branch may target any activity.** It had to name a `workflow.call`, so fanning out
-  over an HTTP request meant wrapping it in a second document that did nothing else. The spec never
-  said so — `PromiseBranch.target` asks only which activity to start, and `PromiseActivityConfig`
-  already documents targets naming a promise or an ancestor — so this was the daemon rejecting
-  bundles the shared validator accepts, which is the one thing the two must not do. A non-workflow
-  target runs this same workflow from that activity. Branches are still child executions; that is
-  how fan-out works here, not something an author has to arrange.
+- Writing the back-edge by hand is **no longer meaningful, and is now harmful**. A handler is a
+  document, so transitioning to the call activity re-enters it *inside the handler* and opens a
+  second producer — recursively. `DispatchStack` and `EvaluateTransitionInput.DispatchedBy` are
+  deleted with it: the driver no longer needs to know which handler a path is under, because a
+  handler path cannot be in this execution at all.
+- **A promise branch names a document, and `workflow: self` covers the current one.** It used to
+  have to name a `workflow.call` activity, so fanning out over an HTTP request meant wrapping it in
+  a second document that did nothing else — and the daemon threw on branch targets the shared
+  validator accepts, which is the one thing the two must not do. Both are gone: a branch says which
+  document to run and where to enter it, and `self` is what the CLI resolves to this document's own
+  identity before a bundle exists. The daemon never sees the word.
 - `CancelSubscribedChildActivity` is now `CancelChildExecutionActivity`. It has two callers rather
   than one — an abandoned subscription and a promise branch nobody is waiting on — and "subscribed"
   was only ever true of the first. An orchestration in flight across the upgrade that is inside a

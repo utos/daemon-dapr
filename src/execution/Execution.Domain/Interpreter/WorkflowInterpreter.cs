@@ -30,11 +30,6 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     /// Why the activity failed, surfaced as <c>{{ error.x }}</c>. Set only when
     /// <paramref name="outcome"/> is <see cref="ActivityOutcomeKind.Failed"/>.
     /// </param>
-    /// <param name="dispatchedBy">
-    /// The call activity whose <c>on_emitted</c> handler this path is running, when it is running
-    /// one. Only the driver knows — a handler activity is an ordinary peer in a flat graph, so
-    /// nothing about <paramref name="activityName"/> reveals how control reached it.
-    /// </param>
     public TransitionDecision Advance(
         WorkflowSession session,
         string activityName,
@@ -42,8 +37,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         object? activityOutput,
         ActivityOutcomeKind outcome = ActivityOutcomeKind.Succeeded,
         HttpResponseContext? response = null,
-        WorkflowErrorContext? error = null,
-        string? dispatchedBy = null)
+        WorkflowErrorContext? error = null)
     {
         var activity = Require(session, activityName);
         var input = session.InputFor(activityInput);
@@ -64,26 +58,28 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         // a handler actually needs to see.
         var passThrough = outcome == ActivityOutcomeKind.Failed ? input : output;
 
-        // An emitted value is dispatched by the caller's on_emitted rules, which live on the call
-        // configuration rather than on the activity — they only mean anything for an awaited
-        // sub-workflow, so they cannot be authored anywhere they would be ignored.
-        var rules = outcome switch
-        {
-            ActivityOutcomeKind.Emitted => (activity.Config as CallActivityConfig)?.OnEmitted ?? [],
-            ActivityOutcomeKind.Failed => activity.OnFailure,
-            _ => activity.OnSuccess
-        };
-
-        // Exhausting the rules means something different on each path — see Exhausted.
-        if (rules.Count == 0)
-            return Exhausted(outcome, activityName, dispatchedBy, passThrough);
-
         var scope = new TemplateScope()
             .WithInput(input)
             .WithOutput(output)
             .WithEnv(session.Env)
             .WithResponse(response)
             .WithError(error);
+
+        // An emitted value is handled by the caller's on_emitted rules, which live on the call
+        // configuration rather than on the activity — they only mean anything for an awaited
+        // sub-workflow, so they cannot be authored anywhere they would be ignored. They are
+        // dispatches, not transitions, so this path is answered separately rather than being
+        // folded into the loop below.
+        if (outcome == ActivityOutcomeKind.Emitted)
+            return DispatchEmitted(
+                (activity.Config as CallActivityConfig)?.OnEmitted ?? [],
+                scope, activityName, passThrough);
+
+        var rules = outcome == ActivityOutcomeKind.Failed ? activity.OnFailure : activity.OnSuccess;
+
+        // Exhausting the rules means something different on each path — see Exhausted.
+        if (rules.Count == 0)
+            return Exhausted(outcome, activityName, passThrough);
 
         foreach (var rule in rules)
         {
@@ -111,47 +107,64 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         }
 
         // Every rule was evaluated and none matched — same meaning as having none at all.
-        return Exhausted(outcome, activityName, dispatchedBy, passThrough);
+        return Exhausted(outcome, activityName, passThrough);
     }
 
     /// <summary>
-    /// What an unmatched rule list means. Not one answer but four, because "carry on as before"
-    /// is a different sentence on each path:
+    /// Which document handles this emitted value, or none.
+    /// <para>
+    /// An unmatched list is the case that made a *filtering* consumer unwritable: every condition
+    /// missing on one uninteresting value used to end the run. It means "skip this value", so the
+    /// answer is to go back to the call activity for the next one — the same answer an empty list
+    /// gives, which is why they share a return rather than being separately special-cased.
+    /// </para>
+    /// </summary>
+    private TransitionDecision DispatchEmitted(
+        IReadOnlyList<DispatchRule> rules,
+        TemplateScope scope,
+        string callActivityName,
+        object? passThrough)
+    {
+        foreach (var rule in rules)
+        {
+            if (!string.IsNullOrEmpty(rule.Condition)
+                && !templateEngine.Evaluate<bool>(rule.Condition, scope))
+                continue;
+
+            return new TransitionDecision.Dispatch(
+                rule.Workflow,
+                rule.StartActivity,
+                rule.Input != null
+                    ? structRenderer.Render(rule.Input, scope)
+                    : passThrough as Dictionary<string, object>);
+        }
+
+        return Resume(callActivityName, passThrough);
+    }
+
+    /// <summary>
+    /// What an unmatched rule list means. Two answers, because "carry on as before" is a
+    /// different sentence on each path:
     ///
     /// <list type="bullet">
     /// <item>A <b>failure</b> was never handled, so it keeps travelling outward — per
-    /// <c>activity.proto</c>, "If no transitions match or list is empty, the error propagates".
-    /// Checked first, and deliberately: a failure inside a handler must kill the run rather than
-    /// quietly go back for the next value, which would swallow it.</item>
-    /// <item>An <b>emission</b> nothing wanted is still an emission that was consumed, so the
-    /// caller returns to its own call activity for the next one. Ending here instead is what made
-    /// a filtering <c>on_emitted</c> — every condition missing on one uninteresting value —
-    /// silently cancel the producer and report the run Completed.</item>
-    /// <item>A <b>handler path that ran out of rules</b> is a handler that finished. Control
-    /// returns to the call activity that dispatched it, the way a promise branch returns to its
-    /// promise. This is what makes the back-edge optional rather than load-bearing.</item>
+    /// <c>activity.proto</c>, "If no transitions match or list is empty, the error propagates".</item>
     /// <item>Anything else is an ordinary path with nowhere left to go: the run is done.</item>
     /// </list>
     ///
-    /// The resumed target is reached with a plain <see cref="TransitionDecision.Goto"/>, so it is
-    /// indistinguishable from the back-edge an author writes by hand — which is precisely why
-    /// workflows that already write one keep behaving exactly as they did.
+    /// It used to have a third answer, for a path that had run out of rules *inside* a handler,
+    /// which meant one iteration was finished rather than the run. That distinction is gone with
+    /// the handler: it is a document now, so its own path ending ends its own execution and
+    /// nothing else, and the consumer learns of it by the child terminating. The emitted path
+    /// never reaches here at all — see <see cref="DispatchEmitted"/>.
     /// </summary>
     private static TransitionDecision Exhausted(
         ActivityOutcomeKind outcome,
         string activityName,
-        string? dispatchedBy,
         object? passThrough)
     {
-        if (outcome == ActivityOutcomeKind.Failed)
-            return new TransitionDecision.Propagate();
-
-        // The call activity's own handler rules matched nothing: go back to it for the next value.
-        if (outcome == ActivityOutcomeKind.Emitted)
-            return Resume(activityName, passThrough);
-
-        return dispatchedBy != null
-            ? Resume(dispatchedBy, passThrough)
+        return outcome == ActivityOutcomeKind.Failed
+            ? new TransitionDecision.Propagate()
             : new TransitionDecision.End();
     }
 
@@ -229,25 +242,52 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             if (branch.ForEach != null)
             {
                 // Dynamic expansion: evaluate collection, iterate with alias
-                var collection = templateEngine.Evaluate<IEnumerable<object>>(branch.ForEach.Collection, scope);
+                var collection = templateEngine
+                    .Evaluate<IEnumerable<object>>(branch.ForEach.Collection, scope)
+                    .ToList();
 
-                var index = 0;
-                foreach (var item in collection)
-                {
-                    var itemScope = scope.With(branch.ForEach.Alias, item);
+                var scopes = collection
+                    .Select(item => scope.With(branch.ForEach.Alias, item))
+                    .ToList();
 
-                    branches.Add(PlanBranch(
-                        session, $"{branch.Name}_{index}", branch.Target, itemScope, activityInput));
+                var names = scopes.Select(itemScope => RenderBranchName(branch, itemScope)).ToList();
 
-                    index++;
-                }
+                // The ordinal is a fallback, not the rule. A templated name renders to something
+                // different per item and stands on its own — `addon-SKU-123` says which expansion
+                // failed where `addon_0` says nothing, which is the whole reason the name is
+                // templatable. A *literal* name renders to itself every time, so without the
+                // suffix an expansion over three items would claim one key three times and lose
+                // two results. Deciding per expansion rather than per author keeps both working
+                // and is why `forEach` with a plain name needs no migration.
+                var distinct = names.Distinct(StringComparer.Ordinal).Count() == names.Count;
+
+                for (var index = 0; index < scopes.Count; index++)
+                    branches.Add(PlanBranch(branch,
+                        distinct ? names[index] : $"{names[index]}_{index}",
+                        scopes[index], activityInput));
             }
             else
             {
-                // Static branch: single resolution
-                branches.Add(PlanBranch(session, branch.Name, branch.Target, scope, activityInput));
+                // Static branch: single resolution. Its name is rendered too — a template with
+                // nothing to bind renders to itself, so this costs nothing and means one rule.
+                branches.Add(PlanBranch(branch, RenderBranchName(branch, scope), scope, activityInput));
             }
         }
+
+        // Branch names key the promise output map, so two branches answering to one name would
+        // lose a result silently. Within one for_each expansion the ordinal above has already
+        // settled it; what is left is a collision *between* branches, which no ordinal can fix
+        // because disambiguating would have to rename a branch the author named deliberately.
+        // The validator catches the literal case (UTOS-C307) and cannot catch this one, since
+        // rendering needs the collection.
+        var duplicate = branches
+            .GroupBy(plan => plan.BranchName, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+
+        if (duplicate != null)
+            throw new InvalidOperationException(
+                $"Promise branch name '{duplicate.Key}' is not unique: {duplicate.Count()} branches "
+                + "rendered to it. Branch names key the promise output map and must be distinct.");
 
         // No parse step: the mode arrived as a oneof case and was mapped to the enum at the wire
         // boundary, so an unknown mode cannot reach here.
@@ -336,35 +376,29 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             config.Workflow, config.StartActivity, subInput, config is SpawnActivityConfig);
     }
 
+    /// <summary>
+    /// The branch's key in the promise output map, rendered in <paramref name="scope"/> so a
+    /// for_each expansion can be named after the item it processes. Ordinals are deliberately not
+    /// appended: <c>item_0</c> says nothing about which expansion failed, which is the whole
+    /// reason the name is templatable.
+    /// </summary>
+    private string RenderBranchName(PromiseBranch branch, TemplateScope scope) =>
+        templateEngine.RenderToString(branch.Name, scope);
+
     private PromiseBranchPlan PlanBranch(
-        WorkflowSession session,
+        PromiseBranch branch,
         string branchName,
-        TransitionTarget target,
         TemplateScope scope,
         IReadOnlyDictionary<string, object>? activityInput)
     {
-        // The target names an activity in the current workflow. Which one it is decides only
-        // *what* the branch runs, not whether it is allowed to.
-        var targetActivity = session.Graph.Find(target.Name)
-                             ?? throw new InvalidOperationException(
-                                 $"Branch target activity '{target.Name}' not found in workflow");
-
-        // Render branch input from target.Input if set, otherwise pass through activity input
-        var branchInput = target.Input != null
-            ? structRenderer.Render(target.Input, scope)
+        // A branch names a document, so there is nothing to look up in this workflow and no
+        // activity kind to reason about. The bundle is self-contained and UTOS-C501-C503 already
+        // checked that the document and its entry activity exist, so this only renders input.
+        var branchInput = branch.Input != null
+            ? structRenderer.Render(branch.Input, scope)
             : AsMutable(activityInput);
 
-        // A workflow-kind target names the sub-workflow to run, and is a pointer rather than the
-        // work itself. Any other target *is* the work: run this same workflow from that activity.
-        //
-        // That every branch is a child execution is how the driver fans out, not something the
-        // spec asks an author to arrange. PromiseBranch.target requires only "which activity to
-        // start", and no UTOS rule constrains its kind — so demanding a workflow.call here made
-        // the daemon reject documents the shared validator accepts, which is the one divergence
-        // the two are supposed to be incapable of.
-        return targetActivity.Config is SubWorkflowActivityConfig config
-            ? new PromiseBranchPlan(branchName, config.Workflow, config.StartActivity, branchInput)
-            : new PromiseBranchPlan(branchName, session.Graph.WorkflowKey, target.Name, branchInput);
+        return new PromiseBranchPlan(branchName, branch.Workflow, branch.StartActivity, branchInput);
     }
 
     private static WorkflowActivity Require(WorkflowSession session, string activityName)

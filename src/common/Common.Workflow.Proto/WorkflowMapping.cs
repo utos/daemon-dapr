@@ -271,11 +271,13 @@ public static class WorkflowMapping
         return result;
     }
 
-    // ---- promise branches ------------------------------------------------
+    // ---- dispatch: promise branches and emission handlers -----------------
 
     public static Domain.PromiseBranch ToDomain(this Wire.PromiseBranch source) =>
         new(source.Name,
-            source.Target.ToDomain(),
+            source.Workflow,
+            source.StartActivity,
+            source.Input?.ToDomain(),
             source.HasCondition ? source.Condition : null,
             source.ForEach == null
                 ? null
@@ -283,7 +285,15 @@ public static class WorkflowMapping
 
     public static Wire.PromiseBranch ToProto(this Domain.PromiseBranch source)
     {
-        var result = new Wire.PromiseBranch { Name = source.Name, Target = source.Target.ToProto() };
+        var result = new Wire.PromiseBranch
+        {
+            Name = source.Name,
+            Workflow = source.Workflow,
+            StartActivity = source.StartActivity
+        };
+
+        if (source.Input != null)
+            result.Input = source.Input.ToProto();
 
         if (source.Condition != null)
             result.Condition = source.Condition;
@@ -294,6 +304,29 @@ public static class WorkflowMapping
                 Collection = source.ForEach.Collection,
                 Alias = source.ForEach.Alias
             };
+
+        return result;
+    }
+
+    public static Domain.DispatchRule ToDomain(this Wire.DispatchRule source) =>
+        new(source.Workflow,
+            source.StartActivity,
+            source.Input?.ToDomain(),
+            source.HasCondition ? source.Condition : null);
+
+    public static Wire.DispatchRule ToProto(this Domain.DispatchRule source)
+    {
+        var result = new Wire.DispatchRule
+        {
+            Workflow = source.Workflow,
+            StartActivity = source.StartActivity
+        };
+
+        if (source.Input != null)
+            result.Input = source.Input.ToProto();
+
+        if (source.Condition != null)
+            result.Condition = source.Condition;
 
         return result;
     }

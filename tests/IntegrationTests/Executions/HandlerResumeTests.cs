@@ -38,8 +38,15 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
             .OnResult(Fields(("produced", Value.ForNumber(values))));
     }
 
-    private static TransitionRule[] Dispatch(string handlerActivity) =>
-        [new TransitionRule { Transition = new TransitionTarget { Name = handlerActivity } }];
+    /// <summary>Hand each value to <paramref name="handlerActivity"/> of this same document.</summary>
+    private static DispatchRule[] Dispatch(string handlerActivity) =>
+    [
+        new DispatchRule
+        {
+            Workflow = TestWorkflowBuilder.SelfReference,
+            StartActivity = handlerActivity
+        }
+    ];
 
     [Fact]
     public async Task A_handler_with_no_back_edge_still_consumes_every_value()
@@ -131,10 +138,11 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted:
                 [
-                    new TransitionRule
+                    new DispatchRule
                     {
                         Condition = "{{ output.n == '2' }}",
-                        Transition = new TransitionTarget { Name = "handle" }
+                        Workflow = TestWorkflowBuilder.SelfReference,
+                        StartActivity = "handle"
                     }
                 ])
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))

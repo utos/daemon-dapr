@@ -41,19 +41,37 @@ public class ActivityConfigJsonShapeTests
     {
         // It decides whether the child gates on its caller, so losing it on the way to disk
         // would turn a streaming consumer into one that silently drops what it was sent.
+        //
+        // A rule is a DispatchRule rather than a TransitionRule, which changed this text. That is
+        // a persisted-shape break and is called out as one in the changelog: an execution created
+        // before it rehydrates with a hole where its definition used to be, silently, because
+        // EventSerializer's deserialize path logs and returns null rather than throwing.
         var config = new CallActivityConfig("acme/mailbox:1.0.0", "poll",
-            OnEmitted: [TransitionRule.Goto("handle")]);
+            OnEmitted: [new DispatchRule("acme/ingester:1.0.0", "ingest")]);
 
         var json = Serialize(config);
 
         Assert.Contains("""
-                        "OnEmitted":[{"Transition":{"Name":"handle","Input":null},"Result":null,"Emit":null,"Condition":null,"HasAction":true}]
+                        "OnEmitted":[{"Workflow":"acme/ingester:1.0.0","StartActivity":"ingest","Input":null,"Condition":null}]
                         """, json);
 
         var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
 
-        Assert.Equal("handle", Assert.Single(restored.OnEmitted).Transition!.Name);
+        Assert.Equal("acme/ingester:1.0.0", Assert.Single(restored.OnEmitted).Workflow);
         Assert.True(restored.ConsumesOutput);
+    }
+
+    [Fact]
+    public void A_promise_branch_persists_the_document_it_dispatches()
+    {
+        // Same contract, the other construct. A branch used to persist a nested `Target`; it now
+        // carries the dispatch fields flat, mirroring the wire form.
+        var config = new PromiseActivityConfig(PromiseMode.All, 0,
+            [new PromiseBranch("leg", "acme/pricer:1.0.0", "quote")]);
+
+        Assert.Contains("""
+                        "Branches":[{"Name":"leg","Workflow":"acme/pricer:1.0.0","StartActivity":"quote","Input":null,"Condition":null,"ForEach":null}]
+                        """, Serialize(config));
     }
 
     [Fact]
