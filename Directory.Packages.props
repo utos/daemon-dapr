@@ -3,13 +3,13 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.4.6" />
-    <PackageVersion Include="Aspire.Hosting.SqlServer" Version="13.4.6" />
-    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.4.6" />
-    <PackageVersion Include="Aspire.Microsoft.EntityFrameworkCore.SqlServer" Version="13.4.6" />
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.3" />
+    <PackageVersion Include="Aspire.Hosting.SqlServer" Version="13.5.3" />
+    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.5.3" />
+    <PackageVersion Include="Aspire.Microsoft.EntityFrameworkCore.SqlServer" Version="13.5.3" />
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Dapr" Version="13.0.0" />
-    <PackageVersion Include="CommunityToolkit.Aspire.Hosting.KurrentDB" Version="13.4.0" />
-    <PackageVersion Include="CommunityToolkit.Aspire.KurrentDB" Version="13.4.0" />
+    <PackageVersion Include="CommunityToolkit.Aspire.Hosting.KurrentDB" Version="13.5.0" />
+    <PackageVersion Include="CommunityToolkit.Aspire.KurrentDB" Version="13.5.0" />
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="Dapr.AspNetCore" Version="1.18.5" />
     <PackageVersion Include="Dapr.Workflow" Version="1.18.5" />
@@ -26,16 +26,16 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.9.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.17.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.18.0" />
     <PackageVersion Include="Scriban" Version="7.2.6" />
-    <PackageVersion Include="Utos.Daemon.Client" Version="0.0.12" />
-    <PackageVersion Include="Utos.Daemon.Server" Version="0.0.12" />
-    <PackageVersion Include="Utos.Workflow" Version="0.0.12" />
-    <PackageVersion Include="Utos.Workflow.Validation" Version="0.0.12" />
+    <PackageVersion Include="Utos.Daemon.Client" Version="0.0.13" />
+    <PackageVersion Include="Utos.Daemon.Server" Version="0.0.13" />
+    <PackageVersion Include="Utos.Workflow" Version="0.0.13" />
+    <PackageVersion Include="Utos.Workflow.Validation" Version="0.0.13" />
     <PackageVersion Include="WireMock.NET" Version="2.15.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
