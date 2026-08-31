@@ -15,6 +15,7 @@
         <PackageReference Include="Dapr.Workflow" />
         <PackageReference Include="Mediator.Abstractions" />
         <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
         <PackageReference Include="Scriban" />
     </ItemGroup>
 
