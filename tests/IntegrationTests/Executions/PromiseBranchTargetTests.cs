@@ -36,7 +36,7 @@ public class PromiseBranchTargetTests(DaemonTestFixture fixture)
             .HttpGet("fetch", fetchPath)
             .WithHeader("X-Item", "{{ input.id }}")
             .Promise("fan-out", "all")
-            .ForEachBranch("fetch-one", "fetch", "{{ input.ids }}", "id",
+            .ForEachBranch("fetch-one", "self", "fetch", "{{ input.ids }}", "id",
                 Fields(("id", Value.ForString("{{ id }}"))))
             .OnResult(Fields(("done", Value.ForBool(true))))
             .WithInput("ids", Value.ForList(

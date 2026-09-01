@@ -99,14 +99,19 @@ public abstract record SubWorkflowActivityConfig(
 /// child's emit does not complete until the value has been consumed here, which bounds the
 /// unconsumed buffer to one entry. Empty means this caller awaits only the terminal value, and
 /// the child emits without waiting for anyone.
+/// <para>
+/// Each rule dispatches a document rather than transitioning, so a handler cannot wander into
+/// this workflow's own flow — which is what used to make "ran out of transitions" mean one thing
+/// inside a handler and another outside it.
+/// </para>
 /// </param>
 public sealed record CallActivityConfig(
     string Workflow,
     string StartActivity,
     ValueMap? Input = null,
-    IReadOnlyList<TransitionRule>? OnEmitted = null) : SubWorkflowActivityConfig(Workflow, StartActivity, Input)
+    IReadOnlyList<DispatchRule>? OnEmitted = null) : SubWorkflowActivityConfig(Workflow, StartActivity, Input)
 {
-    public IReadOnlyList<TransitionRule> OnEmitted { get; init; } = OnEmitted ?? [];
+    public IReadOnlyList<DispatchRule> OnEmitted { get; init; } = OnEmitted ?? [];
 
     /// <summary>
     /// Whether this caller consumes what the child emits. The child is told at start, so the
@@ -143,11 +148,34 @@ public sealed record PromiseActivityConfig(
 /// One branch of a promise. A branch with <see cref="ForEach"/> expands into one branch per
 /// item in the evaluated collection.
 /// </summary>
+/// <param name="Name">
+/// Keys this branch in the promise output map. Rendered in the branch scope, so a
+/// <see cref="ForEach"/> expansion can be named after the item it processes; the rendered names
+/// must be distinct within one promise, which the interpreter enforces because rendering needs
+/// the collection and validation cannot evaluate templates.
+/// </param>
 public sealed record PromiseBranch(
     string Name,
-    TransitionTarget Target,
+    string Workflow,
+    string StartActivity,
+    ValueMap? Input = null,
     string? Condition = null,
     ForEachConfig? ForEach = null);
+
+/// <summary>
+/// A dispatch: run a document, starting from one of its activities.
+/// <para>
+/// The same three fields a <see cref="PromiseBranch"/> carries, minus the fan-out parts. Kept as
+/// its own type rather than folded into <see cref="TransitionTarget"/> because the two answer
+/// different questions — a transition names an activity in <em>this</em> workflow and stays
+/// inside it, a dispatch names a document and leaves.
+/// </para>
+/// </summary>
+public sealed record DispatchRule(
+    string Workflow,
+    string StartActivity,
+    ValueMap? Input = null,
+    string? Condition = null);
 
 /// <summary>Fans a branch out over a collection, binding each item to <see cref="Alias"/>.</summary>
 public sealed record ForEachConfig(string Collection, string Alias);

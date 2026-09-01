@@ -38,8 +38,28 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
             .OnResult(Fields(("produced", Value.ForNumber(values))));
     }
 
-    private static TransitionRule[] Dispatch(string handlerActivity) =>
-        [new TransitionRule { Transition = new TransitionTarget { Name = handlerActivity } }];
+    /// <summary>
+    /// Hand each value to <paramref name="startActivity"/> of the handler document.
+    /// <para>
+    /// A handler is always another document — `self` is rejected here (UTOS-S011) — which is what
+    /// makes it structurally unable to transition back into the consumer's flow.
+    /// </para>
+    /// </summary>
+    private static DispatchRule[] Dispatch(string startActivity, string? condition = null)
+    {
+        var rule = new DispatchRule
+        {
+            Workflow = HandlerWorkflow,
+            StartActivity = startActivity
+        };
+
+        if (condition != null)
+            rule.Condition = condition;
+
+        return [rule];
+    }
+
+    private const string HandlerWorkflow = "handler-workflow";
 
     [Fact]
     public async Task A_handler_with_no_back_edge_still_consumes_every_value()
@@ -54,9 +74,9 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: Dispatch("handle"))
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
-            // No OnSuccess at all. Running out of rules is what sends this back for the next value.
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 3))
             .Build("watch");
 
@@ -93,11 +113,12 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: Dispatch("enrich"))
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
-            .HttpGet("enrich", enrichPath)
-            .WithHeader("X-Value", "{{ input.n }}")
-            .OnSuccess("store", Fields(("n", Value.ForString("{{ input.n }}"))))
-            .HttpGet("store", storePath)
-            .WithHeader("X-Value", "{{ input.n }}")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("enrich", enrichPath)
+                .WithHeader("X-Value", "{{ input.n }}")
+                .OnSuccess("store", Fields(("n", Value.ForString("{{ input.n }}"))))
+                .HttpGet("store", storePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 3))
             .Build("watch");
 
@@ -129,17 +150,11 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("resume-filter", fixture.MockBaseUrl)
             .WorkflowCall("watch", "producer-workflow", "produce",
                 input: Fields(("n", Value.ForNumber(1))),
-                onEmitted:
-                [
-                    new TransitionRule
-                    {
-                        Condition = "{{ output.n == '2' }}",
-                        Transition = new TransitionTarget { Name = "handle" }
-                    }
-                ])
+                onEmitted: Dispatch("handle", condition: "{{ output.n == '2' }}"))
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 4))
             .Build("watch");
 
@@ -177,8 +192,9 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: Dispatch("handle"))
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 3))
             .Build("watch");
 

@@ -23,6 +23,20 @@ public abstract record TransitionDecision
         string ActivityName,
         Dictionary<string, object>? Input) : TransitionDecision;
 
+    /// <summary>
+    /// Run <paramref name="Workflow"/> from <paramref name="StartActivity"/> as a child execution,
+    /// then come back for the next emitted value.
+    ///
+    /// The answer on the <c>Emitted</c> path, where the rules are dispatches rather than
+    /// transitions. Distinct from <see cref="Goto"/> because it leaves this workflow: nothing the
+    /// dispatched document does can land in this execution's flow, which is what stops "ran out of
+    /// transitions" meaning one thing inside a handler and another outside it.
+    /// </summary>
+    public sealed record Dispatch(
+        string Workflow,
+        string StartActivity,
+        Dictionary<string, object>? Input) : TransitionDecision;
+
     /// <summary>End this path with no result of its own.</summary>
     public sealed record End : TransitionDecision;
 

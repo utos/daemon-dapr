@@ -26,7 +26,7 @@ public class EvaluateTransitionActivity(
 
         var decision = interpreter.Advance(
             session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Outcome,
-            input.Response, input.Error, input.DispatchedBy);
+            input.Response, input.Error);
 
         return decision switch
         {
@@ -39,13 +39,21 @@ public class EvaluateTransitionActivity(
             // own: the driver appends it and then continues, so one evaluation still yields one
             // transition.
             TransitionDecision.Emit emit => new EvaluateTransitionOutput(
-                emit.ActivityName, emit.Input, null, emit.Value),
+                emit.ActivityName, emit.Input, null, EmittedValue: emit.Value),
+
+            // A handler to run before the next value is taken. Carries no next activity: the
+            // driver goes back to the call activity once the dispatched execution ends, and
+            // deciding that here would mean naming the call activity twice.
+            TransitionDecision.Dispatch dispatch => new EvaluateTransitionOutput(
+                null, null, null,
+                Dispatch: new DispatchTarget(
+                    dispatch.Workflow, dispatch.StartActivity, dispatch.Input)),
 
             // Nothing handled the failure, so the driver must rethrow rather than continue.
             // Matched explicitly: folding it into the fallback below would turn an unhandled
             // failure into a normally completed run.
             TransitionDecision.Propagate => new EvaluateTransitionOutput(
-                null, null, null, null, Unhandled: true),
+                null, null, null, Unhandled: true),
 
             _ => new EvaluateTransitionOutput(ReservedKeywords.End, null, null)
         };
@@ -55,11 +63,6 @@ public class EvaluateTransitionActivity(
 /// <param name="Outcome">
 /// Which rule list applies. Only the driver can tell these apart — an emitted value and a result
 /// are identical by value, and a failure carries neither.
-/// </param>
-/// <param name="DispatchedBy">
-/// The call activity whose <c>on_emitted</c> handler this path is running, or null when it is not
-/// running one. The top of the driver's dispatch stack: a handler activity is an ordinary peer in
-/// a flat graph, so how control reached it is knowable only here.
 /// </param>
 public sealed record EvaluateTransitionInput(
     ExecutionId ExecutionId,
@@ -73,8 +76,7 @@ public sealed record EvaluateTransitionInput(
     // Plain ints, strings and a string map — no converter needed, unlike ActivityOutput, which
     // carries arbitrary workflow values.
     HttpResponseContext? Response = null,
-    WorkflowErrorContext? Error = null,
-    string? DispatchedBy = null);
+    WorkflowErrorContext? Error = null);
 
 /// <param name="EmittedValue">
 /// What an <c>emit</c> action produced, to be appended to the execution's output stream before
@@ -86,12 +88,25 @@ public sealed record EvaluateTransitionInput(
 /// a flag rather than as a null <paramref name="NextActivityName"/> because "go nowhere" already
 /// means the run finished normally, and the two outcomes must not be confusable.
 /// </param>
+/// <param name="Dispatch">
+/// The document to run for the emitted value just consumed. Set only on the emitted path, and
+/// mutually exclusive with <paramref name="NextActivityName"/> — a dispatch leaves this workflow,
+/// so there is no activity here to go to next.
+/// </param>
 public sealed record EvaluateTransitionOutput(
     string? NextActivityName,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? MappedInput,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? ReturnValue,
+    DispatchTarget? Dispatch = null,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? EmittedValue = null,
     bool Unhandled = false);
+
+/// <summary>Which document an emitted value is handed to, and where it starts.</summary>
+public sealed record DispatchTarget(
+    string Workflow,
+    string StartActivity,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? Input);

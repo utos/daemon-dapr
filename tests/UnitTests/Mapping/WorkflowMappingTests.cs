@@ -103,9 +103,10 @@ public class WorkflowMappingTests
                 {
                     OnEmitted =
                     {
-                        new Wire.TransitionRule
+                        new Wire.DispatchRule
                         {
-                            Transition = new Wire.TransitionTarget { Name = "await-sub" }
+                            Workflow = "acme/handler:1.0.0",
+                            StartActivity = "ingest"
                         }
                     }
                 }
@@ -123,13 +124,15 @@ public class WorkflowMappingTests
                     {
                         Name = "pricing",
                         Condition = "{{ input.enabled }}",
-                        Target = new Wire.TransitionTarget { Name = "call-sub" },
+                        Workflow = "acme/pricer:1.0.0",
+                        StartActivity = "quote",
                         ForEach = new Wire.ForEachConfig { Collection = "{{ input.addons }}", Alias = "addon" }
                     },
                     new Wire.PromiseBranch
                     {
                         Name = "plain",
-                        Target = new Wire.TransitionTarget { Name = "call-sub" }
+                        Workflow = "acme/pricer:1.0.0",
+                        StartActivity = "quote"
                     }
                 }
             }
@@ -185,7 +188,10 @@ public class WorkflowMappingTests
     {
         var config = new Wire.PromiseActivityConfig
         {
-            Branches = { new Wire.PromiseBranch { Name = "a", Target = new Wire.TransitionTarget { Name = "x" } } }
+            Branches =
+            {
+                new Wire.PromiseBranch { Name = "a", Workflow = "acme/leg:1.0.0", StartActivity = "x" }
+            }
         };
 
         configure(config);

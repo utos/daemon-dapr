@@ -34,30 +34,18 @@ namespace Execution.Infrastructure.Dapr;
 /// Live output subscriptions — the call activity that opened each, and the child producing for
 /// it. Re-entering that activity resumes the subscription rather than starting a second child.
 /// </param>
+/// <param name="DispatchSequence">
+/// How many on_emitted handlers this execution has dispatched. Carried across continuations
+/// because it is what keeps handler ids unique: the orchestrator's own GUID sequence restarts
+/// with the history, so a counter that lived only in the segment would re-mint an id a live
+/// child already holds. See <see cref="DeterministicExecutionId"/>.
+/// </param>
 /// <param name="OutputEventName">
 /// Set on a child whose caller consumes what it emits, and is both the fact and the address: the
 /// channel to hand each value to <see cref="ParentExecutionId"/> on. Null means no privileged
 /// consumer, so an emit completes as soon as the entry is durable rather than waiting for an
 /// acknowledgement that would never come. Decided once, at start, from the caller's
 /// <c>on_emitted</c> — never by asking at emit time who is listening, which could not replay.
-/// </param>
-/// <param name="DispatchStack">
-/// The call activities whose <c>on_emitted</c> handlers this path is currently inside, innermost
-/// last. A handler that runs out of rules has finished, and control returns to the top of this
-/// stack for the next value — which is what makes an explicit back-edge optional.
-/// <para>
-/// A stack rather than a single name because handlers nest: a handler may itself enter a second
-/// consuming <c>workflow.call</c>, and when the inner one finishes the outer subscription must
-/// still be there to go back to. It is not about concurrency — one cursor means one handler runs
-/// at a time — but depth is real.
-/// </para>
-/// <para>
-/// It has to live in the envelope rather than as a segment local. Re-entering the call activity
-/// makes <see cref="ExecutionCursor.Enter"/> fail to add a name it has already seen, which sets
-/// <c>LoopDetected</c>, which is exactly what <see cref="ExecutionCursor.ShouldContinueAsNew"/>
-/// requires — so every consumer loop continues as new, and a stack held only in memory would be
-/// empty on the other side.
-/// </para>
 /// </param>
 public record WorkflowExecutorInput(
     ExecutionId ExecutionId,
@@ -72,7 +60,7 @@ public record WorkflowExecutorInput(
     int ContinueAsNewAfterTransitions = 100,
     Dictionary<string, ExecutionId>? Subscriptions = null,
     string? OutputEventName = null,
-    List<string>? DispatchStack = null)
+    int DispatchSequence = 0)
 {
     /// <summary>
     /// The envelope for the next segment of this execution — everything that must survive a
@@ -98,7 +86,7 @@ public record WorkflowExecutorInput(
         ExecutionCursor cursor,
         DateTime startedAt,
         Dictionary<string, ExecutionId> subscriptions,
-        List<string> dispatchStack) =>
+        int dispatchSequence) =>
         this with
         {
             StartActivity = activityName,
@@ -107,7 +95,7 @@ public record WorkflowExecutorInput(
             LoopDetected = cursor.LoopDetected,
             StartedAt = startedAt,
             Subscriptions = subscriptions,
-            DispatchStack = [..dispatchStack]
+            DispatchSequence = dispatchSequence
         };
 }
 
@@ -167,9 +155,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         var subscriptions = new Dictionary<string, ExecutionId>(
             input.Subscriptions ?? [], StringComparer.Ordinal);
 
-        // Which handlers this path is inside, innermost last. Pushed when a consumed value is
-        // dispatched to a handler, popped when the path comes back.
-        var dispatchStack = new List<string>(input.DispatchStack ?? []);
+        // Per-segment, and written back at every continuation. See DispatchSequence.
+        var dispatchSequence = input.DispatchSequence;
 
         try
         {
@@ -212,7 +199,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     context.ContinueAsNew(
                         input.ContinueFrom(
                             currentActivityName, currentActivityInput, continuation.Cursor,
-                            startTime, subscriptions, dispatchStack),
+                            startTime, subscriptions, dispatchSequence),
                         preserveUnprocessedEvents: true);
 
                     return null;
@@ -272,8 +259,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     nameof(EvaluateTransitionActivity),
                     new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
                         run.ActivityName, currentActivityInput, outcome.Output, outcomeKind,
-                        outcome.Response, activityError,
-                        dispatchStack.Count > 0 ? dispatchStack[^1] : null));
+                        outcome.Response, activityError));
 
                 // No rule matched the failure, so it was never handled — rethrow it as it was,
                 // rather than letting the run fall through to a normal completion.
@@ -323,28 +309,19 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     break;
                 }
 
-                // Track which handler the path is inside, so that running out of rules can mean
-                // "this handler is done" rather than "the run is over". Both edges are decided
-                // here, and both before the advance, so the envelope written at ContinueAsNew —
-                // which happens at the *top* of a later lap — always reflects a settled depth.
-                //
-                // A dispatch is an emitted value going somewhere other than back to the call
-                // activity. Going straight back is an author's own back-edge: nothing was entered,
-                // so there is nothing to push, and such a workflow behaves exactly as it did
-                // before any of this existed.
-                if (outcomeKind == ActivityOutcomeKind.Emitted
-                    && transition.NextActivityName != null
-                    && !string.Equals(transition.NextActivityName, run.ActivityName,
-                        StringComparison.Ordinal))
-                    dispatchStack.Add(run.ActivityName);
+                // A handler for the value just consumed. It is a document, so this runs it as a
+                // child execution to termination and then comes straight back to the call
+                // activity for the next value — the handler decides nothing about where this
+                // workflow goes, which is the whole point of it being a document.
+                if (transition.Dispatch != null)
+                {
+                    await RunHandlerAsync(context, logger, input, run.ActivityName,
+                        transition.Dispatch, dispatchSequence++, logExecutionId);
 
-                // And the path is back at the call activity it was dispatched from — whether the
-                // interpreter sent it there for want of a matching rule, or the author wrote the
-                // transition by hand. Either way that handler is finished.
-                else if (dispatchStack.Count > 0
-                         && string.Equals(transition.NextActivityName, dispatchStack[^1],
-                             StringComparison.Ordinal))
-                    dispatchStack.RemoveAt(dispatchStack.Count - 1);
+                    currentActivityName = run.ActivityName;
+                    currentActivityInput = null;
+                    continue;
+                }
 
                 currentActivityName = transition.NextActivityName;
                 currentActivityInput = transition.MappedInput;
@@ -641,6 +618,104 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             new DeleteOutputStreamInput(childExecutionId));
 
         return ActivityOutcome.Completed(childOutput);
+    }
+
+    /// <summary>
+    /// Runs one <c>on_emitted</c> handler to termination, relaying anything it emits.
+    /// <para>
+    /// The handler is a document, so it is a child execution like any other — but a *consuming*
+    /// one, which is what makes relaying fall out rather than needing a rule. It is told to report
+    /// on <see cref="OutputEvents.ForHandler"/>, so each value it emits arrives here, is appended
+    /// to <em>this</em> execution's stream and handed to <em>this</em> execution's caller. A value
+    /// emitted inside a handler therefore comes out of the consumer, exactly as it did when the
+    /// handler ran inline — the three-level relay depends on that and would otherwise have broken
+    /// silently when the handler moved into its own execution.
+    /// </para>
+    /// <para>
+    /// Every wait here is on something further up the chain — our caller acknowledges us before we
+    /// acknowledge the handler, and only then does the producer get its acknowledgement. The waits
+    /// form a chain rather than a cycle, which is why this cannot deadlock however deep the
+    /// relay goes.
+    /// </para>
+    /// <para>
+    /// The handler's terminal result is discarded. A handler has one way to say something and it
+    /// is to emit; a result would be a second, and would have to mean something different from
+    /// the emission it sits beside.
+    /// </para>
+    /// </summary>
+    private static async Task RunHandlerAsync(
+        WorkflowContext context,
+        ILogger logger,
+        WorkflowExecutorInput input,
+        string callActivityName,
+        DispatchTarget dispatch,
+        int dispatchSequence,
+        ExecutionId logExecutionId)
+    {
+        // Not context.NewGuid(): its counter restarts on continue-as-new and would re-mint the
+        // id the live producer child already holds. See DeterministicExecutionId.
+        var handlerExecutionId = DeterministicExecutionId.For(
+            input.ExecutionId, callActivityName, dispatchSequence);
+
+        logger.LogInformation(
+            "Dispatching '{HandlerWorkflow}' from '{HandlerStartActivity}' as {HandlerExecutionId} "
+            + "to handle a value from '{WorkflowActivity}' (execution {WorkflowExecutionId})",
+            dispatch.Workflow, dispatch.StartActivity, handlerExecutionId, callActivityName,
+            logExecutionId);
+
+        await context.CallActivityAsync(nameof(SaveChildContextActivity),
+            new SaveChildContextInput(input.ExecutionId,
+                [new ChildContextSpec(handlerExecutionId, dispatch.Workflow, dispatch.Input)]));
+
+        var handlerEventName = OutputEvents.ForHandler(callActivityName);
+
+        // Deliberately not awaited, for the same reason the producer's task is not: the handler
+        // reports through events, and this method may be re-entered after a continue-as-new that
+        // no task survives.
+        _ = context.CallChildWorkflowAsync<object?>(
+            nameof(WorkflowExecutor),
+            new WorkflowExecutorInput(handlerExecutionId, dispatch.Workflow,
+                dispatch.StartActivity, input.ExecutionId,
+                ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions,
+                OutputEventName: handlerEventName),
+            new ChildWorkflowTaskOptions(handlerExecutionId.ToString()));
+
+        while (true)
+        {
+            var message = await context.WaitForExternalEventAsync<ChildOutputMessage>(handlerEventName);
+
+            if (message.Kind != ChildOutputKind.Value)
+            {
+                // Terminal either way. The handler's own failure is the consumer's failure: it was
+                // dispatched to process this value, and swallowing that would drop the value and
+                // carry on as if it had been handled.
+                await context.CallActivityAsync(nameof(DeleteOutputStreamActivity),
+                    new DeleteOutputStreamInput(handlerExecutionId));
+
+                if (message.Kind == ChildOutputKind.Error)
+                    throw new InvalidOperationException(
+                        $"Emission handler '{dispatch.Workflow}' dispatched from activity "
+                        + $"'{callActivityName}' failed: {message.ErrorMessage}");
+
+                return;
+            }
+
+            await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
+                new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Value, message.Value));
+
+            if (input.OutputEventName != null)
+            {
+                await context.CallActivityAsync(nameof(RaiseChildOutputActivity),
+                    new RaiseChildOutputInput(
+                        input.ParentExecutionId!.Value, input.OutputEventName,
+                        new ChildOutputMessage(ChildOutputKind.Value, message.Value)));
+
+                await context.WaitForExternalEventAsync<bool>(OutputEvents.Consumed);
+            }
+
+            await context.CallActivityAsync(nameof(AckChildOutputActivity),
+                new AckChildOutputInput(handlerExecutionId));
+        }
     }
 
     /// <summary>

@@ -17,9 +17,11 @@ public class PromiseExpansionTests
     }
 
     [Fact]
-    public void Static_branches_resolve_to_their_targets_sub_workflow()
+    public void Static_branches_dispatch_the_documents_they_name()
     {
-        var graph = GraphWith(Wf.Branch("pricing", "price"), Wf.Branch("shipping", "ship"));
+        var graph = GraphWith(
+            Wf.Branch("pricing", "quote", workflow: "pricing:1.0.0"),
+            Wf.Branch("shipping", "estimate", workflow: "shipping:1.0.0"));
 
         var expansion = _interpreter.ExpandPromise(Wf.Session(graph), "fan", null);
 
@@ -32,14 +34,15 @@ public class PromiseExpansionTests
 
         Assert.Equal("shipping", expansion.Branches[1].BranchName);
         Assert.Equal("shipping:1.0.0", expansion.Branches[1].WorkflowKey);
+        Assert.Equal("estimate", expansion.Branches[1].StartActivity);
     }
 
     [Fact]
     public void A_branch_whose_condition_is_false_is_not_started()
     {
         var graph = GraphWith(
-            Wf.Branch("pricing", "price", condition: "{{ input.wantPricing }}"),
-            Wf.Branch("shipping", "ship"));
+            Wf.Branch("pricing", "quote", condition: "{{ input.wantPricing }}"),
+            Wf.Branch("shipping", "estimate"));
 
         var expansion = _interpreter.ExpandPromise(
             Wf.Session(graph), "fan", new Dictionary<string, object> { ["wantPricing"] = false });
@@ -48,10 +51,10 @@ public class PromiseExpansionTests
     }
 
     [Fact]
-    public void A_for_each_branch_expands_once_per_item_with_an_indexed_name()
+    public void A_for_each_branch_expands_once_per_item()
     {
         var graph = GraphWith(Wf.Branch(
-            "addon", "price",
+            "addon", "quote",
             input: Wf.Fields(("sku", "{{ item.sku }}")),
             forEachCollection: "{{ input.addons }}"));
 
@@ -66,6 +69,8 @@ public class PromiseExpansionTests
             session, "fan", new Dictionary<string, object> { ["addons"] = addons });
 
         Assert.Equal(2, expansion.Branches.Count);
+        // A literal name renders to itself every time, so the ordinal fallback is what keeps the
+        // two expansions apart. Unchanged behaviour, and why forEach needs no migration.
         Assert.Equal("addon_0", expansion.Branches[0].BranchName);
         Assert.Equal("addon_1", expansion.Branches[1].BranchName);
         Assert.Equal("a1", expansion.Branches[0].Input!["sku"]);
@@ -73,9 +78,54 @@ public class PromiseExpansionTests
     }
 
     [Fact]
+    public void A_templated_branch_name_is_rendered_per_item()
+    {
+        // The proto has always documented `{{ alias.x }}` here, and the daemon has never honoured
+        // it: names were built from the raw string plus `_{index}`, so a fixture authoring
+        // `addon-{{ item.sku }}` produced the literal key `addon-{{ item.sku }}_0`. Ordinals are
+        // gone with it — `addon-SKU-a1` says which expansion failed and `addon_0` does not.
+        var graph = GraphWith(Wf.Branch(
+            "addon-{{ item.sku }}", "quote",
+            forEachCollection: "{{ input.addons }}"));
+
+        var addons = new List<object>
+        {
+            new Dictionary<string, object> { ["sku"] = "a1" },
+            new Dictionary<string, object> { ["sku"] = "b2" }
+        };
+
+        var expansion = _interpreter.ExpandPromise(
+            Wf.Session(graph), "fan", new Dictionary<string, object> { ["addons"] = addons });
+
+        Assert.Equal(["addon-a1", "addon-b2"], expansion.Branches.Select(b => b.BranchName));
+    }
+
+    [Fact]
+    public void A_templated_name_that_repeats_falls_back_to_the_ordinal()
+    {
+        // Within one expansion the ordinal still settles it, exactly as for a literal name. The
+        // alternative — failing the promise — would be a run-time error on a document the shared
+        // validator accepts, which is the divergence this whole change exists to close.
+        var graph = GraphWith(Wf.Branch(
+            "addon-{{ item.sku }}", "quote",
+            forEachCollection: "{{ input.addons }}"));
+
+        var addons = new List<object>
+        {
+            new Dictionary<string, object> { ["sku"] = "same" },
+            new Dictionary<string, object> { ["sku"] = "same" }
+        };
+
+        var expansion = _interpreter.ExpandPromise(
+            Wf.Session(graph), "fan", new Dictionary<string, object> { ["addons"] = addons });
+
+        Assert.Equal(["addon-same_0", "addon-same_1"], expansion.Branches.Select(b => b.BranchName));
+    }
+
+    [Fact]
     public void A_for_each_branch_over_an_empty_collection_starts_nothing()
     {
-        var graph = GraphWith(Wf.Branch("addon", "price", forEachCollection: "{{ input.addons }}"));
+        var graph = GraphWith(Wf.Branch("addon", "quote", forEachCollection: "{{ input.addons }}"));
 
         var expansion = _interpreter.ExpandPromise(
             Wf.Session(graph), "fan", new Dictionary<string, object> { ["addons"] = new List<object>() });
@@ -87,7 +137,7 @@ public class PromiseExpansionTests
     public void The_alias_is_scoped_to_the_item_and_does_not_shadow_input_or_env()
     {
         var graph = GraphWith(Wf.Branch(
-            "addon", "price",
+            "addon", "quote",
             input: Wf.Fields(("sku", "{{ item }}"), ("order", "{{ input.orderId }}"), ("stage", "{{ env.stage }}")),
             forEachCollection: "{{ input.skus }}"));
 
@@ -110,7 +160,9 @@ public class PromiseExpansionTests
     {
         // Expansion has no non-deterministic ingredient — no ids, no clock — which is what
         // lets the driver treat its result as replayable.
-        var graph = GraphWith(Wf.Branch("pricing", "price"), Wf.Branch("shipping", "ship"));
+        var graph = GraphWith(
+            Wf.Branch("pricing", "quote", workflow: "pricing:1.0.0"),
+            Wf.Branch("shipping", "estimate", workflow: "shipping:1.0.0"));
         var session = Wf.Session(graph);
 
         var first = _interpreter.ExpandPromise(session, "fan", null);
@@ -120,25 +172,11 @@ public class PromiseExpansionTests
     }
 
     [Fact]
-    public void A_branch_pointing_at_a_missing_activity_is_rejected()
+    public void A_branch_may_dispatch_the_document_it_is_declared_in()
     {
-        var graph = GraphWith(Wf.Branch("pricing", "nowhere"));
-
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => _interpreter.ExpandPromise(Wf.Session(graph), "fan", null));
-
-        Assert.Equal("Branch target activity 'nowhere' not found in workflow", ex.Message);
-    }
-
-    [Fact]
-    public void A_branch_pointing_at_a_plain_activity_runs_this_workflow_from_there()
-    {
-        // Every branch is a child execution — that is how the driver fans out, not a shape the
-        // author has to arrange. A workflow-kind target names some *other* workflow to run; any
-        // other target is the work itself, so the branch runs this same workflow from that
-        // activity. Requiring a workflow.call here made the daemon throw on documents the shared
-        // validator accepts: PromiseBranch.target asks only "which activity to start", and no
-        // UTOS rule constrains its kind.
+        // What `workflow: self` becomes once the CLI has resolved it. Recursive and nested fan-out
+        // rest on this: a branch may re-enter the promise activity itself, and the cycle check
+        // never sees it because self never enters the dependency graph.
         var graph = Wf.Graph(
             ("fan", Wf.Promise(PromiseMode.All, 0, [Wf.Branch("pricing", "fetch")])),
             ("fetch", Wf.Http("https://example.com")));
@@ -149,19 +187,6 @@ public class PromiseExpansionTests
         Assert.Equal("pricing", branch.BranchName);
         Assert.Equal("test:1.0.0", branch.WorkflowKey);
         Assert.Equal("fetch", branch.StartActivity);
-    }
-
-    [Fact]
-    public void A_workflow_kind_target_still_resolves_to_the_workflow_it_names()
-    {
-        // The other half of the same rule, so relaxing it cannot quietly redirect a sub-workflow
-        // branch at the parent.
-        var graph = GraphWith(Wf.Branch("pricing", "price"));
-
-        var branch = Assert.Single(_interpreter.ExpandPromise(Wf.Session(graph), "fan", null).Branches);
-
-        Assert.Equal("pricing:1.0.0", branch.WorkflowKey);
-        Assert.Equal("quote", branch.StartActivity);
     }
 
     // This suite used to own both "every documented mode parses" and "an unknown mode is

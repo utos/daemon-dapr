@@ -17,6 +17,17 @@ public static class OutputEvents
     public static string For(string activityName) => $"child-output:{activityName}";
 
     /// <summary>
+    /// The channel an <c>on_emitted</c> handler reports on, distinct from the producer's.
+    /// <para>
+    /// A consumer holds two subscriptions while a handler runs — the producer it is taking values
+    /// from, and the handler it dispatched for the current one. Sharing a channel would let the
+    /// handler's relayed emission satisfy the wait meant for the producer's next value, and the
+    /// two are indistinguishable once they are both a <see cref="ChildOutputMessage"/>.
+    /// </para>
+    /// </summary>
+    public static string ForHandler(string activityName) => $"handler-output:{activityName}";
+
+    /// <summary>
     /// The acknowledgement, back to the child. Constant because it is addressed to a single child
     /// instance, and a child has exactly one caller.
     /// </summary>

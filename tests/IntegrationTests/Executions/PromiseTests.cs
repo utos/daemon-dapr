@@ -38,12 +38,10 @@ public class PromiseTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("promise-all-parent", fixture.MockBaseUrl)
             // Branch target activities (workflow-type) in the parent workflow
-            .WorkflowCall("call-wf1", "child-wf1", "http-step")
-            .WorkflowCall("call-wf2", "child-wf2", "http-step")
             // Promise activity references those workflow-call activities
             .Promise("fan-out", "all")
-            .Branch("branch1", "call-wf1")
-            .Branch("branch2", "call-wf2")
+            .Branch("branch1", "child-wf1", "http-step")
+            .Branch("branch2", "child-wf2", "http-step")
             .OnResult(promiseReturnStruct)
             // Dependent workflows
             .AddDependentWorkflow("child-wf1", child =>
@@ -97,11 +95,9 @@ public class PromiseTests(DaemonTestFixture fixture)
                 .WithBody("Internal Server Error"));
 
         var request = new TestWorkflowBuilder("promise-allfail-parent", fixture.MockBaseUrl)
-            .WorkflowCall("call-ok", "child-ok", "http-step")
-            .WorkflowCall("call-fail", "child-fail", "http-step")
             .Promise("fan-out", "all")
-            .Branch("ok-branch", "call-ok")
-            .Branch("fail-branch", "call-fail")
+            .Branch("ok-branch", "child-ok", "http-step")
+            .Branch("fail-branch", "child-fail", "http-step")
             .OnSuccess("end")
             .AddDependentWorkflow("child-ok", child => { child.HttpGet("http-step", "/promise-allfail-ok"); })
             .AddDependentWorkflow("child-fail", child => { child.HttpGet("http-step", "/promise-allfail-500"); })
@@ -153,11 +149,9 @@ public class PromiseTests(DaemonTestFixture fixture)
         returnStruct.Fields.Add("result", Value.ForString("{{ output.result }}"));
 
         var request = new TestWorkflowBuilder("promise-any-parent", fixture.MockBaseUrl)
-            .WorkflowCall("call-fail", "child-any-fail", "http-step")
-            .WorkflowCall("call-ok", "child-any-ok", "http-step")
             .Promise("fan-out", "any")
-            .Branch("fail-branch", "call-fail")
-            .Branch("ok-branch", "call-ok")
+            .Branch("fail-branch", "child-any-fail", "http-step")
+            .Branch("ok-branch", "child-any-ok", "http-step")
             .OnSuccess("end")
             .AddDependentWorkflow("child-any-fail", child => { child.HttpGet("http-step", "/promise-any-fail"); })
             .AddDependentWorkflow("child-any-ok", child =>
@@ -205,11 +199,9 @@ public class PromiseTests(DaemonTestFixture fixture)
         returnStruct.Fields.Add("result", Value.ForString("{{ output.result }}"));
 
         var request = new TestWorkflowBuilder("promise-race-parent", fixture.MockBaseUrl)
-            .WorkflowCall("call-a", "child-race-a", "http-step")
-            .WorkflowCall("call-b", "child-race-b", "http-step")
             .Promise("fan-out", "race")
-            .Branch("racer-a", "call-a")
-            .Branch("racer-b", "call-b")
+            .Branch("racer-a", "child-race-a", "http-step")
+            .Branch("racer-b", "child-race-b", "http-step")
             .OnSuccess("end")
             .AddDependentWorkflow("child-race-a", child =>
             {
@@ -257,9 +249,9 @@ public class PromiseTests(DaemonTestFixture fixture)
         branchInput.Fields.Add("itemValue", Value.ForString("{{ item }}"));
 
         var request = new TestWorkflowBuilder("promise-foreach-parent", fixture.MockBaseUrl)
-            .WorkflowCall("call-item-wf", "child-foreach", "http-step")
             .Promise("fan-out", "all")
-            .ForEachBranch("item", "call-item-wf", "{{ input.items }}", "item", branchInput)
+            .ForEachBranch("item", "child-foreach", "http-step",
+                "{{ input.items }}", "item", branchInput)
             .OnSuccess("end")
             .AddDependentWorkflow("child-foreach", child =>
             {

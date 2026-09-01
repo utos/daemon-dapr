@@ -14,6 +14,13 @@ namespace UnitTests.Support;
 /// </summary>
 internal static class Wf
 {
+    /// <summary>
+    /// The identity <see cref="Graph"/> builds under, and so what a dispatch of the document
+    /// under test resolves to. Bundles carry canonical identities — <c>self</c> is a source-format
+    /// word the CLI has already resolved — so this is what a daemon-side fixture writes.
+    /// </summary>
+    public const string SelfKey = "test:1.0.0";
+
     public static WorkflowGraph Graph(params (string Name, WorkflowActivity Activity)[] activities)
     {
         var workflow = new Workflow(
@@ -97,7 +104,7 @@ internal static class Wf
     public static WorkflowActivity ConsumingCall(
         string workflowKey,
         string startActivity,
-        TransitionRule[] onEmitted,
+        DispatchRule[] onEmitted,
         params TransitionRule[] onSuccess)
     {
         return new WorkflowActivity(
@@ -118,17 +125,30 @@ internal static class Wf
 
     public static PromiseBranch Branch(
         string name,
-        string targetActivity,
+        string startActivity,
         ValueMap? input = null,
         string? condition = null,
         string? forEachCollection = null,
-        string forEachAlias = "item")
+        string forEachAlias = "item",
+        string workflow = SelfKey)
     {
         return new PromiseBranch(
             name,
-            new TransitionTarget(targetActivity, input),
+            workflow,
+            startActivity,
+            input,
             condition,
             forEachCollection == null ? null : new ForEachConfig(forEachCollection, forEachAlias));
+    }
+
+    /// <summary>An on_emitted rule: hand the value to a document.</summary>
+    public static DispatchRule Dispatch(
+        string startActivity,
+        ValueMap? input = null,
+        string? condition = null,
+        string workflow = SelfKey)
+    {
+        return new DispatchRule(workflow, startActivity, input, condition);
     }
 
     // ---- transitions ---------------------------------------------------

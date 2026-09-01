@@ -26,7 +26,9 @@ namespace IntegrationTests.Executions;
 [Collection(DaemonTestCollection.Name)]
 public class StreamingConsumerTests(DaemonTestFixture fixture)
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(90);
+    // Raised from 90s: a handler is a child execution now, so each consumed value costs a
+    // context save, a child start, a rendezvous and a stream delete on top of the handler work.
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(240);
 
     /// <summary>Emits 1..<paramref name="values"/>, then returns how many it produced.</summary>
     private static void Producer(TestWorkflowBuilder child, string path, int values)
@@ -41,8 +43,18 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
     }
 
     /// <summary>The handler path a consumed value takes, and back to the call activity.</summary>
-    private static TransitionRule[] HandleThenResume(string handlerActivity) =>
-        [new TransitionRule { Transition = new TransitionTarget { Name = handlerActivity } }];
+    /// <summary>
+    /// Hand each value to <paramref name="startActivity"/> of the handler document. A handler is
+    /// always another document — `self` is rejected here (UTOS-S011) — which is what makes it
+    /// structurally unable to transition back into the consumer's flow and open a second producer.
+    /// </summary>
+    private static DispatchRule[] HandleThenResume(string startActivity) =>
+    [
+        new DispatchRule { Workflow = HandlerWorkflow, StartActivity = startActivity }
+    ];
+
+    private const string HandlerWorkflow = "handler-workflow";
+    private const string RelayWorkflow = "relay-workflow";
 
     [Fact]
     public async Task Each_emitted_value_reaches_the_callers_handler_in_order()
@@ -59,9 +71,9 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
             // The handler marks each value, then transitions back to the call activity — which is
             // what both acknowledges the value and asks for the next.
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
-            .OnSuccess("watch")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 3))
             .Build("watch");
 
@@ -109,9 +121,9 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: HandleThenResume("handle"))
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
-            .OnSuccess("watch")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, values))
             .Build("watch");
 
@@ -158,11 +170,11 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: HandleThenResume("slow"))
             .OnResult(Fields(("done", Value.ForBool(true))))
-            .Timer("slow", TimeSpan.FromSeconds(1))
-            .OnSuccess("handle")
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
-            .OnSuccess("watch")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .Timer("slow", TimeSpan.FromSeconds(1))
+                .OnSuccess("handle")
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 3))
             .Build("watch");
 
@@ -211,19 +223,25 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .WorkflowCall("watch-middle", "middle-workflow", "watch-child",
                 onEmitted: HandleThenResume("handle"))
             .OnResult(Fields(("done", Value.ForString("{{ output.relayed }}"))))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
-            .OnSuccess("watch-middle")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("middle-workflow", middle => middle
                 .WorkflowCall("watch-child", "producer-workflow", "produce",
                     input: Fields(("n", Value.ForNumber(1))),
-                    onEmitted: HandleThenResume("relay"))
-                .OnResult(Fields(("relayed", Value.ForString("{{ output.produced }}"))))
+                    onEmitted: [new DispatchRule
+                    {
+                        Workflow = RelayWorkflow,
+                        StartActivity = "relay"
+                    }])
+                .OnResult(Fields(("relayed", Value.ForString("{{ output.produced }}")))))
+            // The middle document's handler, which is where the relay happens. Emit-and-end: hand
+            // the value up, then finish. Finishing is what acknowledges the producer and asks for
+            // the next value; `emit` still needs a target (UTOS-T004), and `end` means "done".
+            .AddDependentWorkflow(RelayWorkflow, relay => relay
                 .HttpGet("relay", relayPath)
                 .WithHeader("X-Value", "{{ input.n }}")
-                // Emit-and-continue: hand the value up, then go back to the call activity, which
-                // is what acknowledges the child and asks it for the next one.
-                .OnEmit(Fields(("n", Value.ForString("{{ input.n }}"))), "watch-child"))
+                .OnEmit(Fields(("n", Value.ForString("{{ input.n }}"))), "end"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, values))
             .Build("watch-middle");
 
@@ -267,9 +285,9 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .WorkflowCall("watch", "producer-workflow", "produce",
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: HandleThenResume("handle"))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
-            .OnSuccess("watch")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}"))
             .AddDependentWorkflow("producer-workflow", child =>
                 child.HttpGet("produce", producePath)
                     .OnEmit(
@@ -292,15 +310,19 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
     }
 
     [Fact]
-    public async Task A_handler_that_leaves_instead_of_returning_ends_the_subscription()
+    public async Task A_handler_that_ends_finishes_only_itself()
     {
-        // How a consumer stops early, and the reason it has to be explicit. This handler takes the
-        // first value and transitions to 'end' — a rule that matched, not a rule list that ran out,
-        // so it terminates rather than going back for the next value.
+        // A handler is a document now, so `end` ends the *handler*, not the consumer. This used to
+        // be how a consumer stopped early — the handler transitioned to `end` and took the whole
+        // run with it — and that is gone, deliberately: nothing a dispatched document does can
+        // reach into the flow that dispatched it, which is the property the document boundary
+        // exists to provide.
         //
-        // At which point the producer is parked on an acknowledgement that will never arrive, and
-        // being a child orchestration does not save it: Dapr tears a child down when its parent is
-        // *cancelled*, not when its parent simply finishes. Nothing else would ever stop it.
+        // It leaves a real gap, recorded here rather than hidden. `on_emitted` rules are
+        // dispatches, so a consumer can no longer decide to stop based on what it consumed; it
+        // runs until the producer terminates. Expressing "enough" needs a spec decision (a
+        // terminal dispatch action, or a handler result the consumer reads) and is not something
+        // to invent in the daemon.
         const string producePath = "/streaming-abandon-produce";
         const string handlePath = "/streaming-abandon-handle";
         StubJson(producePath);
@@ -310,30 +332,24 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .WorkflowCall("watch", "producer-workflow", "produce",
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted: HandleThenResume("handle"))
-            .HttpGet("handle", handlePath)
-            .WithHeader("X-Value", "{{ input.n }}")
-            .OnSuccess("end")
+            .AddDependentWorkflow(HandlerWorkflow, handler => handler
+                .HttpGet("handle", handlePath)
+                .WithHeader("X-Value", "{{ input.n }}")
+                .OnSuccess("end"))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 5))
             .Build("watch");
 
         var scheduled = await fixture.ScheduleAsync(request);
-        var events = await WatchToCompletion(scheduled.Id);
+        await WatchToCompletion(scheduled.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduled.Id });
 
-        // The caller finishes rather than hanging on a producer it stopped listening to.
         Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
 
-        // It handled exactly one value and left, so the producer got nowhere near its five.
-        Assert.Equal(["1"], ValuesHandled(handlePath));
-
-        // The cancellation itself is only observable in the log: an abandoned child has no
-        // execution record of its own, so there is no status to query — and a producer parked
-        // forever and a producer terminated look identical from the outside, which is precisely
-        // why the distinction has to be asserted here rather than inferred from behaviour.
-        Assert.Contains(events, e =>
-            e.Message.Contains("Subscription at activity 'watch' was abandoned"));
+        // Every value handled, not one. The handler ending five times is five finished handlers,
+        // and the run ends when the producer does.
+        Assert.Equal(["1", "2", "3", "4", "5"], ValuesHandled(handlePath));
     }
 
     // ============================================================================
