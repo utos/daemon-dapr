@@ -5,6 +5,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
         <ProjectReference Include="../Observability.Domain/Observability.Domain.csproj"/>
         <ProjectReference Include="../Observability.Application/Observability.Application.csproj"/>
         <!-- Common.Infrastructure for the event store the probe asks whether an execution exists.
