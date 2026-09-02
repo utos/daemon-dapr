@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Requirements
+
+- **Dapr runtime 1.18.4 or later is now required**, up from 1.18.3. An `on_emitted` handler is a
+  child execution, and the driver mints its id with `WorkflowContext.NewGuid`. On earlier runtimes
+  that counter restarts with the history, so the first id minted after a continue-as-new is the one
+  the previous segment minted — and a consumer's producer survives every continuation by design, so
+  the ids collide while the earlier child is still live. Dapr then declines to start the duplicate
+  and **neither faults nor completes the parent's task**: the consumer waits forever on a rendezvous
+  that cannot happen, with one debug line and nothing else. Any consumer that outlives
+  `Execution:ContinueAsNewAfterTransitions` hits it, which is every long-running one.
+  Three upstream changes make it correct rather than one: `dapr/durabletask-dotnet` seeds the guid
+  namespace from the execution id, `dapr/durabletask-go#130` populates that id on the work item
+  (it was hardcoded `nil`, so the seeding had nothing to read), and `dapr/dapr#10400` makes a
+  genuine collision fail loudly instead of hanging. Only the second is strictly needed here; the
+  third is why a future collision from any other source is diagnosable. Released together in
+  **1.18.4** and verified against `1.18.4-rc.3`.
+  The daemon carried a workaround for one release — handler ids derived from durable state rather
+  than from `NewGuid` — which is now removed. It is not kept as a belt-and-braces measure because
+  it would mask exactly the failure this requirement exists to make visible.
+
 ### Breaking
 
 - **Dispatched work is its own document** (spec `v0.0.13`, `Utos.Workflow` pins bumped `0.0.12` →

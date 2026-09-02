@@ -34,12 +34,6 @@ namespace Execution.Infrastructure.Dapr;
 /// Live output subscriptions — the call activity that opened each, and the child producing for
 /// it. Re-entering that activity resumes the subscription rather than starting a second child.
 /// </param>
-/// <param name="DispatchSequence">
-/// How many on_emitted handlers this execution has dispatched. Carried across continuations
-/// because it is what keeps handler ids unique: the orchestrator's own GUID sequence restarts
-/// with the history, so a counter that lived only in the segment would re-mint an id a live
-/// child already holds. See <see cref="DeterministicExecutionId"/>.
-/// </param>
 /// <param name="OutputEventName">
 /// Set on a child whose caller consumes what it emits, and is both the fact and the address: the
 /// channel to hand each value to <see cref="ParentExecutionId"/> on. Null means no privileged
@@ -59,8 +53,7 @@ public record WorkflowExecutorInput(
     DateTime? StartedAt = null,
     int ContinueAsNewAfterTransitions = 100,
     Dictionary<string, ExecutionId>? Subscriptions = null,
-    string? OutputEventName = null,
-    int DispatchSequence = 0)
+    string? OutputEventName = null)
 {
     /// <summary>
     /// The envelope for the next segment of this execution — everything that must survive a
@@ -85,8 +78,7 @@ public record WorkflowExecutorInput(
         Dictionary<string, object>? activityInput,
         ExecutionCursor cursor,
         DateTime startedAt,
-        Dictionary<string, ExecutionId> subscriptions,
-        int dispatchSequence) =>
+        Dictionary<string, ExecutionId> subscriptions) =>
         this with
         {
             StartActivity = activityName,
@@ -94,8 +86,7 @@ public record WorkflowExecutorInput(
             Visited = [..cursor.Visited],
             LoopDetected = cursor.LoopDetected,
             StartedAt = startedAt,
-            Subscriptions = subscriptions,
-            DispatchSequence = dispatchSequence
+            Subscriptions = subscriptions
         };
 }
 
@@ -155,9 +146,6 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         var subscriptions = new Dictionary<string, ExecutionId>(
             input.Subscriptions ?? [], StringComparer.Ordinal);
 
-        // Per-segment, and written back at every continuation. See DispatchSequence.
-        var dispatchSequence = input.DispatchSequence;
-
         try
         {
             // Load the workflow definition once at start (avoids per-activity DB lookups)
@@ -199,7 +187,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     context.ContinueAsNew(
                         input.ContinueFrom(
                             currentActivityName, currentActivityInput, continuation.Cursor,
-                            startTime, subscriptions, dispatchSequence),
+                            startTime, subscriptions),
                         preserveUnprocessedEvents: true);
 
                     return null;
@@ -316,7 +304,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 if (transition.Dispatch != null)
                 {
                     await RunHandlerAsync(context, logger, input, run.ActivityName,
-                        transition.Dispatch, dispatchSequence++, logExecutionId);
+                        transition.Dispatch, logExecutionId);
 
                     currentActivityName = run.ActivityName;
                     currentActivityInput = null;
@@ -649,13 +637,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         WorkflowExecutorInput input,
         string callActivityName,
         DispatchTarget dispatch,
-        int dispatchSequence,
         ExecutionId logExecutionId)
     {
-        // Not context.NewGuid(): its counter restarts on continue-as-new and would re-mint the
-        // id the live producer child already holds. See DeterministicExecutionId.
-        var handlerExecutionId = DeterministicExecutionId.For(
-            input.ExecutionId, callActivityName, dispatchSequence);
+        // Replay-safe, and unique across a continuation: the orchestrator seeds its guid namespace
+        // from the execution id, which ContinueAsNew mints fresh. That was only true from Dapr
+        // 1.18.4 — before it, NewGuid restarted with the history and re-minted the id the live
+        // producer child already held, which Dapr then dropped silently and hung the run. See the
+        // Requirements section of CHANGELOG.md.
+        var handlerExecutionId = new ExecutionId(context.NewGuid());
 
         logger.LogInformation(
             "Dispatching '{HandlerWorkflow}' from '{HandlerStartActivity}' as {HandlerExecutionId} "

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text.RegularExpressions;
 using Aspire.Hosting;
 using Common.Constants;
 using Grpc.Core.Interceptors;
@@ -38,8 +40,22 @@ public class DaemonTestFixture : IAsyncLifetime
     public WireMockServer WireMockServer { get; private set; } = null!;
     public string MockBaseUrl => WireMockServer.Urls[0];
 
+    /// <summary>
+    /// The runtime the daemon requires, asserted before anything starts.
+    /// <para>
+    /// Below this, an <c>on_emitted</c> handler dispatched after a continue-as-new collides with
+    /// the still-live producer's id and Dapr drops the creation without faulting the caller — so
+    /// the consumer tests do not fail, they <em>hang</em>, once per test, for the full stream
+    /// deadline. That is a slow and thoroughly misleading way to be told to upgrade, which is why
+    /// this is a precondition rather than a note in the README.
+    /// </para>
+    /// </summary>
+    private static readonly Version MinimumDaprRuntime = new(1, 18, 4);
+
     public async Task InitializeAsync()
     {
+        AssertDaprRuntimeIsSupported();
+
         var appHost = await DistributedApplicationTestingBuilder.CreateAsync<Projects.Tools_AppHost>();
         appHost.Services.ConfigureHttpClientDefaults(clientBuilder =>
         {
@@ -91,6 +107,57 @@ public class DaemonTestFixture : IAsyncLifetime
                 .WithStatusCode(200)
                 .WithHeader("Content-Type", "application/json")
                 .WithBody("{\"status\": \"success\"}"));
+    }
+
+    /// <summary>
+    /// Reads the runtime version from the Dapr CLI, which is the binary
+    /// <c>WithDaprSidecar()</c> will launch.
+    /// <para>
+    /// Deliberately lenient about everything except a version it can read and compare: no CLI on
+    /// PATH, unexpected output, an edge or custom build — all pass. The check exists to catch the
+    /// one case worth catching, an ordinary install that is simply too old, and a precondition
+    /// that fails on unfamiliar-but-fine setups would be worse than none.
+    /// </para>
+    /// </summary>
+    private static void AssertDaprRuntimeIsSupported()
+    {
+        string output;
+
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("dapr", "--version")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            });
+
+            if (process == null) return;
+
+            output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(TimeSpan.FromSeconds(10));
+        }
+        catch (Exception)
+        {
+            // No CLI, not on PATH, not executable. Not this method's business.
+            return;
+        }
+
+        var match = Regex.Match(output, @"Runtime version:\s*(\d+)\.(\d+)\.(\d+)");
+        if (!match.Success) return;
+
+        var installed = new Version(
+            int.Parse(match.Groups[1].Value),
+            int.Parse(match.Groups[2].Value),
+            int.Parse(match.Groups[3].Value));
+
+        if (installed >= MinimumDaprRuntime) return;
+
+        throw new InvalidOperationException(
+            $"Dapr runtime {installed} is installed; the daemon requires {MinimumDaprRuntime} or "
+            + "later. On earlier runtimes an on_emitted handler dispatched after a continue-as-new "
+            + "collides with the live producer's id, and the creation is dropped without faulting "
+            + "the caller — so the consumer tests hang rather than fail. "
+            + $"Run: dapr uninstall && dapr init --runtime-version {MinimumDaprRuntime}");
     }
 
     /// <summary>
