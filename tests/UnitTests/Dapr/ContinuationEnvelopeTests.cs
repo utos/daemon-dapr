@@ -42,15 +42,13 @@ public class ContinuationEnvelopeTests
         ExecutionCursor.Start(["first", "handle"], loopDetected: true).Enter("handle").Cursor;
 
     private static WorkflowExecutorInput Continued(
-        Dictionary<string, ExecutionId>? subscriptions = null,
-        int dispatchSequence = 3) =>
+        Dictionary<string, ExecutionId>? subscriptions = null) =>
         Original().ContinueFrom(
             "handle",
             new Dictionary<string, object> { ["fresh"] = 2 },
             Cursor(),
             Started,
-            subscriptions ?? new Dictionary<string, ExecutionId> { ["watch"] = ChildId },
-            dispatchSequence);
+            subscriptions ?? new Dictionary<string, ExecutionId> { ["watch"] = ChildId });
 
     [Fact]
     public void The_next_segment_resumes_at_the_activity_the_last_one_stopped_on()
@@ -94,7 +92,7 @@ public class ContinuationEnvelopeTests
         var continued = Original() with { Subscriptions = new Dictionary<string, ExecutionId> { ["watch"] = ChildId } };
 
         var ended = continued.ContinueFrom(
-            "handle", null, Cursor(), Started, new Dictionary<string, ExecutionId>(), 0);
+            "handle", null, Cursor(), Started, new Dictionary<string, ExecutionId>());
 
         Assert.Empty(ended.Subscriptions!);
     }
@@ -136,8 +134,7 @@ public class ContinuationEnvelopeTests
             nameof(WorkflowExecutorInput.Visited),
             nameof(WorkflowExecutorInput.LoopDetected),
             nameof(WorkflowExecutorInput.StartedAt),
-            nameof(WorkflowExecutorInput.Subscriptions),
-            nameof(WorkflowExecutorInput.DispatchSequence)
+            nameof(WorkflowExecutorInput.Subscriptions)
         ];
 
         string[] carriedUnchanged =
@@ -164,17 +161,6 @@ public class ContinuationEnvelopeTests
     /// fails the way everything else on this boundary does — quietly, with a null where state
     /// used to be.
     /// </summary>
-    [Fact]
-    public void The_handler_count_carries_forward_rather_than_restarting()
-    {
-        // The one that cost a day. Handler ids are derived from this counter, and the
-        // orchestrator's own GUID sequence restarts with the history — so a counter that reset
-        // here would re-mint the id the live producer child already holds, Dapr would decline to
-        // start the handler, and the consumer would wait on a rendezvous that never happens.
-        // Silently: no exception reaches the orchestrator, the child simply never runs.
-        Assert.Equal(9, Continued(dispatchSequence: 9).DispatchSequence);
-    }
-
     [Fact]
     public void The_envelope_round_trips_through_the_Dapr_boundary()
     {
