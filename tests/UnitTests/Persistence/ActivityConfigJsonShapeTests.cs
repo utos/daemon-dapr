@@ -42,23 +42,58 @@ public class ActivityConfigJsonShapeTests
         // It decides whether the child gates on its caller, so losing it on the way to disk
         // would turn a streaming consumer into one that silently drops what it was sent.
         //
-        // A rule is a DispatchRule rather than a TransitionRule, which changed this text. That is
-        // a persisted-shape break and is called out as one in the changelog: an execution created
-        // before it rehydrates with a hole where its definition used to be, silently, because
+        // A rule is an EmissionRule carrying one of three actions, where it was first a
+        // TransitionRule and then a flat DispatchRule. Each step changed this text, and each is a
+        // persisted-shape break called out as one in the changelog: an execution created before it
+        // rehydrates with a hole where its definition used to be, silently, because
         // EventSerializer's deserialize path logs and returns null rather than throwing.
         var config = new CallActivityConfig("acme/mailbox:1.0.0", "poll",
-            OnEmitted: [new DispatchRule("acme/ingester:1.0.0", "ingest")]);
+            OnEmitted: [EmissionRule.Handles("acme/ingester:1.0.0", "ingest")]);
 
         var json = Serialize(config);
 
         Assert.Contains("""
-                        "OnEmitted":[{"Workflow":"acme/ingester:1.0.0","StartActivity":"ingest","Input":null,"Condition":null}]
+                        "OnEmitted":[{"Handle":{"Workflow":"acme/ingester:1.0.0","StartActivity":"ingest","Input":null},"Transition":null,"Result":null,"Condition":null,"HasAction":true}]
                         """, json);
 
         var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
 
-        Assert.Equal("acme/ingester:1.0.0", Assert.Single(restored.OnEmitted).Workflow);
+        Assert.Equal("acme/ingester:1.0.0", Assert.Single(restored.OnEmitted).Handle!.Workflow);
         Assert.True(restored.ConsumesOutput);
+    }
+
+    [Fact]
+    public void An_on_emitted_rule_that_leaves_the_loop_persists_its_action()
+    {
+        // The two actions that stop a consumer consuming. They share the rule's shape with a
+        // handler, so what has to survive the round trip is *which* one is set: a transition read
+        // back as a handler would dispatch the consumer's own activity name as a document.
+        //
+        // Note `HasAction`, which lands in the stream the way `Kind` and `HeaderMap` do. Left
+        // there rather than ignored, because `TransitionRule` carries the same computed property
+        // untouched and the two rules are the same idea; it is never read back.
+        var config = new CallActivityConfig("acme/mailbox:1.0.0", "poll",
+            OnEmitted:
+            [
+                EmissionRule.Goto("wrap-up", condition: "{{ output.done }}"),
+                EmissionRule.Returns(new ValueMap(new Dictionary<string, object?> { ["seen"] = true }))
+            ]);
+
+        var json = Serialize(config);
+
+        Assert.Contains("""
+                        {"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":"{{ output.done }}","HasAction":true}
+                        """, json);
+
+        Assert.Contains("""
+                        {"Handle":null,"Transition":null,"Result":{"seen":true},"Condition":null,"HasAction":true}
+                        """, json);
+
+        var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
+
+        Assert.Equal("wrap-up", restored.OnEmitted[0].Transition!.Name);
+        Assert.NotNull(restored.OnEmitted[1].Result);
+        Assert.True(restored.OnEmitted[1].Result!.TryGetValue("seen", out var seen) && (bool)seen!);
     }
 
     [Fact]

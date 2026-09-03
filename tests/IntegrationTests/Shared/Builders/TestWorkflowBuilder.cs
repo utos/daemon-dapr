@@ -63,7 +63,7 @@ public class TestWorkflowBuilder
     /// </summary>
     public ActivityBuilder WorkflowCall(string activityName, string targetWorkflow,
         string startActivity, Struct? input = null,
-        IEnumerable<DispatchRule>? onEmitted = null) =>
+        IEnumerable<EmissionRule>? onEmitted = null) =>
         SubWorkflow(activityName, targetWorkflow, startActivity, input,
             config =>
             {
@@ -230,18 +230,24 @@ public class TestWorkflowBuilder
                     if (activity.Workflow.ModeCase == WorkflowActivityConfig.ModeOneofCase.Call)
                         foreach (var rule in activity.Workflow.Call.OnEmitted)
                         {
+                            // Only a handler names a document. A transition names an activity in
+                            // the consuming workflow and a result names nothing, so neither is
+                            // resolved — the same distinction the CLI draws when it rewrites
+                            // aliases.
+                            if (rule.ActionCase != EmissionRule.ActionOneofCase.Handle) continue;
+
                             // The CLI rejects this (UTOS-S011), so a fixture that writes it is
                             // testing a document no author could build. Worth failing loudly here
                             // rather than at the far end: a handler in the consumer's own graph can
                             // transition back to the call activity, which in the handler's own
                             // execution starts a second producer instead of resuming the first —
                             // once per value, which presents as the suite hanging.
-                            if (rule.Workflow == SelfReference)
+                            if (rule.Handle.Workflow == SelfReference)
                                 throw new InvalidOperationException(
                                     "An onEmitted rule may not dispatch 'self' (UTOS-S011). "
                                     + "Give the handler its own document with AddDependentWorkflow.");
 
-                            rule.Workflow = Resolve(rule.Workflow);
+                            rule.Handle.Workflow = Resolve(rule.Handle.Workflow);
                         }
 
                     break;

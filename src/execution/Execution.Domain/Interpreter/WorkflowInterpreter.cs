@@ -111,16 +111,23 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     }
 
     /// <summary>
-    /// Which document handles this emitted value, or none.
+    /// What this emitted value does to the run: hand it to a document and take the next one, or
+    /// stop consuming — by continuing somewhere in this workflow, or by ending with a result.
     /// <para>
     /// An unmatched list is the case that made a *filtering* consumer unwritable: every condition
     /// missing on one uninteresting value used to end the run. It means "skip this value", so the
     /// answer is to go back to the call activity for the next one — the same answer an empty list
     /// gives, which is why they share a return rather than being separately special-cased.
     /// </para>
+    /// <para>
+    /// The two leaving actions are the consumer's own, evaluated here, in the consuming execution.
+    /// That is what makes them safe where the same words inside a dispatched handler would not be:
+    /// a handler runs in an execution holding no subscription, so a transition there could only
+    /// re-enter the call activity and start a *second* producer.
+    /// </para>
     /// </summary>
     private TransitionDecision DispatchEmitted(
-        IReadOnlyList<DispatchRule> rules,
+        IReadOnlyList<EmissionRule> rules,
         TemplateScope scope,
         string callActivityName,
         object? passThrough)
@@ -131,12 +138,23 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
                 && !templateEngine.Evaluate<bool>(rule.Condition, scope))
                 continue;
 
-            return new TransitionDecision.Dispatch(
-                rule.Workflow,
-                rule.StartActivity,
-                rule.Input != null
-                    ? structRenderer.Render(rule.Input, scope)
-                    : passThrough as Dictionary<string, object>);
+            return rule switch
+            {
+                { Handle: not null } => new TransitionDecision.Dispatch(
+                    rule.Handle.Workflow,
+                    rule.Handle.StartActivity,
+                    rule.Handle.Input != null
+                        ? structRenderer.Render(rule.Handle.Input, scope)
+                        : passThrough as Dictionary<string, object>),
+
+                { Transition: not null } => Goto(rule.Transition, scope, passThrough),
+
+                { Result: not null } =>
+                    new TransitionDecision.Return(structRenderer.Render(rule.Result, scope)),
+
+                _ => throw new InvalidOperationException(
+                    "Emission rule has no action set (neither handle, transition nor result)")
+            };
         }
 
         return Resume(callActivityName, passThrough);
@@ -175,7 +193,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     /// </summary>
     private static TransitionDecision Resume(string callActivityName, object? passThrough)
     {
-        return new TransitionDecision.Goto(
+        return new TransitionDecision.Resume(
             callActivityName, passThrough as Dictionary<string, object>);
     }
 

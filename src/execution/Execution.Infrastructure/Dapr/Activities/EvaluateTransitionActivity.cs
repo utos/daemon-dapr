@@ -28,12 +28,24 @@ public class EvaluateTransitionActivity(
             session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Outcome,
             input.Response, input.Error);
 
+        // Leaving is only meaningful on the emitted path — everywhere else there is no
+        // subscription to leave — so the driver is told the conclusion rather than the two facts
+        // it would otherwise have to combine.
+        var leaves = input.Outcome == ActivityOutcomeKind.Emitted
+                     && decision is TransitionDecision.Goto or TransitionDecision.Return;
+
         return decision switch
         {
-            TransitionDecision.Goto go => new EvaluateTransitionOutput(go.ActivityName, go.Input, null),
+            TransitionDecision.Goto go => new EvaluateTransitionOutput(
+                go.ActivityName, go.Input, null, LeavesSubscription: leaves),
+
+            // Back for the next value on the same subscription. Identical in shape to a Goto and
+            // deliberately not folded into it: this is the one that must *not* cancel the producer.
+            TransitionDecision.Resume resume => new EvaluateTransitionOutput(
+                resume.ActivityName, resume.Input, null),
 
             TransitionDecision.Return result => new EvaluateTransitionOutput(
-                ReservedKeywords.End, null, result.Value),
+                ReservedKeywords.End, null, result.Value, LeavesSubscription: leaves),
 
             // The emitted value rides alongside the target rather than becoming a step of its
             // own: the driver appends it and then continues, so one evaluation still yields one
@@ -93,6 +105,11 @@ public sealed record EvaluateTransitionInput(
 /// mutually exclusive with <paramref name="NextActivityName"/> — a dispatch leaves this workflow,
 /// so there is no activity here to go to next.
 /// </param>
+/// <param name="LeavesSubscription">
+/// The consumer is done consuming: this value's rule was a <c>transition</c> or a <c>result</c>,
+/// so the producer is cancelled now rather than whenever this run happens to end — which, for the
+/// long-running consumer the two actions exist to serve, could be much later or never.
+/// </param>
 public sealed record EvaluateTransitionOutput(
     string? NextActivityName,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
@@ -102,7 +119,8 @@ public sealed record EvaluateTransitionOutput(
     DispatchTarget? Dispatch = null,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? EmittedValue = null,
-    bool Unhandled = false);
+    bool Unhandled = false,
+    bool LeavesSubscription = false);
 
 /// <summary>Which document an emitted value is handed to, and where it starts.</summary>
 public sealed record DispatchTarget(

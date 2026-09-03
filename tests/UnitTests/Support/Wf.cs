@@ -104,7 +104,7 @@ internal static class Wf
     public static WorkflowActivity ConsumingCall(
         string workflowKey,
         string startActivity,
-        DispatchRule[] onEmitted,
+        EmissionRule[] onEmitted,
         params TransitionRule[] onSuccess)
     {
         return new WorkflowActivity(
@@ -141,15 +141,24 @@ internal static class Wf
             forEachCollection == null ? null : new ForEachConfig(forEachCollection, forEachAlias));
     }
 
-    /// <summary>An on_emitted rule: hand the value to a document.</summary>
-    public static DispatchRule Dispatch(
+    /// <summary>An on_emitted rule: hand the value to a document and take the next one.</summary>
+    public static EmissionRule Dispatch(
         string startActivity,
         ValueMap? input = null,
         string? condition = null,
         string workflow = SelfKey)
     {
-        return new DispatchRule(workflow, startActivity, input, condition);
+        return EmissionRule.Handles(workflow, startActivity, input, condition);
     }
+
+    /// <summary>An on_emitted rule: stop consuming and continue at an activity in this workflow.</summary>
+    public static EmissionRule EmittedGoto(
+        string name, ValueMap? input = null, string? condition = null) =>
+        EmissionRule.Goto(name, input, condition);
+
+    /// <summary>An on_emitted rule: stop consuming and end this run with a result.</summary>
+    public static EmissionRule EmittedResult(ValueMap result, string? condition = null) =>
+        EmissionRule.Returns(result, condition);
 
     // ---- transitions ---------------------------------------------------
 

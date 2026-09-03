@@ -100,18 +100,20 @@ public abstract record SubWorkflowActivityConfig(
 /// unconsumed buffer to one entry. Empty means this caller awaits only the terminal value, and
 /// the child emits without waiting for anyone.
 /// <para>
-/// Each rule dispatches a document rather than transitioning, so a handler cannot wander into
-/// this workflow's own flow — which is what used to make "ran out of transitions" mean one thing
-/// inside a handler and another outside it.
+/// A rule's handler dispatches a document rather than transitioning, so a handler cannot wander
+/// into this workflow's own flow — which is what used to make "ran out of transitions" mean one
+/// thing inside a handler and another outside it. The other two actions do reach this workflow,
+/// and safely, because the consumer evaluates them in its own execution rather than delegating
+/// them to one that holds no subscription.
 /// </para>
 /// </param>
 public sealed record CallActivityConfig(
     string Workflow,
     string StartActivity,
     ValueMap? Input = null,
-    IReadOnlyList<DispatchRule>? OnEmitted = null) : SubWorkflowActivityConfig(Workflow, StartActivity, Input)
+    IReadOnlyList<EmissionRule>? OnEmitted = null) : SubWorkflowActivityConfig(Workflow, StartActivity, Input)
 {
-    public IReadOnlyList<DispatchRule> OnEmitted { get; init; } = OnEmitted ?? [];
+    public IReadOnlyList<EmissionRule> OnEmitted { get; init; } = OnEmitted ?? [];
 
     /// <summary>
     /// Whether this caller consumes what the child emits. The child is told at start, so the
@@ -163,6 +165,49 @@ public sealed record PromiseBranch(
     ForEachConfig? ForEach = null);
 
 /// <summary>
+/// What to do with one value the consumed child emitted. Rules are evaluated in order and the
+/// first whose <see cref="Condition"/> holds wins, exactly as a <see cref="TransitionRule"/>'s do.
+///
+/// Exactly one of <see cref="Handle"/>, <see cref="Transition"/> and <see cref="Result"/> is set,
+/// and the split that matters is not three ways but two: <see cref="Handle"/> continues the
+/// consuming loop, the other two leave it. Before they existed a consumer could not stop
+/// consuming at all — its only exit was the producer terminating, which for a poller never
+/// happens.
+/// </summary>
+/// <param name="Handle">
+/// Run a document for this value, wait for it, then come back for the next one. The producer
+/// stays parked meanwhile, which is where the back-pressure comes from.
+/// </param>
+/// <param name="Transition">
+/// Stop consuming and continue at an activity in <em>this</em> workflow. Safe where a handler
+/// transitioning here would not be, and the difference is which execution evaluates it: this rule
+/// is the consumer's own, so the target is an ordinary activity in the consumer's own graph.
+/// </param>
+/// <param name="Result">
+/// Stop consuming and end the consumer with this value. The same action <c>on_success</c> carries;
+/// what differs is that this one fires while the producer is still running.
+/// </param>
+public sealed record EmissionRule(
+    HandlerDispatch? Handle = null,
+    TransitionTarget? Transition = null,
+    ValueMap? Result = null,
+    string? Condition = null)
+{
+    /// <summary>False when a rule was authored with no action — rejected by the interpreter.</summary>
+    public bool HasAction => Handle != null || Transition != null || Result != null;
+
+    public static EmissionRule Handles(
+        string workflow, string startActivity, ValueMap? input = null, string? condition = null) =>
+        new(new HandlerDispatch(workflow, startActivity, input), Condition: condition);
+
+    public static EmissionRule Goto(string name, ValueMap? input = null, string? condition = null) =>
+        new(Transition: new TransitionTarget(name, input), Condition: condition);
+
+    public static EmissionRule Returns(ValueMap result, string? condition = null) =>
+        new(Result: result, Condition: condition);
+}
+
+/// <summary>
 /// A dispatch: run a document, starting from one of its activities.
 /// <para>
 /// The same three fields a <see cref="PromiseBranch"/> carries, minus the fan-out parts. Kept as
@@ -171,11 +216,10 @@ public sealed record PromiseBranch(
 /// inside it, a dispatch names a document and leaves.
 /// </para>
 /// </summary>
-public sealed record DispatchRule(
+public sealed record HandlerDispatch(
     string Workflow,
     string StartActivity,
-    ValueMap? Input = null,
-    string? Condition = null);
+    ValueMap? Input = null);
 
 /// <summary>Fans a branch out over a collection, binding each item to <see cref="Alias"/>.</summary>
 public sealed record ForEachConfig(string Collection, string Alias);

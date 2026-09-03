@@ -28,9 +28,12 @@ public class StreamingFailureTests(DaemonTestFixture fixture)
     /// always another document — `self` is rejected here (UTOS-S011) — which is what makes it
     /// structurally unable to transition back into the consumer's flow and open a second producer.
     /// </summary>
-    private static DispatchRule[] HandleThenResume(string startActivity) =>
+    private static EmissionRule[] HandleThenResume(string startActivity) =>
     [
-        new DispatchRule { Workflow = HandlerWorkflow, StartActivity = startActivity }
+        new EmissionRule
+        {
+            Handle = new HandlerDispatch { Workflow = HandlerWorkflow, StartActivity = startActivity }
+        }
     ];
 
     private const string HandlerWorkflow = "handler-workflow";
