@@ -103,11 +103,27 @@ public class WorkflowMappingTests
                 {
                     OnEmitted =
                     {
-                        new Wire.DispatchRule
+                        // All three actions, because the oneof is what the mapping reads and a
+                        // dropped arm would present as a consumer that quietly ignores a rule
+                        // rather than as a mapping failure. The empty `result` earns its place:
+                        // an empty Struct is a set oneof, and reading the action from field
+                        // presence instead of ActionCase would turn it into no action at all.
+                        new Wire.EmissionRule
                         {
-                            Workflow = "acme/handler:1.0.0",
-                            StartActivity = "ingest"
-                        }
+                            Condition = "{{ output.kind == 'receipt' }}",
+                            Handle = new Wire.HandlerDispatch
+                            {
+                                Workflow = "acme/handler:1.0.0",
+                                StartActivity = "ingest",
+                                Input = new Struct { Fields = { ["n"] = Value.ForString("{{ output.n }}") } }
+                            }
+                        },
+                        new Wire.EmissionRule
+                        {
+                            Condition = "{{ output.done }}",
+                            Transition = new Wire.TransitionTarget { Name = "wait" }
+                        },
+                        new Wire.EmissionRule { Result = new Struct() }
                     }
                 }
             }

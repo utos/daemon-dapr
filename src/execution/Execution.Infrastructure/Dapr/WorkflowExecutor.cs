@@ -291,6 +291,16 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     }
                 }
 
+                // The consumer said it is done consuming. Ending the subscription and cancelling
+                // the producer are one event, and it happens here rather than in the sweep below,
+                // because a consumer that transitions away carries on running — possibly for a
+                // very long time — and leaving the producer parked for the duration would be a
+                // leak, not a delay. Before the transition is taken, so nothing this run does next
+                // can race the cancellation.
+                if (transition.LeavesSubscription)
+                    await LeaveSubscriptionAsync(
+                        context, logger, subscriptions, run.ActivityName, logExecutionId);
+
                 if (transition.ReturnValue != null)
                 {
                     workflowOutput = transition.ReturnValue;
@@ -708,14 +718,49 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
     }
 
     /// <summary>
+    /// Ends one subscription deliberately: the consumer's rule said <c>transition</c> or
+    /// <c>result</c>, so no further value will be observed and the producer is stopped now.
+    /// <para>
+    /// The stream is left in place rather than deleted, unlike the terminal path in
+    /// <see cref="TakeChildOutputAsync"/>. There the producer finished and its stream is spent;
+    /// here it is being cut short mid-run, and what it emitted stays readable — the consumer
+    /// stopping early is not a reason to destroy the record of why.
+    /// </para>
+    /// </summary>
+    private static async Task LeaveSubscriptionAsync(
+        WorkflowContext context,
+        ILogger logger,
+        Dictionary<string, ExecutionId> subscriptions,
+        string activityName,
+        ExecutionId logExecutionId)
+    {
+        // Absent when the rule fired on the terminal value rather than an emitted one, which
+        // TakeChildOutputAsync has already unsubscribed. Nothing to cancel: the producer is done.
+        if (!subscriptions.Remove(activityName, out var childExecutionId))
+            return;
+
+        logger.LogInformation(
+            "Consumer left the subscription at activity '{WorkflowActivity}'; cancelling its " +
+            "sub-workflow (execution {WorkflowExecutionId})",
+            activityName, logExecutionId);
+
+        await context.CallActivityAsync(nameof(CancelChildExecutionActivity),
+            new CancelChildExecutionInput(childExecutionId));
+    }
+
+    /// <summary>
     /// Stops every producer still waiting on this run.
     /// <para>
     /// A subscription lives only while the run keeps coming back to its call activity. Leaving
-    /// that loop any other way ends it — an <c>on_emitted</c> handler that transitions to
-    /// <c>end</c> rather than back, a failure elsewhere in the graph, a rule that returns a
-    /// result. The child is parked on an acknowledgement at that moment, and nothing else in the
-    /// system would ever release it: it is a child orchestration, so it is torn down if its
-    /// caller is *cancelled*, but a caller that simply finishes leaves it waiting.
+    /// that loop any other way ends it — a failure elsewhere in the graph, or simply reaching the
+    /// end of the workflow. The child is parked on an acknowledgement at that moment, and nothing
+    /// else in the system would ever release it: it is a child orchestration, so it is torn down
+    /// if its caller is *cancelled*, but a caller that simply finishes leaves it waiting.
+    /// </para>
+    /// <para>
+    /// This is the involuntary counterpart to <see cref="LeaveSubscriptionAsync"/>, and by the
+    /// time a run gets here that one has usually already emptied the map. What is left is what no
+    /// rule accounted for.
     /// </para>
     /// <para>
     /// Ordered by activity name because each cancellation is an activity call recorded in

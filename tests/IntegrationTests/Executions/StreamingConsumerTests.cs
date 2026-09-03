@@ -48,9 +48,12 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
     /// always another document — `self` is rejected here (UTOS-S011) — which is what makes it
     /// structurally unable to transition back into the consumer's flow and open a second producer.
     /// </summary>
-    private static DispatchRule[] HandleThenResume(string startActivity) =>
+    private static EmissionRule[] HandleThenResume(string startActivity) =>
     [
-        new DispatchRule { Workflow = HandlerWorkflow, StartActivity = startActivity }
+        new EmissionRule
+        {
+            Handle = new HandlerDispatch { Workflow = HandlerWorkflow, StartActivity = startActivity }
+        }
     ];
 
     private const string HandlerWorkflow = "handler-workflow";
@@ -229,10 +232,13 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .AddDependentWorkflow("middle-workflow", middle => middle
                 .WorkflowCall("watch-child", "producer-workflow", "produce",
                     input: Fields(("n", Value.ForNumber(1))),
-                    onEmitted: [new DispatchRule
+                    onEmitted: [new EmissionRule
                     {
-                        Workflow = RelayWorkflow,
-                        StartActivity = "relay"
+                        Handle = new HandlerDispatch
+                        {
+                            Workflow = RelayWorkflow,
+                            StartActivity = "relay"
+                        }
                     }])
                 .OnResult(Fields(("relayed", Value.ForString("{{ output.produced }}")))))
             // The middle document's handler, which is where the relay happens. Emit-and-end: hand
@@ -312,17 +318,15 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
     [Fact]
     public async Task A_handler_that_ends_finishes_only_itself()
     {
-        // A handler is a document now, so `end` ends the *handler*, not the consumer. This used to
-        // be how a consumer stopped early — the handler transitioned to `end` and took the whole
-        // run with it — and that is gone, deliberately: nothing a dispatched document does can
-        // reach into the flow that dispatched it, which is the property the document boundary
-        // exists to provide.
+        // A handler is a document, so `end` ends the *handler*, not the consumer. This used to be
+        // how a consumer stopped early — the handler transitioned to `end` and took the whole run
+        // with it — and that is gone, deliberately: nothing a dispatched document does can reach
+        // into the flow that dispatched it, which is the property the document boundary exists to
+        // provide.
         //
-        // It leaves a real gap, recorded here rather than hidden. `on_emitted` rules are
-        // dispatches, so a consumer can no longer decide to stop based on what it consumed; it
-        // runs until the producer terminates. Expressing "enough" needs a spec decision (a
-        // terminal dispatch action, or a handler result the consumer reads) and is not something
-        // to invent in the daemon.
+        // Stopping early is now the consumer's own decision to make, with a `transition` or a
+        // `result` rule; the two tests below are that. What this one pins is that a handler still
+        // cannot make it on the consumer's behalf.
         const string producePath = "/streaming-abandon-produce";
         const string handlePath = "/streaming-abandon-handle";
         StubJson(producePath);
@@ -352,9 +356,136 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
         Assert.Equal(["1", "2", "3", "4", "5"], ValuesHandled(handlePath));
     }
 
+    [Fact]
+    public async Task A_result_rule_ends_the_consumer_on_the_value_it_was_looking_for()
+    {
+        // "Find one thing and return it." The producer would go on emitting; the consumer stops at
+        // the third value and returns it, and the run's result is that value rather than the
+        // producer's terminal one — which it never reaches.
+        //
+        // This one deliberately does not pin *where* the producer is cancelled, and passes with
+        // the leave-at-the-rule path disabled — verified, not assumed. Ending the consumer and
+        // leaving the loop are the same moment here, so the terminal sweep would catch it either
+        // way and there is nothing to distinguish. `transition` is where that stops being true,
+        // and the test below is the one that holds it.
+        const string producePath = "/streaming-early-result-produce";
+        StubJson(producePath);
+
+        var request = new TestWorkflowBuilder("streaming-early-result", fixture.MockBaseUrl)
+            .WorkflowCall("watch", "producer-workflow", "produce",
+                input: Fields(("n", Value.ForNumber(1))),
+                onEmitted:
+                [
+                    new EmissionRule
+                    {
+                        Condition = "{{ output.n >= 3 }}",
+                        Result = Fields(("found", Value.ForString("{{ output.n }}")))
+                    }
+                ])
+            .AddDependentWorkflow("producer-workflow", child => SlowProducer(child, producePath, 50))
+            .Build("watch");
+
+        var scheduled = await fixture.ScheduleAsync(request);
+        await WatchToCompletion(scheduled.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduled.Id });
+
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+        Assert.Equal(3d, details.Result.Fields["found"].NumberValue);
+
+        // Three produced, not fifty. Without the cancellation the consumer would still return the
+        // same result — the producer would simply carry on alone — so this count is the assertion
+        // that matters, not the status above.
+        Assert.Equal(3, CallCount(producePath));
+    }
+
+    [Fact]
+    public async Task A_transition_rule_stops_the_producer_while_the_consumer_carries_on()
+    {
+        // The case the terminal sweep cannot cover, and the reason cancellation happens at the
+        // rule rather than at the end of the run: the consumer leaves the loop and then stays
+        // alive for a good while longer, holding a producer it will never read again.
+        //
+        // What this can and cannot see is worth stating, because the obvious assertion is the
+        // wrong one. A producer whose value has not been acknowledged is *parked* on that
+        // acknowledgement — that is the back-pressure the design is built on — so an uncancelled
+        // producer issues no further requests either. Counting `producePath` therefore cannot tell
+        // a stopped producer from an abandoned one, and a test that only counted would pass with
+        // the cancellation deleted.
+        //
+        // The difference that is visible is which path did the stopping. Leaving at the rule logs
+        // "left the subscription"; the terminal sweep that would otherwise catch it eight seconds
+        // later logs "was abandoned". Asserting the first is what pins the timing, and deleting
+        // `LeaveSubscriptionAsync` swaps one message for the other rather than removing both.
+        const string producePath = "/streaming-early-transition-produce";
+        const string wrapUpPath = "/streaming-early-transition-wrap-up";
+        StubJson(producePath);
+        StubJson(wrapUpPath);
+
+        var request = new TestWorkflowBuilder("streaming-early-transition", fixture.MockBaseUrl)
+            .WorkflowCall("watch", "producer-workflow", "produce",
+                input: Fields(("n", Value.ForNumber(1))),
+                onEmitted:
+                [
+                    new EmissionRule
+                    {
+                        Condition = "{{ output.n >= 2 }}",
+                        Transition = new TransitionTarget { Name = "settle" }
+                    }
+                ])
+            .Timer("settle", TimeSpan.FromSeconds(8))
+            .OnSuccess("wrap-up")
+            .HttpGet("wrap-up", wrapUpPath)
+            .OnResult(Fields(("wrapped", Value.ForBool(true))))
+            .AddDependentWorkflow("producer-workflow", child => SlowProducer(child, producePath, 50))
+            .Build("watch");
+
+        var scheduled = await fixture.ScheduleAsync(request);
+        var events = await WatchToCompletion(scheduled.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduled.Id });
+
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+        Assert.True(details.Result.Fields["wrapped"].BoolValue);
+
+        // The consumer really did carry on rather than ending at the rule — otherwise "cancelled
+        // at the rule" and "cancelled at the end of the run" would be the same moment and this
+        // test would be the one above.
+        Assert.Equal(1, CallCount(wrapUpPath));
+
+        // The rule stopped the producer, and the terminal sweep did not have to.
+        Assert.Contains(events, e => e.Message.Contains("left the subscription"));
+        Assert.DoesNotContain(events, e => e.Message.Contains("was abandoned"));
+
+        // Two values consumed, and no more. Weak on its own — a parked producer emits nothing
+        // either way — but it pins that the rule fired on the second value rather than later.
+        Assert.Equal(2, CallCount(producePath));
+    }
+
     // ============================================================================
     // Helpers
     // ============================================================================
+
+    /// <summary>
+    /// A producer that pauses between values, so "did it keep going after it was cancelled?" is
+    /// answerable by counting rather than by racing. <see cref="Producer"/> emits as fast as it
+    /// can, which makes it useless for that question.
+    /// </summary>
+    private static void SlowProducer(TestWorkflowBuilder child, string path, int values)
+    {
+        child.HttpGet("produce", path)
+            .OnEmit(
+                Fields(("n", Value.ForString("{{ input.n }}"))),
+                "pause",
+                Fields(("n", Value.ForString("{{ input.n }}"))),
+                when: $"{{{{ input.n <= {values} }}}}")
+            .OnResult(Fields(("produced", Value.ForNumber(values))));
+
+        child.Timer("pause", TimeSpan.FromSeconds(1))
+            .OnSuccess("produce", Fields(("n", Value.ForString("{{ input.n + 1 }}"))));
+    }
 
     private async Task<List<WatchExecutionResponse>> WatchToCompletion(string executionId)
     {

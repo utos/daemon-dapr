@@ -45,12 +45,15 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
     /// makes it structurally unable to transition back into the consumer's flow.
     /// </para>
     /// </summary>
-    private static DispatchRule[] Dispatch(string startActivity, string? condition = null)
+    private static EmissionRule[] Dispatch(string startActivity, string? condition = null)
     {
-        var rule = new DispatchRule
+        var rule = new EmissionRule
         {
-            Workflow = HandlerWorkflow,
-            StartActivity = startActivity
+            Handle = new HandlerDispatch
+            {
+                Workflow = HandlerWorkflow,
+                StartActivity = startActivity
+            }
         };
 
         if (condition != null)

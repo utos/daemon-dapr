@@ -308,15 +308,46 @@ public static class WorkflowMapping
         return result;
     }
 
-    public static Domain.DispatchRule ToDomain(this Wire.DispatchRule source) =>
-        new(source.Workflow,
-            source.StartActivity,
-            source.Input?.ToDomain(),
+    /// <summary>
+    /// The action is read from <c>ActionCase</c> rather than from whether a field is populated:
+    /// <c>result</c> is a Struct, and an empty one is a perfectly good "end with nothing", which a
+    /// null check would silently turn into a rule with no action at all.
+    /// </summary>
+    public static Domain.EmissionRule ToDomain(this Wire.EmissionRule source) =>
+        new(source.ActionCase == Wire.EmissionRule.ActionOneofCase.Handle
+                ? source.Handle.ToDomain()
+                : null,
+            source.ActionCase == Wire.EmissionRule.ActionOneofCase.Transition
+                ? source.Transition.ToDomain()
+                : null,
+            source.ActionCase == Wire.EmissionRule.ActionOneofCase.Result
+                ? source.Result.ToDomain()
+                : null,
             source.HasCondition ? source.Condition : null);
 
-    public static Wire.DispatchRule ToProto(this Domain.DispatchRule source)
+    public static Wire.EmissionRule ToProto(this Domain.EmissionRule source)
     {
-        var result = new Wire.DispatchRule
+        var result = new Wire.EmissionRule();
+
+        if (source.Handle != null)
+            result.Handle = source.Handle.ToProto();
+        else if (source.Transition != null)
+            result.Transition = source.Transition.ToProto();
+        else if (source.Result != null)
+            result.Result = source.Result.ToProto();
+
+        if (source.Condition != null)
+            result.Condition = source.Condition;
+
+        return result;
+    }
+
+    public static Domain.HandlerDispatch ToDomain(this Wire.HandlerDispatch source) =>
+        new(source.Workflow, source.StartActivity, source.Input?.ToDomain());
+
+    public static Wire.HandlerDispatch ToProto(this Domain.HandlerDispatch source)
+    {
+        var result = new Wire.HandlerDispatch
         {
             Workflow = source.Workflow,
             StartActivity = source.StartActivity
@@ -324,9 +355,6 @@ public static class WorkflowMapping
 
         if (source.Input != null)
             result.Input = source.Input.ToProto();
-
-        if (source.Condition != null)
-            result.Condition = source.Condition;
 
         return result;
     }

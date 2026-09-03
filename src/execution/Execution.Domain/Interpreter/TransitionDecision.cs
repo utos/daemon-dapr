@@ -27,14 +27,29 @@ public abstract record TransitionDecision
     /// Run <paramref name="Workflow"/> from <paramref name="StartActivity"/> as a child execution,
     /// then come back for the next emitted value.
     ///
-    /// The answer on the <c>Emitted</c> path, where the rules are dispatches rather than
-    /// transitions. Distinct from <see cref="Goto"/> because it leaves this workflow: nothing the
-    /// dispatched document does can land in this execution's flow, which is what stops "ran out of
-    /// transitions" meaning one thing inside a handler and another outside it.
+    /// One of the two answers on the <c>Emitted</c> path that keep consuming. Distinct from
+    /// <see cref="Goto"/> because it leaves this workflow: nothing the dispatched document does can
+    /// land in this execution's flow, which is what stops "ran out of transitions" meaning one
+    /// thing inside a handler and another outside it.
     /// </summary>
     public sealed record Dispatch(
         string Workflow,
         string StartActivity,
+        Dictionary<string, object>? Input) : TransitionDecision;
+
+    /// <summary>
+    /// Back to <paramref name="ActivityName"/> for the next emitted value, on the same
+    /// subscription.
+    ///
+    /// Identical to <see cref="Goto"/> in where it sends the run and deliberately not the same
+    /// case, because on the emitted path the two mean opposite things to the driver: this one
+    /// keeps the producer running, a <see cref="Goto"/> ends the subscription and cancels it. They
+    /// were the same case once, which left the driver inferring the difference from whether the
+    /// target happened to equal the call activity's own name — true of a resume, and true again of
+    /// an author transitioning to that activity on purpose.
+    /// </summary>
+    public sealed record Resume(
+        string ActivityName,
         Dictionary<string, object>? Input) : TransitionDecision;
 
     /// <summary>End this path with no result of its own.</summary>

@@ -29,20 +29,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
-- **Dispatched work is its own document** (spec `v0.0.13`, `Utos.Workflow` pins bumped `0.0.12` →
-  `0.0.13`). A promise branch and an `on_emitted` rule name a *document* — `workflow`,
-  `startActivity`, `input` — rather than pointing at an activity in the dispatching one.
-  `PromiseBranch.Target` is gone and `CallActivityConfig.OnEmitted` holds `DispatchRule` instead of
-  `TransitionRule`, which changes the persisted shape in all three places a bundle is stored, so
+- **Dispatched work is its own document** (spec `v0.0.13`; `Utos.Workflow` pins bumped `0.0.12` →
+  `0.0.14`, taking both spec releases at once). A promise branch and an `on_emitted` rule name a
+  *document* — `workflow`, `startActivity`, `input` — rather than pointing at an activity in the
+  dispatching one. `PromiseBranch.Target` is gone, and `CallActivityConfig.OnEmitted` no longer
+  holds `TransitionRule` — it holds `EmissionRule`, whose shape the `v0.0.14` entry below
+  describes. Both steps change the persisted shape in all three places a bundle is stored, so
   **existing streams cannot be replayed — drop the KurrentDB volume and the SQL database.** There is
   no upcaster; the daemon is pre-1.0. `ActivityConfigJsonShapeTests` pins the new text.
 - **A handler can no longer stop its consumer.** It used to: a handler transitioning to `end` ended
   the consuming run, which was how a consumer stopped early. A handler is a separate execution now,
   so `end` ends the handler and the consumer takes the next value. Nothing dispatched can reach into
-  the flow that dispatched it — that is the property the document boundary exists to provide — but
-  it means a consumer runs until its producer terminates, with no way to say "enough" based on what
-  it consumed. `A_handler_that_ends_finishes_only_itself` records the gap rather than hiding it.
-  Closing it needs a spec decision, not a daemon workaround.
+  the flow that dispatched it — that is the property the document boundary exists to provide.
+  Stopping early is the *consumer's* decision to make instead, with the two rules below;
+  `A_handler_that_ends_finishes_only_itself` pins that a handler still cannot make it on the
+  consumer's behalf.
+
+### Added
+
+- **An `on_emitted` rule carries an action** (spec `v0.0.14`): a guard plus exactly one of `handle`,
+  `transition` or `result`, where it was a flat dispatch. `handle` is what a rule used to be and
+  continues the consuming loop; the other two leave it, and they exist because without them a
+  consumer could not stop consuming at all. Its only exit was the producer terminating, which for
+  the poller this feature is for never happens — so "watch until you see X, then get on with it"
+  was inexpressible, and "find one thing and return it" could only be written as a handler that
+  fails, which ends the run as an error and loses the difference between finishing early on purpose
+  and breaking.
+  - `transition` continues at an activity in the *consuming* workflow. Safe where the same words
+    inside a handler would not be, and the difference is which execution evaluates them: this rule
+    is the consumer's own, so its target is an ordinary activity in the consumer's own graph.
+  - `result` ends the consumer with that value.
+  - **Both end the subscription and cancel the producer at that point**, not when the consuming run
+    eventually terminates. For `result` those are nearly the same moment; for `transition` they are
+    not, and a consumer that carries on for another hour would otherwise hold a producer it will
+    never read again for all of it.
+    Worth knowing what that leak is and is not: an unacknowledged producer is *parked* on the
+    acknowledgement, so it issues no further requests whether or not anyone cancels it. Leaving it
+    running leaks an orchestration and its context row, not behaviour — which is why
+    `A_transition_rule_stops_the_producer_while_the_consumer_carries_on` asserts on which path did
+    the stopping (leaving at the rule and the terminal sweep log different lines) rather than on a
+    request count, which cannot tell the two apart.
+  - The interpreter gained a `Resume` decision to go with it. "Back to the call activity for the
+    next value" and "transition to the call activity on purpose" are the same `Goto` by shape and
+    opposite in meaning — one keeps the producer, the other kills it — so the driver is told which
+    it is rather than inferring it from whether the target happens to match the call activity's
+    name.
 
 ### Fixed
 
@@ -52,9 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Harmless when that child has finished, fatal when it has not — and a consumer's producer survives
   every continuation by design. Dapr declines to start an instance whose id already exists, so the
   handler never ran and the consumer waited forever on a rendezvous that could not happen. Nothing
-  threw; the trace simply stopped. Handler ids now come from `DeterministicExecutionId` — a pure
-  function of (execution, activity, dispatch sequence) — with the sequence carried in the
-  continuation envelope, so they replay identically and cannot repeat across segments.
+  threw; the trace simply stopped. Fixed upstream in Dapr 1.18.4, which is why that runtime is now
+  required — see the Requirements section above. The daemon carried its own workaround for the
+  length of one release and no longer does.
 
 ### Changed
 
