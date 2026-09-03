@@ -18,6 +18,20 @@ namespace UnitTests.Persistence;
 /// <c>workflow.call</c> / <c>workflow.spawn</c> without a single test noticing. Asserted as text
 /// rather than round-tripped, because a round trip passes whatever the names happen to be.
 /// </para>
+/// <para>
+/// <b>Computed properties are persisted state here, and <c>[JsonIgnore]</c> does not always stop
+/// them.</b> <c>Kind</c> carries the attribute on <c>ActivityConfig</c>'s abstract declaration and
+/// appears in the text below anyway: System.Text.Json reads the most-derived declaration, and an
+/// <c>override</c> does not inherit it. So the attribute silently did nothing, and these tests
+/// then froze the leak as contract. <c>ConsumesOutput</c> is the case that works — declared once,
+/// never overridden, and correctly absent.
+/// </para>
+/// <para>
+/// Which makes <c>Kind</c> and <c>HeaderMap</c> a poor precedent to reason from: neither is a
+/// decision, one is an ineffective attribute and the other an omission. They stay because
+/// removing them is its own persisted-shape change with nothing to gain. A *new* computed property
+/// should simply not be persisted — see <c>EmissionRule</c>, which has none.
+/// </para>
 /// </summary>
 public class ActivityConfigJsonShapeTests
 {
@@ -53,7 +67,7 @@ public class ActivityConfigJsonShapeTests
         var json = Serialize(config);
 
         Assert.Contains("""
-                        "OnEmitted":[{"Handle":{"Workflow":"acme/ingester:1.0.0","StartActivity":"ingest","Input":null},"Transition":null,"Result":null,"Condition":null,"HasAction":true}]
+                        "OnEmitted":[{"Handle":{"Workflow":"acme/ingester:1.0.0","StartActivity":"ingest","Input":null},"Transition":null,"Result":null,"Condition":null}]
                         """, json);
 
         var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
@@ -69,9 +83,9 @@ public class ActivityConfigJsonShapeTests
         // handler, so what has to survive the round trip is *which* one is set: a transition read
         // back as a handler would dispatch the consumer's own activity name as a document.
         //
-        // Note `HasAction`, which lands in the stream the way `Kind` and `HeaderMap` do. Left
-        // there rather than ignored, because `TransitionRule` carries the same computed property
-        // untouched and the two rules are the same idea; it is never read back.
+        // Note what is *not* here: no `HasAction`. A computed property on a rule is written on
+        // every one of them, and nothing read it. `Kind` and `HeaderMap` still leak the same way
+        // and are left alone — see the class remarks.
         var config = new CallActivityConfig("acme/mailbox:1.0.0", "poll",
             OnEmitted:
             [
@@ -82,11 +96,11 @@ public class ActivityConfigJsonShapeTests
         var json = Serialize(config);
 
         Assert.Contains("""
-                        {"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":"{{ output.done }}","HasAction":true}
+                        {"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":"{{ output.done }}"}
                         """, json);
 
         Assert.Contains("""
-                        {"Handle":null,"Transition":null,"Result":{"seen":true},"Condition":null,"HasAction":true}
+                        {"Handle":null,"Transition":null,"Result":{"seen":true},"Condition":null}
                         """, json);
 
         var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;

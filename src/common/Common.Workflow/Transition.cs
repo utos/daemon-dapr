@@ -14,8 +14,10 @@ public sealed record TransitionRule(
     EmitAction? Emit = null,
     string? Condition = null)
 {
-    /// <summary>False when a rule was authored with no action — rejected by the interpreter.</summary>
-    public bool HasAction => Transition != null || Result != null || Emit != null;
+    // `HasAction` used to live here and was never read. See the note on EmissionRule for why a
+    // computed property on one of these is a persistence decision rather than a convenience:
+    // UTOS-T001 is the rule that rejects an actionless transition rule, and the interpreter's
+    // `_ =>` arm is the backstop for a bundle that reached it anyway.
 
     public static TransitionRule Goto(string name, ValueMap? input = null, string? condition = null) =>
         new(new TransitionTarget(name, input), Condition: condition);
