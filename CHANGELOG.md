@@ -89,6 +89,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`TransitionRule.HasAction` and `EmissionRule.HasAction` are gone**, and with them two fields
+  from the persisted bundle. Neither was ever read: an actionless rule is rejected by the shared
+  validator (`UTOS-T001`, `UTOS-C504`) with the interpreter's `_ =>` arm as the backstop, so the
+  property was a convenience nobody used, written on every rule in every stored bundle.
+  It matters more than a dead property usually would, because a computed property on one of these
+  records *is* persisted state — and if the derivation ever changed, every event already written
+  would carry the old answer as a fact. Removing them rides the shape break already declared
+  above, which is the only reason this is free; after a release it would need an upcaster.
+  `Kind` and `HeaderMap` still leak the same way and are deliberately left alone. Worth knowing
+  why, since it reads like an oversight: `Kind` *carries* `[JsonIgnore]`, on `ActivityConfig`'s
+  abstract declaration, and leaks regardless — System.Text.Json reads the most-derived
+  declaration and an `override` does not inherit the attribute. So the two of them are not a
+  precedent for persisting computed state; one is an attribute that silently does nothing. The
+  working example is `ConsumesOutput`, declared once and correctly absent.
+  `ActivityConfigJsonShapeTests` records all of this where the next person will hit it.
 - **A promise branch name is rendered**, so a `for_each` expansion can be named after the item it
   processes. The proto has documented `{{ alias.x }}` here since the field existed, and the
   interpreter never honoured it — names were built from the raw string plus `_{index}`, so the

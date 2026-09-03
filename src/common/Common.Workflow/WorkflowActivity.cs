@@ -193,8 +193,11 @@ public sealed record EmissionRule(
     ValueMap? Result = null,
     string? Condition = null)
 {
-    /// <summary>False when a rule was authored with no action — rejected by the interpreter.</summary>
-    public bool HasAction => Handle != null || Transition != null || Result != null;
+    // No `HasAction` here, deliberately. A computed property on a record that reaches the event
+    // stream is *persisted*: it is written on every rule, pins wider text in
+    // ActivityConfigJsonShapeTests, and would become a stale claim on already-written events if
+    // the derivation ever changed. Nothing read it — the interpreter's own `_ =>` arm is what
+    // rejects an actionless rule, and the bundle rule is UTOS-C504 in the shared validator.
 
     public static EmissionRule Handles(
         string workflow, string startActivity, ValueMap? input = null, string? condition = null) =>
