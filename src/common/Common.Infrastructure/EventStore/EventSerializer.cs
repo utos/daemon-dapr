@@ -11,8 +11,11 @@ namespace Common.Infrastructure.EventStore;
 ///
 /// The body is serialized with the runtime type and <b>no options</b>, deliberately. The shape
 /// guarantee rides on the <c>[JsonConverter]</c> attributes the types carry, so that the same
-/// shape is produced by anything that serializes them — see the persistence invariants in
-/// CLAUDE.md, and <c>EventJsonShapeTests</c>, which pins it as text.
+/// shape is produced by anything that serializes them. Which means a value object that reaches
+/// persisted state must carry one: without it the shape here silently becomes whatever the
+/// default is, and every event written before the change becomes unreadable — a load throws and
+/// a subscription parks. <c>EventJsonShapeTests</c> and <c>ActivityConfigJsonShapeTests</c> pin
+/// it as text, and are the enforcement rather than this comment.
 ///
 /// What is <i>not</i> the CLR type's business is the name. It used to be: the stored name was the
 /// type's <c>AssemblyQualifiedName</c> and reading one back was <c>Type.GetType</c>, so a rename,
