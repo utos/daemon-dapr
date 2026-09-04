@@ -29,8 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
-- **Dispatched work is its own document** (spec `v0.0.13`; `Utos.Workflow` pins bumped `0.0.12` →
-  `0.0.14`, taking both spec releases at once). A promise branch and an `on_emitted` rule name a
+- **Dispatched work is its own document** (spec `v0.0.13`; all four Utos SDK pins bumped `0.0.12` →
+  `0.0.14.1`, taking both spec releases at once). A promise branch and an `on_emitted` rule name a
   *document* — `workflow`, `startActivity`, `input` — rather than pointing at an activity in the
   dispatching one. `PromiseBranch.Target` is gone, and `CallActivityConfig.OnEmitted` no longer
   holds `TransitionRule` — it holds `EmissionRule`, whose shape the `v0.0.14` entry below
