@@ -7,6 +7,13 @@ public abstract record TransitionDecision
     {
     }
 
+    /// <summary>
+    /// The rule that produced this decision. Null when no rule matched — an exhausted list's
+    /// <see cref="End"/> or <see cref="Propagate"/>, or the <see cref="Resume"/> an unmatched
+    /// emission falls back to — because then no rule decided anything.
+    /// </summary>
+    public RuleMatch? Match { get; init; }
+
     /// <summary>Continue at <paramref name="ActivityName"/> with <paramref name="Input"/>.</summary>
     public sealed record Goto(string ActivityName, Dictionary<string, object>? Input) : TransitionDecision;
 

@@ -58,6 +58,20 @@ public class FailureRoutingTests
     }
 
     [Fact]
+    public void A_handled_failure_names_the_onFailure_rule_that_caught_it()
+    {
+        var decision = Advance(Failing(
+            onFailure:
+            [
+                Wf.Goto("backoff", condition: "{{ response.status == 429 }}"),
+                Wf.Goto("giveup")
+            ]),
+            response: new HttpResponseContext(500, [], null));
+
+        Assert.Equal(new RuleMatch("onFailure", 2, 2), decision.Match);
+    }
+
+    [Fact]
     public void An_empty_failure_list_propagates()
     {
         Assert.IsType<TransitionDecision.Propagate>(Advance(Failing()));

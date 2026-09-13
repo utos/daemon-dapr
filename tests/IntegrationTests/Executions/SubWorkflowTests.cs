@@ -145,7 +145,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
             ExecutionId = response.Id
         });
 
-        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
         // Assert — C's HTTP endpoint was hit, execution completed
         var logEntries = fixture.WireMockServer.LogEntries.ToList();
@@ -154,6 +154,23 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
         var execution = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = response.Id });
         Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
+
+        // Assert — the whole tree is in the root's stream, each line naming who wrote it. A
+        // grandchild's lines used to route to its direct parent's id: a stream nobody watches.
+        Assert.Contains(events, e => e.Source == "system" && e.Message.Contains("'call-b'"));
+        Assert.Contains(events, e => e.Source == "workflow-b:1.0.0" && e.Message.Contains("'call-c'"));
+        Assert.Contains(events, e => e.Source == "workflow-c:1.0.0" && e.Message.Contains("'do-http'"));
+
+        // Assert — each call names the workflow it enters, so the lines that follow can be joined
+        // to it by that same identity
+        Assert.Contains(events, e => e.Source == "system" && e.Message.Contains("calls workflow-b:1.0.0 as execution "));
+        Assert.Contains(events, e => e.Source == "workflow-b:1.0.0" && e.Message.Contains("calls workflow-c:1.0.0 as execution "));
+
+        // Assert — every transition says which rule took it
+        Assert.Contains(events, e => e.Source == "system" && e.Message.Contains("'call-b' onSuccess rule 1 of 1 matched → end"));
+
+        // Assert — and the stream does not repeat its own execution id on every line
+        Assert.DoesNotContain(events, e => e.Message.EndsWith($"(execution {response.Id})"));
     }
 
     [Fact]

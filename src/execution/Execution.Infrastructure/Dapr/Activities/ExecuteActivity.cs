@@ -24,7 +24,8 @@ public class ExecuteActivity(IEnumerable<IActivityHandler> handlers)
                 input.Url,
                 input.HttpMethod,
                 input.Body,
-                input.Headers));
+                input.Headers,
+                input.LogSource));
 
         return new ExecuteActivityOutput(
             result.StatusCode, result.Success, result.Output, result.Headers, result.BodyText);
@@ -38,7 +39,8 @@ public sealed record ExecuteActivityInput(
     string? Url,
     string? HttpMethod,
     string? Body,
-    Dictionary<string, string>? Headers);
+    Dictionary<string, string>? Headers,
+    string? LogSource = null);
 
 /// <param name="Headers">
 /// Plain string-to-string, so no custom converter is needed — unlike <paramref name="Output"/>,

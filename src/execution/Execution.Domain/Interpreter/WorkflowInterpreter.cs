@@ -81,8 +81,12 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         if (rules.Count == 0)
             return Exhausted(outcome, activityName, passThrough);
 
+        var list = outcome == ActivityOutcomeKind.Failed ? "onFailure" : "onSuccess";
+        var number = 0;
         foreach (var rule in rules)
         {
+            number++;
+
             // Check condition first — skip this rule if condition doesn't match
             if (!string.IsNullOrEmpty(rule.Condition))
             {
@@ -92,7 +96,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             }
 
             // Condition matched (or no condition) — execute the action
-            return rule switch
+            TransitionDecision decision = rule switch
             {
                 { Transition: not null } => Goto(rule.Transition, scope, passThrough),
 
@@ -104,6 +108,8 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
                 _ => throw new InvalidOperationException(
                     "Transition rule has no action set (neither transition, result nor emit)")
             };
+
+            return decision with { Match = new RuleMatch(list, number, rules.Count) };
         }
 
         // Every rule was evaluated and none matched — same meaning as having none at all.
@@ -132,13 +138,16 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         string callActivityName,
         object? passThrough)
     {
+        var number = 0;
         foreach (var rule in rules)
         {
+            number++;
+
             if (!string.IsNullOrEmpty(rule.Condition)
                 && !templateEngine.Evaluate<bool>(rule.Condition, scope))
                 continue;
 
-            return rule switch
+            TransitionDecision decision = rule switch
             {
                 { Handle: not null } => new TransitionDecision.Dispatch(
                     rule.Handle.Workflow,
@@ -155,6 +164,8 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
                 _ => throw new InvalidOperationException(
                     "Emission rule has no action set (neither handle, transition nor result)")
             };
+
+            return decision with { Match = new RuleMatch("onEmitted", number, rules.Count) };
         }
 
         return Resume(callActivityName, passThrough);

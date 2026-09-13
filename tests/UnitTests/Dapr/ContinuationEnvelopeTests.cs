@@ -22,6 +22,7 @@ public class ContinuationEnvelopeTests
     private static readonly ExecutionId Id = new(Guid.Parse("11111111-1111-1111-1111-111111111111"));
     private static readonly ExecutionId ParentId = new(Guid.Parse("22222222-2222-2222-2222-222222222222"));
     private static readonly ExecutionId ChildId = new(Guid.Parse("33333333-3333-3333-3333-333333333333"));
+    private static readonly ExecutionId RootId = new(Guid.Parse("44444444-4444-4444-4444-444444444444"));
     private static readonly DateTime Started = new(2026, 8, 13, 9, 0, 0, DateTimeKind.Utc);
 
     /// <summary>An envelope with every property set to something distinctive.</summary>
@@ -36,7 +37,8 @@ public class ContinuationEnvelopeTests
             StartedAt: Started,
             ContinueAsNewAfterTransitions: 7,
             Subscriptions: new Dictionary<string, ExecutionId>(),
-            OutputEventName: "child-output:upstream");
+            OutputEventName: "child-output:upstream",
+            RootExecutionId: RootId);
 
     private static ExecutionCursor Cursor() =>
         ExecutionCursor.Start(["first", "handle"], loopDetected: true).Enter("handle").Cursor;
@@ -114,6 +116,9 @@ public class ContinuationEnvelopeTests
         Assert.Equal(Id, continued.ExecutionId);
         Assert.Equal("acme/watcher:1.0.0", continued.WorkflowKey);
         Assert.Equal(ParentId, continued.ParentExecutionId);
+        // The root is identity too. A continuation that lost it would send the rest of a long
+        // child's lines back to its direct parent's stream, mid-run.
+        Assert.Equal(RootId, continued.RootExecutionId);
         Assert.Equal(7, continued.ContinueAsNewAfterTransitions);
         Assert.Equal(Started, continued.StartedAt);
     }
@@ -143,7 +148,8 @@ public class ContinuationEnvelopeTests
             nameof(WorkflowExecutorInput.WorkflowKey),
             nameof(WorkflowExecutorInput.ParentExecutionId),
             nameof(WorkflowExecutorInput.ContinueAsNewAfterTransitions),
-            nameof(WorkflowExecutorInput.OutputEventName)
+            nameof(WorkflowExecutorInput.OutputEventName),
+            nameof(WorkflowExecutorInput.RootExecutionId)
         ];
 
         var declared = typeof(WorkflowExecutorInput)

@@ -77,6 +77,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A sub-workflow nested two or more levels deep logged into a stream nobody watches.** Log lines
+  routed to `ParentExecutionId ?? ExecutionId`, which reaches exactly one level: a grandchild's
+  lines landed in its direct parent's buffer, never in the root's `WatchExecution` stream.
+  `WorkflowExecutorInput` now carries `RootExecutionId` down every call, handler dispatch and
+  promise branch, and every execution in the tree logs under it. A detached `workflow.spawn` is
+  unchanged — it is its own top-level run with its own stream. Carried through continue-as-new, and
+  classified as such in `ContinuationEnvelopeTests`.
+
 - **A child started after a continue-as-new could collide with a live one, and hang the run.**
   `WorkflowContext.NewGuid` is replay-safe but not continuation-safe: its counter restarts with the
   history, so the first id minted in the second segment is the same one the first segment minted.
@@ -88,6 +96,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   length of one release and no longer does.
 
 ### Changed
+
+- **Watch stream lines name the workflow that wrote them.** A sub-workflow's lines carry its
+  canonical identity as the frame's `source` — `settle-refund:2.1.0` — where every line was
+  `system`, so a child's `Activity 'refund' completed` was indistinguishable from the root's. The
+  root's own lines stay `system`. Applied as a structured `WorkflowSource` property by a logger
+  decorator rather than a scope, because it has to reach the HTTP activity, which logs from its
+  own Dapr invocation. The property names are now shared constants in `Common.Infrastructure`.
+- **Transitions are logged, with the rule that took them.** After each activity the stream says
+  `Activity 'check-policy' onSuccess rule 1 of 3 matched → settle` — which list ran, which rule won,
+  and out of how many, so first-match-wins is visible in the log rather than inferred from which
+  activity ran next. `TransitionDecision` carries the matched rule as `RuleMatch`, and
+  `EvaluateTransitionOutput` records it in the orchestration history as optional fields, so a replay
+  logs the rule it matched the first time and history written before the change still reads.
+- **Entering a sub-workflow logs what it enters.** `Entering sub-workflow from activity 'settle'`
+  becomes `Activity 'settle' calls acme/settle-refund:2.1.0 as execution {id}` (`spawns` for a
+  detached run) — the canonical identity that the child's own lines carry as their source, and the
+  child's execution id once, as the handle for `utos logs` or `utos cancel`.
+- **Scheduling no longer announces a run twice before it starts.** `Execution created and
+  scheduled` and `Workflow scheduled starting from activity` are now Debug. At Information they
+  were followed within milliseconds by the executor's `Workflow execution started from activity`,
+  so a watch stream opened with three lines saying one thing.
+- **A watch stream no longer repeats its own execution id on every line.** The daemon's log calls
+  end in `(execution {id})`, which the host's interleaved logs need and a stream already scoped to
+  one run does not; the suffix is dropped at projection when it names the stream's own execution.
 
 - **`TransitionRule.HasAction` and `EmissionRule.HasAction` are gone**, and with them two fields
   from the persisted bundle. Neither was ever read: an actionless rule is rejected by the shared
