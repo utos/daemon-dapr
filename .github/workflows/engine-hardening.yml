@@ -1,0 +1,29 @@
+name: Engine hardening
+
+# The adversarial suite for the expression engine (tests/EngineHardeningTests). Not part of the
+# pull-request CI on purpose: it builds 45,000-deep structures, runs catastrophic regexes and
+# allocates against the memory limit, and a regression in one engine option would take the test
+# host down rather than fail a test. Weekly, and on demand.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  hardening:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore tests/EngineHardeningTests/EngineHardeningTests.csproj
+
+      - name: Build
+        run: dotnet build tests/EngineHardeningTests/EngineHardeningTests.csproj --no-restore --configuration Release
+
+      - name: Engine hardening tests
+        run: dotnet test tests/EngineHardeningTests/EngineHardeningTests.csproj --no-build --configuration Release
