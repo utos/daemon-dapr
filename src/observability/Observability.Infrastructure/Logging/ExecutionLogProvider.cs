@@ -1,3 +1,4 @@
+using Common.Infrastructure.Logging;
 using Common.SeedWork;
 using Microsoft.Extensions.Logging;
 using Observability.Domain;
@@ -28,7 +29,7 @@ internal sealed class ExecutionLogger(IExecutionLogStore store, string category)
         {
             switch (kv.Key)
             {
-                case "WorkflowExecutionId":
+                case LogProperty.WorkflowExecutionId:
                     // Callers log the id in whichever form they hold it. A shape missing from
                     // this list is not an error anywhere — the entry is simply dropped — so
                     // every form the daemon uses has to be listed.
@@ -40,7 +41,7 @@ internal sealed class ExecutionLogger(IExecutionLogStore store, string category)
                         _ => null
                     };
                     break;
-                case "WorkflowSource":
+                case LogProperty.WorkflowSource:
                     source = kv.Value?.ToString();
                     break;
             }

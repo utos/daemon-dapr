@@ -34,7 +34,7 @@ public class EvaluateTransitionActivity(
         var leaves = input.Outcome == ActivityOutcomeKind.Emitted
                      && decision is TransitionDecision.Goto or TransitionDecision.Return;
 
-        return decision switch
+        var output = decision switch
         {
             TransitionDecision.Goto go => new EvaluateTransitionOutput(
                 go.ActivityName, go.Input, null, LeavesSubscription: leaves),
@@ -68,6 +68,13 @@ public class EvaluateTransitionActivity(
                 null, null, null, Unhandled: true),
 
             _ => new EvaluateTransitionOutput(ReservedKeywords.End, null, null)
+        };
+
+        return output with
+        {
+            MatchedList = decision.Match?.List,
+            MatchedRule = decision.Match?.Number ?? 0,
+            RuleCount = decision.Match?.Of ?? 0,
         };
     }
 }
@@ -105,6 +112,13 @@ public sealed record EvaluateTransitionInput(
 /// mutually exclusive with <paramref name="NextActivityName"/> — a dispatch leaves this workflow,
 /// so there is no activity here to go to next.
 /// </param>
+/// <param name="MatchedList">
+/// Which rule list decided — <c>onSuccess</c>, <c>onFailure</c> or <c>onEmitted</c> — with
+/// <paramref name="MatchedRule"/> its 1-based position and <paramref name="RuleCount"/> the list's
+/// length. Null when no rule matched. Recorded here, in the orchestration history, so a replay
+/// logs the same rule it matched the first time. Optional fields, so history written before them
+/// still reads.
+/// </param>
 /// <param name="LeavesSubscription">
 /// The consumer is done consuming: this value's rule was a <c>transition</c> or a <c>result</c>,
 /// so the producer is cancelled now rather than whenever this run happens to end — which, for the
@@ -120,7 +134,10 @@ public sealed record EvaluateTransitionOutput(
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? EmittedValue = null,
     bool Unhandled = false,
-    bool LeavesSubscription = false);
+    bool LeavesSubscription = false,
+    string? MatchedList = null,
+    int MatchedRule = 0,
+    int RuleCount = 0);
 
 /// <summary>Which document an emitted value is handed to, and where it starts.</summary>
 public sealed record DispatchTarget(

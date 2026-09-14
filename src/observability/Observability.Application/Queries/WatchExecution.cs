@@ -40,7 +40,7 @@ public class WatchExecutionHandler(
 
         await foreach (var item in stream.WithCancellation(ct))
         {
-            var frame = Project(item);
+            var frame = Project(item, query.ExecutionId);
 
             if (frame is null || !Matches(frame, query))
                 continue;
@@ -49,14 +49,14 @@ public class WatchExecutionHandler(
         }
     }
 
-    private static ExecutionFrame? Project(ExecutionStreamItem item) => item switch
+    private static ExecutionFrame? Project(ExecutionStreamItem item, ExecutionId executionId) => item switch
     {
         LogItem log => new ExecutionFrame(
             log.Entry.Timestamp,
             MapLevel(log.Entry.Level),
             log.Entry.Source,
             log.Entry.Category,
-            log.Entry.Message),
+            WithoutExecutionSuffix(log.Entry.Message, executionId)),
 
         TerminalItem terminal => new ExecutionFrame(
             terminal.Timestamp,
@@ -73,6 +73,23 @@ public class WatchExecutionHandler(
 
         _ => null
     };
+
+    /// <summary>
+    /// Drops the <c>(execution {id})</c> suffix the daemon's log calls carry, when it names the
+    /// execution this stream belongs to.
+    /// <para>
+    /// The suffix earns its place in the host's own logs, where runs interleave and the id is the
+    /// only way to tell them apart. A watch stream is already scoped to one run, so there it repeats
+    /// the one thing the reader asked for on every line. Only an exact suffix naming this stream's
+    /// execution is removed: a message naming some other execution keeps it, because there it is
+    /// information. Which workflow in the tree wrote a line is the frame's source, not this text.
+    /// </para>
+    /// </summary>
+    public static string WithoutExecutionSuffix(string message, ExecutionId executionId)
+    {
+        var suffix = $" (execution {executionId})";
+        return message.EndsWith(suffix, StringComparison.Ordinal) ? message[..^suffix.Length] : message;
+    }
 
     private static bool Matches(ExecutionFrame frame, WatchExecutionQuery query)
     {

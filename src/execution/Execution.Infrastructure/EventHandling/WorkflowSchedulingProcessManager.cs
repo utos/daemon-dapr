@@ -51,7 +51,10 @@ public class WorkflowSchedulingProcessManager(
             // nothing.
             await lifecycle.ApplyAsync(executionId, execution => execution.Schedule(), cancellationToken);
 
-            logger.LogInformation(
+            // Debug, not Information: in a watch stream this and the "scheduled starting from" line
+            // below are followed within milliseconds by the executor's own "started from activity",
+            // which says the same thing from the component that actually starts the run.
+            logger.LogDebug(
                 "Execution created and scheduled (execution {WorkflowExecutionId})", executionId);
 
             // Step 2: Write context to store BEFORE scheduling the workflow (idempotent — skip if exists)
@@ -86,7 +89,7 @@ public class WorkflowSchedulingProcessManager(
                     executionId.ToString(),
                     workflowInput);
 
-                logger.LogInformation("Workflow scheduled starting from activity '{StartActivity}' (execution {WorkflowExecutionId})",
+                logger.LogDebug("Workflow scheduled starting from activity '{StartActivity}' (execution {WorkflowExecutionId})",
                     startActivity, executionId);
             }
             catch (Exception ex) when (IsDuplicateWorkflowException(ex))

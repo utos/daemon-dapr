@@ -17,7 +17,9 @@ public record ActivityHandlerInput(
     string? Url,
     string? HttpMethod,
     string? Body,
-    Dictionary<string, string>? Headers);
+    Dictionary<string, string>? Headers,
+    // The workflow to attribute this activity's log lines to, or null for the root being watched.
+    string? LogSource = null);
 
 /// <param name="Success">
 /// False when the transport succeeded but the response was not 2xx. The handler does not throw on

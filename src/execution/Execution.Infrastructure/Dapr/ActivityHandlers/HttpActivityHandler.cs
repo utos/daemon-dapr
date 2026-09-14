@@ -21,7 +21,9 @@ public class HttpActivityHandler(
         var url = input.Url
                   ?? throw new InvalidOperationException("URL is required for HTTP activity");
 
-        logger.LogDebug(
+        var log = WorkflowSourceLogger.For(logger, input.LogSource);
+
+        log.LogDebug(
             "HTTP {HttpMethod} {Url} starting (execution {WorkflowExecutionId})",
             httpMethod, url, input.LogExecutionId);
 
@@ -62,7 +64,7 @@ public class HttpActivityHandler(
             _ => LogLevel.Information
         };
 
-        logger.Log(logLevel,
+        log.Log(logLevel,
             "HTTP {HttpMethod} {Url} completed: {StatusCode} {StatusText} in {DurationMs}ms (execution {WorkflowExecutionId})",
             httpMethod.Method, url, statusCode, statusText, (long)duration, input.LogExecutionId);
 

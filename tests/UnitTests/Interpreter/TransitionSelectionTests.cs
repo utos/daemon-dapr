@@ -35,6 +35,35 @@ public class TransitionSelectionTests
     }
 
     [Fact]
+    public void A_decision_names_the_rule_that_won_and_how_many_there_were()
+    {
+        // "rule 2 of 3" is what a log line prints. The 3 is the point: it says the first rule was
+        // evaluated and lost, and the third was never reached.
+        var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
+            onSuccess:
+            [
+                Wf.Goto("small", condition: "{{ output.count < 10 }}"),
+                Wf.Goto("medium", condition: "{{ output.count < 100 }}"),
+                Wf.Goto("large")
+            ]))));
+
+        var decision = _interpreter.Advance(session, "a", null, Output(("count", 50)));
+
+        Assert.Equal(new RuleMatch("onSuccess", 2, 3), decision.Match);
+    }
+
+    [Fact]
+    public void When_no_rule_matches_there_is_no_rule_to_name()
+    {
+        var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
+            onSuccess: [Wf.Goto("never", condition: "{{ output.count > 10 }}")]))));
+
+        var decision = _interpreter.Advance(session, "a", null, Output(("count", 1)));
+
+        Assert.Null(decision.Match);
+    }
+
+    [Fact]
     public void An_unconditional_rule_is_the_fallback_when_nothing_matches()
     {
         var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",

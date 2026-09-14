@@ -53,7 +53,11 @@ public record WorkflowExecutorInput(
     DateTime? StartedAt = null,
     int ContinueAsNewAfterTransitions = 100,
     Dictionary<string, ExecutionId>? Subscriptions = null,
-    string? OutputEventName = null)
+    string? OutputEventName = null,
+    // The run whose watch stream this execution logs into: the root of the call tree, carried
+    // down unchanged. ParentExecutionId cannot do this job — it names the direct caller, which is
+    // right for handing emitted values back and wrong for a grandchild's log lines.
+    ExecutionId? RootExecutionId = null)
 {
     /// <summary>
     /// The envelope for the next segment of this execution — everything that must survive a
@@ -121,14 +125,20 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 {
     public override async Task<object?> RunAsync(WorkflowContext context, WorkflowExecutorInput input)
     {
-        var logger = context.CreateReplaySafeLogger<WorkflowExecutor>();
         var isChild = input.ParentExecutionId != null;
+        // A child's lines carry which workflow wrote them. The root's do not: it is the run being
+        // watched, so naming it on every line would repeat the one thing the reader already knows.
+        var logger = WorkflowSourceLogger.For(
+            context.CreateReplaySafeLogger<WorkflowExecutor>(), isChild ? input.WorkflowKey : null);
         // A non-null Visited set means this instance resumed via continue-as-new rather than
         // being scheduled fresh, so the run's opening bookkeeping must not repeat.
         var isContinuation = input.Visited != null;
         var startTime = input.StartedAt ?? context.CurrentUtcDateTime;
-        // Child workflows log under the parent's execution ID so their entries appear in the parent's WatchExecution stream.
-        var logExecutionId = input.ParentExecutionId ?? input.ExecutionId;
+        // Every execution in a call tree logs under the root's id, so the one stream a client
+        // watches carries the whole run, however deep it nests. ParentExecutionId alone reached one
+        // level: a grandchild's lines routed to its direct parent — a stream nobody watches. It
+        // remains the fallback for a run already in flight when RootExecutionId was introduced.
+        var logExecutionId = input.RootExecutionId ?? input.ParentExecutionId ?? input.ExecutionId;
 
         if (!isChild && !isContinuation)
             await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
@@ -248,6 +258,15 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     new EvaluateTransitionInput(input.ExecutionId, input.WorkflowKey,
                         run.ActivityName, currentActivityInput, outcome.Output, outcomeKind,
                         outcome.Response, activityError));
+
+                // Which rule decided where the run goes next. Logged before the rethrow below, so a
+                // failure routed to `error` still says which rule sent it there. "rule 1 of 3" is
+                // the useful part: it shows the first match won and the rest were never evaluated.
+                if (transition.MatchedList != null)
+                    logger.LogInformation(
+                        "Activity '{WorkflowActivity}' {TransitionList} rule {RuleNumber} of {RuleCount} matched → {TransitionTarget} (execution {WorkflowExecutionId})",
+                        run.ActivityName, transition.MatchedList, transition.MatchedRule, transition.RuleCount,
+                        DescribeTarget(transition), logExecutionId);
 
                 // No rule matched the failure, so it was never handled — rethrow it as it was,
                 // rather than letting the run fall through to a normal completion.
@@ -401,6 +420,12 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         }
     }
 
+    /// <summary>Where a matched rule sends the run, as a log reads it.</summary>
+    private static string DescribeTarget(EvaluateTransitionOutput transition) =>
+        transition.Dispatch != null ? $"handler {transition.Dispatch.Workflow}"
+        : transition.ReturnValue != null ? "result"
+        : transition.NextActivityName ?? ReservedKeywords.End;
+
     /// <summary>
     /// Performs the activity's work and returns its output, which the transition is then
     /// evaluated against. Each arm is a different durable primitive; the decisions around
@@ -486,7 +511,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 nameof(ExecuteActivity),
                 new ExecuteActivityInput(input.ExecutionId, logExecutionId,
                     resolved.Kind,
-                    resolved.Url, resolved.HttpMethod, resolved.Body, resolved.Headers));
+                    resolved.Url, resolved.HttpMethod, resolved.Body, resolved.Headers,
+                    LogSource: input.ParentExecutionId is null ? null : input.WorkflowKey));
 
             var activityDuration = (context.CurrentUtcDateTime - activityStartTime).TotalMilliseconds;
 
@@ -539,10 +565,6 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 context, logger, run, logExecutionId, subscriptions, subscribedChild);
         }
 
-        logger.LogInformation(
-            "Entering sub-workflow from activity '{WorkflowActivity}' (execution {WorkflowExecutionId})",
-            run.ActivityName, logExecutionId);
-
         // Resolve workflow call input via central template rendering
         var resolved = await context.CallActivityAsync<ResolveActivityInputOutput>(
             nameof(ResolveActivityInputActivity),
@@ -551,6 +573,20 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
         // NewGuid is the replay-safe source, so the same child id comes back on replay.
         var childExecutionId = new ExecutionId(context.NewGuid());
+
+        // The line that makes the rest of the tree legible. It names the child by canonical
+        // identity, which is what the child's own lines carry as their source, so the reader can
+        // join the two; and by its execution id — once, here — because that is the handle a reader
+        // can act on with utos logs or utos cancel. The trailing root id is for routing and is
+        // dropped from the stream; the child's id is not, since it names a different execution.
+        if (resolved.Detached)
+            logger.LogInformation(
+                "Activity '{WorkflowActivity}' spawns {SubWorkflow} as execution {ChildExecutionId} (execution {WorkflowExecutionId})",
+                run.ActivityName, resolved.SubWorkflowKey, childExecutionId, logExecutionId);
+        else
+            logger.LogInformation(
+                "Activity '{WorkflowActivity}' calls {SubWorkflow} as execution {ChildExecutionId} (execution {WorkflowExecutionId})",
+                run.ActivityName, resolved.SubWorkflowKey, childExecutionId, logExecutionId);
 
         if (resolved.Detached)
         {
@@ -591,7 +627,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
                 resolved.SubStartActivity!, input.ExecutionId,
                 ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions,
-                OutputEventName: outputEventName),
+                OutputEventName: outputEventName,
+                RootExecutionId: logExecutionId),
             new ChildWorkflowTaskOptions(childExecutionId.ToString()));
 
         if (consumes)
@@ -676,7 +713,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             new WorkflowExecutorInput(handlerExecutionId, dispatch.Workflow,
                 dispatch.StartActivity, input.ExecutionId,
                 ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions,
-                OutputEventName: handlerEventName),
+                OutputEventName: handlerEventName,
+                RootExecutionId: logExecutionId),
             new ChildWorkflowTaskOptions(handlerExecutionId.ToString()));
 
         while (true)
@@ -879,7 +917,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 nameof(WorkflowExecutor),
                 new WorkflowExecutorInput(branchExecutionId, branch.WorkflowKey,
                     branch.StartActivity, input.ExecutionId,
-                    ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions),
+                    ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions,
+                    RootExecutionId: logExecutionId),
                 new ChildWorkflowTaskOptions(branchExecutionId.ToString()));
         }
 
