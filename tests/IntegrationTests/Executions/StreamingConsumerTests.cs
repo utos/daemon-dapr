@@ -38,7 +38,7 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 Fields(("n", Value.ForString("{{ input.n }}"))),
                 "produce",
                 Fields(("n", Value.ForString("{{ input.n + 1 }}"))),
-                when: $"{{{{ input.n <= {values} }}}}")
+                when: $"input.n <= {values}")
             .OnResult(Fields(("produced", Value.ForNumber(values))));
     }
 
@@ -300,7 +300,7 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                         Fields(("n", Value.ForString("{{ input.n }}"))),
                         "produce",
                         Fields(("n", Value.ForString("{{ input.n + 1 }}"))),
-                        when: "{{ input.n <= 2 }}")
+                        when: "input.n <= 2")
                     .OnSuccess("boom")
                     .HttpGet("boom", boomPath))
             .Build("watch");
@@ -378,7 +378,7 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 [
                     new EmissionRule
                     {
-                        Condition = "{{ output.n >= 3 }}",
+                        Condition = "output.n >= 3",
                         Result = Fields(("found", Value.ForString("{{ output.n }}")))
                     }
                 ])
@@ -430,7 +430,7 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 [
                     new EmissionRule
                     {
-                        Condition = "{{ output.n >= 2 }}",
+                        Condition = "output.n >= 2",
                         Transition = new TransitionTarget { Name = "settle" }
                     }
                 ])
@@ -480,7 +480,7 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 Fields(("n", Value.ForString("{{ input.n }}"))),
                 "pause",
                 Fields(("n", Value.ForString("{{ input.n }}"))),
-                when: $"{{{{ input.n <= {values} }}}}")
+                when: $"input.n <= {values}")
             .OnResult(Fields(("produced", Value.ForNumber(values))));
 
         child.Timer("pause", TimeSpan.FromSeconds(1))

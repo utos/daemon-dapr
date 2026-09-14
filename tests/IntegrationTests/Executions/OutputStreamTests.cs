@@ -40,7 +40,7 @@ public class OutputStreamTests(DaemonTestFixture fixture)
                 Fields(("n", Value.ForString("{{ input.n }}"))),
                 "poll",
                 Fields(("n", Value.ForString("{{ input.n + 1 }}"))),
-                when: $"{{{{ input.n <= {laps} }}}}")
+                when: $"input.n <= {laps}")
             .OnResult(Fields(("done", Value.ForBool(true))))
             .WithInput("n", 1)
             .Build();
@@ -143,7 +143,7 @@ public class OutputStreamTests(DaemonTestFixture fixture)
                 Fields(("n", Value.ForString("{{ input.n }}"))),
                 "wait",
                 Fields(("n", Value.ForString("{{ input.n + 1 }}"))),
-                when: "{{ input.n <= 3 }}")
+                when: "input.n <= 3")
             .OnResult(Fields(("done", Value.ForBool(true))))
             .Timer("wait", TimeSpan.FromSeconds(1))
             .OnSuccess("poll")

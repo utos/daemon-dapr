@@ -13,10 +13,10 @@ namespace Execution.Domain.Interpreter;
 public sealed record WorkflowErrorContext(string Code, string Message)
 {
     /// <summary>
-    /// The scope value for <c>error</c>. Every key is present even off the failure path, for the
-    /// same reason <see cref="HttpResponseContext.ToScopeValue"/> does it: the engine throws on a
-    /// missing member, not merely on an undefined root, so an empty map would make
-    /// <c>error.code == 'X'</c> fail rather than evaluate false.
+    /// The scope value for <c>error</c>. Every key is present even off the failure path, as
+    /// <c>api/docs/template-expressions.md</c> § Scope requires and for the same reason
+    /// <see cref="HttpResponseContext.ToScopeValue"/> does it: <c>error.code === 'X'</c> is
+    /// <c>false</c> on the success path, never an error about a missing root.
     /// </summary>
     public static Dictionary<string, object?> ToScopeValue(WorkflowErrorContext? error)
     {

@@ -31,6 +31,9 @@ public class LegitimateProgramsTests
     [InlineData("const a = []; a.push(1); a.push(2); a", "[1,2]")]
     [InlineData("[3, 1, 2].sort((a, b) => a - b)", "[1,2,3]")]
     [InlineData("const o = { n: 0 }; o.n = 5; o.n", "5")]
+    [InlineData("({ a: { b: 1 } }).a.b", "1")]                          // nested braces inside {{ }}
+    [InlineData("'}}'", "\"}}\"")]                                        // the delimiter inside a string
+    [InlineData("env.SECRET", "\"s3cret\"")]                              // the env namespace
     public void Ordinary_programs_work(string source, string expected) =>
         Assert.Equal(expected, Attack.Json(Attack.Run(source).Returned()));
 
@@ -46,12 +49,20 @@ public class LegitimateProgramsTests
     }
 
     [Fact]
-    public void Expressions_on_one_engine_do_not_share_top_level_declarations()
+    public void The_gmail_body_decode_in_one_program()
     {
-        // §6.4: one engine per activity, one function scope per expression — otherwise results
-        // would depend on evaluation order within an activity.
-        using var session = new ReferenceEvaluator().Open(Attack.ScopeFrom(Attack.DefaultScope));
-        session.Evaluate("const leaked = 1; leaked");
-        Assert.Equal("undefined", session.Evaluate("typeof leaked"));
+        var body = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("Hi there, ÿ")).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var scope = "{\"input\": {}, \"env\": {}, \"output\": {\"payload\": {\"mimeType\": \"multipart/mixed\", \"parts\": ["
+                    + "{\"mimeType\": \"multipart/alternative\", \"parts\": [{\"mimeType\": \"text/plain\", \"body\": {\"data\": \"" + body + "\"}}]},"
+                    + "{\"mimeType\": \"application/pdf\", \"body\": {\"attachmentId\": \"x\"}}]}}}";
+
+        var program = """
+            const parts = output.payload.parts ?? [output.payload];
+            const flat = parts.flatMap(p => [p, ...(p.parts ?? [])]);
+            const data = flat.find(p => p.mimeType === 'text/plain' && p.body?.data !== undefined)?.body.data ?? '';
+            utos.base64UrlDecode(data)
+            """;
+
+        Assert.Equal("Hi there, ÿ", Attack.Run(program, scope).Returned());
     }
 }

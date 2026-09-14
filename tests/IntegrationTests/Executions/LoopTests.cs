@@ -245,7 +245,7 @@ public class LoopTests(DaemonTestFixture fixture)
     }
 
     /// <summary>Condition that stays true until the marker has accumulated <paramref name="laps"/> characters.</summary>
-    private static string NotYetAt(int laps) => $"{{{{ input.marker != \"{MarkerAfter(laps)}\" }}}}";
+    private static string NotYetAt(int laps) => $"input.marker !== \"{MarkerAfter(laps)}\"";
 
     private void StubJson(string path) =>
         fixture.WireMockServer

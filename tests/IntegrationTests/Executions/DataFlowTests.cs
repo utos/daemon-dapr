@@ -342,7 +342,7 @@ public class DataFlowTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("array-output-workflow", fixture.MockBaseUrl)
             .HttpGet("fetch-items", "/items")
-            .OnSuccess("process-many", when: "{{ output.total > 2 }}")
+            .OnSuccess("process-many", when: "output.total > 2")
             .HttpGet("process-many", "/process-many")
             .Build("fetch-items");
 

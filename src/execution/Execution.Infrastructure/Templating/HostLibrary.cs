@@ -5,10 +5,13 @@ using Jint.Native.Object;
 using Jint.Runtime;
 using Jint.Runtime.Interop;
 
-namespace EngineHardeningTests.Support;
+namespace Execution.Infrastructure.Templating;
 
-/// <summary>`utos.*` — spec surface, kept small (`plans/scripting-language.md` §8).</summary>
-public static class HostLibrary
+/// <summary>
+/// <c>utos.*</c> — § Host library of the spec. Spec surface, so it stays small: each function is
+/// a conformance fixture.
+/// </summary>
+internal static class HostLibrary
 {
     public static void Install(Engine engine)
     {
@@ -25,7 +28,14 @@ public static class HostLibrary
             var argument = arguments.Length > 0 ? arguments[0] : JsValue.Undefined;
             if (!argument.IsString())
                 throw new JavaScriptException(engine.Intrinsics.TypeError, $"utos.{name} expects a string");
-            return new JsString(body(argument.AsString()));
+            try
+            {
+                return new JsString(body(argument.AsString()));
+            }
+            catch (FormatException error)
+            {
+                throw new JavaScriptException(engine.Intrinsics.TypeError, $"utos.{name}: {error.Message}");
+            }
         });
 
     private static string Decode(string value, bool urlSafe)

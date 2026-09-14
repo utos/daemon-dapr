@@ -29,6 +29,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- **Template expressions are JavaScript** (spec `v0.0.15`; all four Utos SDK pins bumped
+  `0.0.14.1` → `0.0.15`). `ScribanTemplateEngine` is replaced by `JintTemplateEngine`, which
+  makes every guarantee of `api/docs/template-expressions.md` § Runtime: an allow-listed surface,
+  deep-frozen scope values, one engine per activity decision with one function scope per program,
+  and limits — statement budget, memory, timeout, recursion, array size, JSON depth, regex
+  timeout — that are invisible to script and fail the evaluation with their own `UTOS-E1##` code
+  (`TemplateException.Code`). Native recursion in `JSON.stringify`/`flat` is `UTOS-E114`, not a
+  process exit: Jint's `StackOverflowGuard`, off by default in 4.x, is on. Limits are
+  configuration under `Expressions:` (`TemplateEngineOptions`). The grammar (`UTOS-E0##`) is
+  enforced at load by the 0.0.15 validator and not re-checked at evaluation.
+  **Every Scriban document breaks, loudly** — a `{{ }}`-wrapped condition is `UTOS-E061` at load
+  and Scriban's call syntax is a syntax error — and **existing streams cannot be replayed: drop the
+  KurrentDB volume and the SQL database.** Four behaviours change without an error, per the spec:
+  a missing member is `undefined` rather than fatal, a condition must be boolean, whole-valued
+  doubles divide exactly, division by zero is an error. Two more are this daemon's:
+  `response.headers` keys are **lowercased** (`response.headers['retry-after']`), since a
+  JavaScript property lookup cannot be case-insensitive the way the old dictionary was; and an
+  integer beyond 2⁵³ in scope is refused (`UTOS-E104`) rather than rounded, where the old engine
+  carried it exactly. `ITemplateEngine` is reshaped — `EvaluateCondition` for bare conditions,
+  `RenderTyped`, `RenderToString` — and the hardening suite now attacks the real engine rather
+  than a copy of it.
 - **Dispatched work is its own document** (spec `v0.0.13`; all four Utos SDK pins bumped `0.0.12` →
   `0.0.14.1`, taking both spec releases at once). A promise branch and an `on_emitted` rule name a
   *document* — `workflow`, `startActivity`, `input` — rather than pointing at an activity in the

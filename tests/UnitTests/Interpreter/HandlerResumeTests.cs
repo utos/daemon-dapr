@@ -36,7 +36,7 @@ public class HandlerResumeTests
     {
         // A filtering consumer: values it does not care about must be skipped, not fatal. This is
         // the trap the old behaviour set — one uninteresting value silently killed the producer.
-        var graph = Consumer([Wf.Dispatch("process", condition: "{{ output.urgent }}")]);
+        var graph = Consumer([Wf.Dispatch("process", condition: "output.urgent")]);
 
         var decision = _interpreter.Advance(
             Wf.Session(graph), "watch", null,
@@ -61,7 +61,7 @@ public class HandlerResumeTests
     [Fact]
     public void A_matching_rule_dispatches_the_document_it_names()
     {
-        var graph = Consumer([Wf.Dispatch("process", condition: "{{ output.urgent }}")]);
+        var graph = Consumer([Wf.Dispatch("process", condition: "output.urgent")]);
 
         var decision = _interpreter.Advance(
             Wf.Session(graph), "watch", null,
@@ -81,7 +81,7 @@ public class HandlerResumeTests
         var graph = Wf.Graph(
             ("watch", Wf.ConsumingCall("acme/producer:1.0.0", "poll",
             [
-                Wf.Dispatch("first", condition: "{{ output.urgent }}"),
+                Wf.Dispatch("first", condition: "output.urgent"),
                 Wf.Dispatch("second")
             ])),
             ("first", Wf.Http("https://api.example.com/first")),
@@ -117,7 +117,7 @@ public class HandlerResumeTests
         // The action that closed the early-stop gap. It is a Goto and not a Resume, which is the
         // whole distinction the driver reads: a Resume keeps the producer running, a Goto ends the
         // subscription and cancels it.
-        var graph = Consumer([Wf.EmittedGoto("process", condition: "{{ output.done }}")]);
+        var graph = Consumer([Wf.EmittedGoto("process", condition: "output.done")]);
 
         var decision = _interpreter.Advance(
             Wf.Session(graph), "watch", null,
@@ -138,7 +138,7 @@ public class HandlerResumeTests
         [
             Wf.EmittedResult(
                 ValueMap.From([new KeyValuePair<string, object?>("found", "{{ output.id }}")]),
-                condition: "{{ output.match }}")
+                condition: "output.match")
         ]);
 
         var decision = _interpreter.Advance(
@@ -158,7 +158,7 @@ public class HandlerResumeTests
         // catch-all result, and reading them in any other order would invert it.
         var graph = Consumer(
         [
-            Wf.Dispatch("process", condition: "{{ output.urgent }}"),
+            Wf.Dispatch("process", condition: "output.urgent"),
             Wf.EmittedGoto("process")
         ]);
 

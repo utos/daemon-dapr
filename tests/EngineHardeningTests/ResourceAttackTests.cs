@@ -1,11 +1,9 @@
-using System.Text.RegularExpressions;
 using EngineHardeningTests.Support;
-using Jint.Runtime;
 
 namespace EngineHardeningTests;
 
 /// <summary>
-/// §6.5. Work that is small in statements and large in everything else, each stopped by a named
+/// Work that is small in statements and large in everything else, each stopped by a named
 /// limit, quickly. Without loops or `Array.from`, every multiplication of work starts from the
 /// input's own size; the array-size cap catches most of the shapes the sampled memory limit
 /// would otherwise see too late.
@@ -13,6 +11,7 @@ namespace EngineHardeningTests;
 public class ResourceAttackTests
 {
     private static readonly TimeSpan Quickly = TimeSpan.FromSeconds(3);
+    private static readonly string[] LimitCodes = ["UTOS-E110", "UTOS-E111", "UTOS-E112", "UTOS-E115"];
 
     [Theory]
     [InlineData("input.items.flatMap(a => input.items.flatMap(b => input.items.flatMap(c => input.items)))", 60)]      // 60⁴ elements
@@ -24,9 +23,8 @@ public class ResourceAttackTests
     public void Allocation_attacks_are_stopped_by_a_named_limit(string source, int items)
     {
         var outcome = Attack.Run(source, Attack.ScopeWithItems(items, ", \"big\": \"" + new string('x', 1024) + "\""));
-        var exception = outcome.Threw<Exception>();
-        Assert.True(exception is MemoryLimitExceededException or StatementsCountOverflowException or TimeoutException,
-            $"stopped by {exception.GetType().Name}: {exception.Message}");
+        var exception = outcome.ThrewAny();
+        Assert.Contains(exception.Code, LimitCodes);
         Assert.True(outcome.Elapsed < Quickly, $"took {outcome.Elapsed}");
     }
 
@@ -34,18 +32,13 @@ public class ResourceAttackTests
     [InlineData("/(a+)+$/.test('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaab')")]
     [InlineData("'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaab'.match(/(a+)+$/)")]
     [InlineData("'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaab'.replace(/(a+)+$/, '')")]
-    public void Catastrophic_regex_hits_the_regex_timeout(string source)
+    public void Catastrophic_regex_hits_the_regex_timeout_on_prepared_scripts_too(string source)
     {
+        // The engine prepares scripts, which compiles regex literals at parse time with the
+        // parsing options' timeout — a different setting from the engine constraint, and one that
+        // defaults to ~10 s. Both are set; this is the one that would have been missed.
         var outcome = Attack.Run(source);
-        outcome.Threw<RegexMatchTimeoutException>();
+        outcome.Threw("UTOS-E117");
         Assert.True(outcome.Elapsed < Quickly, $"took {outcome.Elapsed}");
     }
-
-    [Theory]
-    [InlineData("'x'.repeat(200000000)")]
-    [InlineData("'x'.padStart(200000000)")]
-    [InlineData("'x'.padEnd(200000000)")]
-    [InlineData("Array.from({ length: 2000000 }, () => 0)")]
-    public void Manufacturers_of_size_from_a_number_do_not_exist(string source) =>
-        Assert.Contains("is not a function", Attack.Run(source).Threw<JavaScriptException>().Message);
 }

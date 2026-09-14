@@ -3,10 +3,12 @@ using System.Text.Json;
 namespace Common.Workflow.Serialization;
 
 /// <summary>
-/// Decides what CLR type a number becomes. Template expressions do arithmetic and comparisons on
-/// these values and Scriban dispatches on the runtime type, so this decision is behaviour, not
-/// housekeeping — and it was previously made by four separate copies of the rule that did not all
-/// agree.
+/// Decides what CLR type a number becomes. This is the persisted and wire-facing shape of a
+/// value — what an event stores and what an API returns — so it is behaviour, not housekeeping;
+/// it was previously made by four separate copies of the rule that did not all agree. Inside an
+/// expression there is one number type (a double, per <c>api/docs/template-expressions.md</c>),
+/// so the two rules below no longer affect what a template computes; a result narrows through
+/// <see cref="FromDouble"/> on its way out.
 ///
 /// There are deliberately <b>two</b> rules, because the two sources carry different evidence:
 /// a <c>google.protobuf.Value</c> has only a double, while JSON still has the author's token.

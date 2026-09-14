@@ -38,7 +38,7 @@ public class ResponseContextTests
     {
         var decision = Advance(
             Response(429),
-            Wf.Goto("retry", condition: "{{ response.status == 429 }}"),
+            Wf.Goto("retry", condition: "response.status === 429"),
             Wf.Goto("fallback"));
 
         Assert.Equal("retry", Assert.IsType<TransitionDecision.Goto>(decision).ActivityName);
@@ -49,8 +49,8 @@ public class ResponseContextTests
     {
         var decision = Advance(
             Response(401),
-            Wf.Goto("retry", condition: "{{ response.status == 429 }}"),
-            Wf.Goto("reauth", condition: "{{ response.status == 401 }}"),
+            Wf.Goto("retry", condition: "response.status === 429"),
+            Wf.Goto("reauth", condition: "response.status === 401"),
             Wf.Goto("fallback"));
 
         Assert.Equal("reauth", Assert.IsType<TransitionDecision.Goto>(decision).ActivityName);
@@ -61,7 +61,7 @@ public class ResponseContextTests
     {
         var decision = Advance(
             Response(429, ("Retry-After", "120")),
-            Wf.Goto("retry", condition: "{{ response.headers['Retry-After'] == '120' }}"),
+            Wf.Goto("retry", condition: "response.headers['retry-after'] === '120'"),
             Wf.Goto("fallback"));
 
         Assert.Equal("retry", Assert.IsType<TransitionDecision.Goto>(decision).ActivityName);
@@ -76,7 +76,7 @@ public class ResponseContextTests
         // evaluate false instead of failing while a failure is already being handled.
         var decision = Advance(
             null,
-            Wf.Goto("retry", condition: "{{ response.status == 429 }}"),
+            Wf.Goto("retry", condition: "response.status === 429"),
             Wf.Goto("fallback"));
 
         Assert.Equal("fallback", Assert.IsType<TransitionDecision.Goto>(decision).ActivityName);

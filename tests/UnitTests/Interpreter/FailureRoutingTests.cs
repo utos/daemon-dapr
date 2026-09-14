@@ -51,7 +51,7 @@ public class FailureRoutingTests
         // The single most important assertion here. If this returns End, an unhandled failure is
         // reported as a successful completion — a regression no other test would notice.
         var decision = Advance(Failing(
-            onFailure: [Wf.Goto("backoff", condition: "{{ response.status == 429 }}")]),
+            onFailure: [Wf.Goto("backoff", condition: "response.status === 429")]),
             response: new HttpResponseContext(500, [], null));
 
         Assert.IsType<TransitionDecision.Propagate>(decision);
@@ -63,7 +63,7 @@ public class FailureRoutingTests
         var decision = Advance(Failing(
             onFailure:
             [
-                Wf.Goto("backoff", condition: "{{ response.status == 429 }}"),
+                Wf.Goto("backoff", condition: "response.status === 429"),
                 Wf.Goto("giveup")
             ]),
             response: new HttpResponseContext(500, [], null));
@@ -82,7 +82,7 @@ public class FailureRoutingTests
     {
         // The asymmetry, from the other side: same situation on the success path means finished.
         var graph = Wf.Graph(("call", Wf.Http("https://api.example.com/thing",
-            onSuccess: Wf.Goto("call", condition: "{{ output.ready }}"))));
+            onSuccess: Wf.Goto("call", condition: "output.ready"))));
 
         var decision = _interpreter.Advance(
             Wf.Session(graph), "call", null,
@@ -97,8 +97,8 @@ public class FailureRoutingTests
         var decision = Advance(Failing(
             onFailure:
             [
-                Wf.Goto("backoff", condition: "{{ response.status == 429 }}"),
-                Wf.Goto("reauth", condition: "{{ response.status == 401 }}"),
+                Wf.Goto("backoff", condition: "response.status === 429"),
+                Wf.Goto("reauth", condition: "response.status === 401"),
                 Wf.Goto("giveup")
             ]),
             response: new HttpResponseContext(401, [], null));
@@ -110,7 +110,7 @@ public class FailureRoutingTests
     public void A_rule_with_no_condition_is_the_failure_fallback()
     {
         var decision = Advance(Failing(
-            onFailure: [Wf.Goto("backoff", condition: "{{ response.status == 429 }}"), Wf.Goto("giveup")]),
+            onFailure: [Wf.Goto("backoff", condition: "response.status === 429"), Wf.Goto("giveup")]),
             response: new HttpResponseContext(500, [], null));
 
         Assert.Equal("giveup", Assert.IsType<TransitionDecision.Goto>(decision).ActivityName);
@@ -130,7 +130,7 @@ public class FailureRoutingTests
     public void The_error_message_is_readable_from_a_condition()
     {
         var decision = Advance(Failing(
-            onFailure: [Wf.Goto("backoff", condition: "{{ error.message == 'boom' }}"), Wf.Goto("giveup")]));
+            onFailure: [Wf.Goto("backoff", condition: "error.message === 'boom'"), Wf.Goto("giveup")]));
 
         Assert.Equal("backoff", Assert.IsType<TransitionDecision.Goto>(decision).ActivityName);
     }

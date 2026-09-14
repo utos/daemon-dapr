@@ -3,10 +3,9 @@ using EngineHardeningTests.Support;
 namespace EngineHardeningTests;
 
 /// <summary>
-/// §6.3, the way back. A result is plain data or it is refused: a cycle, a function, a Map or Set
-/// (which would silently become `{}`), a non-finite number. Getters, methods and class instances
-/// cannot be written in the language at all (`GrammarTests`); the converter still refuses them,
-/// as a second answer. Numbers narrow by the daemon's own rule.
+/// § Values, the way back. A result is plain data or it is refused: a cycle, a function, a Map
+/// or Set (which would silently become `{}`), a non-finite number. Numbers narrow by the daemon's
+/// own rule; an integer beyond 2⁵³ is refused on the way in rather than rounded.
 /// </summary>
 public class ResultConverterTests
 {
@@ -17,10 +16,13 @@ public class ResultConverterTests
     [InlineData("({ toJSON: () => 1 })", "function")]
     [InlineData("new Map([['a', 1]])", "JsMap")]
     [InlineData("new Set([1])", "JsSet")]
-    [InlineData("1 / 0", "non-finite")]
-    [InlineData("0 / 0", "non-finite")]
     public void Anything_but_plain_data_is_refused(string source, string reason) =>
-        Assert.Contains(reason, Attack.Run(source).Threw<ResultRejectedException>().Message);
+        Assert.Contains(reason, Attack.Run(source).Threw("UTOS-E103").Message);
+
+    [Theory]
+    [InlineData("1 / 0")]
+    [InlineData("0 / 0")]
+    public void A_non_finite_number_is_an_error(string source) => Attack.Run(source).Threw("UTOS-E102");
 
     [Fact]
     public void A_symbol_keyed_function_is_dropped_never_invoked() =>
@@ -38,10 +40,8 @@ public class ResultConverterTests
     [Fact]
     public void An_integer_beyond_2_53_is_refused_on_the_way_in_rather_than_rounded()
     {
-        // 2^53 + 1 is the first integer a double cannot hold. Scriban carried a long exactly; a JS
-        // number would round it silently — a numeric id would come back changed.
         var scope = """{"input": {"id": 9007199254740993}, "env": {}, "output": {}}""";
-        Assert.Contains("2^53", Attack.Run("input.id", scope).Threw<ScopeRejectedException>().Message);
+        Assert.Contains("2^53", Attack.Run("input.id", scope).Threw("UTOS-E104").Message);
 
         var exact = """{"input": {"id": 9007199254740992}, "env": {}, "output": {}}""";
         Assert.Equal(9007199254740992L, Attack.Run("input.id", exact).Returned());
@@ -56,7 +56,7 @@ public class ResultConverterTests
     }
 
     [Fact]
-    public void Undefined_becomes_null_and_null_stays_null()
+    public void Undefined_and_null_both_come_back_as_null()
     {
         Assert.Null(Attack.Run("input.missing").Returned());
         Assert.Null(Attack.Run("null").Returned());
@@ -66,4 +66,24 @@ public class ResultConverterTests
     [Fact]
     public void String_plus_number_concatenates_the_trap_the_spec_names() =>
         Assert.Equal("123451", Attack.Run("'12345' + 1").Returned());
+
+    [Theory]
+    [InlineData("n={{ input.count }}", "n=1")]
+    [InlineData("{{ 5.0 }}", "5")]
+    [InlineData("{{ 2.5 }}", "2.5")]
+    [InlineData("{{ true }}/{{ null }}/{{ undefined }}", "true//")]
+    [InlineData("{{ input.user }}", """{"name":"x"}""")]
+    [InlineData("{{ input.items }}", "[3,1,2]")]
+    public void Text_rendering_follows_the_spec(string template, string expected) =>
+        Assert.Equal(expected, Attack.RunText(template).Returned());
+
+    [Fact]
+    public void A_condition_must_be_boolean()
+    {
+        Assert.Equal(true, Attack.RunCondition("input.count === 1").Returned());
+        Assert.Equal(false, Attack.RunCondition("input.missing?.deep === 'x'").Returned());
+        Attack.RunCondition("input.items").Threw("UTOS-E101");
+        Attack.RunCondition("input.count").Threw("UTOS-E101");
+        Attack.RunCondition("{{ input.count === 1 }}").Threw("UTOS-E061");
+    }
 }

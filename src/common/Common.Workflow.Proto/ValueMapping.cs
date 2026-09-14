@@ -68,10 +68,10 @@ public static class ValueMapping
 
     /// <summary>
     /// The same scalar rules as <see cref="ToDomain(Value)"/>, but nesting into a plain
-    /// dictionary rather than a <see cref="ValueMap"/>. That difference is deliberate and
-    /// load-bearing: run data goes straight into a template scope, and Scriban resolves members
-    /// on something that implements a dictionary interface while falling back to reflection on
-    /// anything else — a ValueMap here would stop <c>{{ input.user.name }}</c> resolving. An
+    /// dictionary rather than a <see cref="ValueMap"/>. That difference is deliberate: run data
+    /// goes straight into a template scope, and the scope converter copies dictionaries and lists
+    /// into plain JavaScript objects and arrays — it accepts a ValueMap too, but a dictionary is
+    /// what every other run value is, and one shape is easier to reason about than two. An
     /// authored document has no such problem because the renderer flattens it first.
     /// </summary>
     private static object? ToRuntimeValue(Value source)

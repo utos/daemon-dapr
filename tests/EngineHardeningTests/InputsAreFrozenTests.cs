@@ -1,12 +1,12 @@
 using EngineHardeningTests.Support;
-using Jint.Runtime;
 
 namespace EngineHardeningTests;
 
 /// <summary>
-/// §6.3. Scope roots are deep-frozen and bound non-writable. Every route to changing them is a
-/// TypeError, the host's data is untouched, and — the other half of the same rule — an expression's
-/// own locals are freely mutable, because the freeze decides what is writable, not the method list.
+/// § Scope. Scope values are deep-frozen copies bound non-writable. Every route to changing
+/// them is a TypeError (UTOS-E120), the host's data is untouched, and — the other half of the
+/// same rule — an expression's own locals are freely mutable, because the freeze decides what is
+/// writable, not the method list.
 /// </summary>
 public class InputsAreFrozenTests
 {
@@ -23,22 +23,26 @@ public class InputsAreFrozenTests
     [InlineData("input.items.fill(0)")]
     [InlineData("input.items.length = 0; input.items.length")]
     [InlineData("Object.assign(input, { count: 999 }); input.count")]
-    [InlineData("globalThis.input = { count: 999 }; input.count")]
-    public void Every_route_to_mutating_an_input_is_a_TypeError(string source) =>
-        Attack.Run(source).Threw<JavaScriptException>();
-
-    [Theory]
     [InlineData("Object.defineProperty(input, 'count', { value: 999 })")]
     [InlineData("Object.setPrototypeOf(input, { pwned: 1 })")]
-    public void Reflection_style_mutators_do_not_exist(string source) =>
-        Assert.Contains("is not a function", Attack.Run(source).Threw<JavaScriptException>().Message);
-
-    [Theory]
     [InlineData("Array.prototype.map = () => 'pwned'; [1].map(x => x)")]
     [InlineData("Array.prototype.evil = 1; [].evil")]
     [InlineData("String.prototype.trim = () => 'pwned'; ' x '.trim()")]
-    public void Built_in_prototypes_are_frozen(string source) =>
-        Attack.Run(source).Threw<JavaScriptException>();
+    public void Every_route_to_mutation_is_a_script_error(string source) =>
+        Attack.Run(source).Threw("UTOS-E120");
+
+    [Fact]
+    public void The_host_data_is_untouched_by_a_mutation_attempt()
+    {
+        var scope = Attack.ScopeFrom(Attack.DefaultScope);
+        var before = Attack.Json(Attack.Snapshot(scope));
+        var engine = Attack.Engine();
+
+        Assert.Throws<Execution.Domain.Templating.TemplateException>(() => engine.RenderTyped("{{ input.count = 999; input.count }}", scope));
+        Assert.Throws<Execution.Domain.Templating.TemplateException>(() => engine.RenderTyped("{{ input.items.push(4) }}", scope));
+
+        Assert.Equal(before, Attack.Json(Attack.Snapshot(scope)));
+    }
 
     [Theory]
     [InlineData("const a = []; a.push(1); a.push(2); a", "[1,2]")]
@@ -51,28 +55,21 @@ public class InputsAreFrozenTests
         Assert.Equal(expected, Attack.Json(Attack.Run(source).Returned()));
 
     [Fact]
-    public void An_expression_cannot_change_what_the_next_expression_on_the_same_engine_sees()
+    public void An_expression_cannot_change_what_the_next_expression_on_the_same_scope_sees()
     {
-        var evaluator = new ReferenceEvaluator();
-        using var session = evaluator.Open(Attack.ScopeFrom(Attack.DefaultScope));
+        // One engine per scope (per activity decision); each program in its own function scope.
+        var scope = Attack.ScopeFrom(Attack.DefaultScope);
+        var engine = Attack.Engine();
 
-        Assert.Throws<JavaScriptException>(() => session.Evaluate("input.count = 999"));
-        Assert.Throws<JavaScriptException>(() => session.Evaluate("Array.prototype.includes = () => 'pwned'"));
+        Assert.Throws<Execution.Domain.Templating.TemplateException>(() => engine.RenderTyped("{{ input.count = 999 }}", scope));
+        Assert.Throws<Execution.Domain.Templating.TemplateException>(() => engine.RenderTyped("{{ Array.prototype.includes = () => 'pwned' }}", scope));
+        Assert.Throws<Execution.Domain.Templating.TemplateException>(() => engine.RenderTyped("{{ globalThis.leak = 1 }}", scope));
+        engine.RenderTyped("{{ const leaked = 1; leaked }}", scope);
 
-        Assert.Equal(1, session.Evaluate("input.count"));
-        Assert.Equal(false, session.Evaluate("[1].includes(2)"));
-    }
-
-    [Fact]
-    public void The_global_object_is_not_reachable_so_nothing_can_be_left_behind()
-    {
-        // `var` and `function` declarations are outside the language, so the global object has no
-        // legitimate use, is not named, and is frozen; `globalThis.leak = 1` was the last way one
-        // expression could change what the next one sees.
-        using var session = new ReferenceEvaluator().Open(Attack.ScopeFrom(Attack.DefaultScope));
-
-        Assert.Throws<JavaScriptException>(() => session.Evaluate("globalThis.leak = 1"));
-        Assert.Equal("undefined", session.Evaluate("typeof leak"));
-        Assert.Equal("undefined", session.Evaluate("typeof globalThis"));
+        Assert.Equal(1, engine.RenderTyped("{{ input.count }}", scope));
+        Assert.Equal(false, engine.RenderTyped("{{ [1].includes(2) }}", scope));
+        Assert.Equal("undefined", engine.RenderTyped("{{ typeof leaked }}", scope));
+        Assert.Equal("undefined", engine.RenderTyped("{{ typeof leak }}", scope));
+        Assert.Equal("undefined", engine.RenderTyped("{{ typeof globalThis }}", scope));
     }
 }

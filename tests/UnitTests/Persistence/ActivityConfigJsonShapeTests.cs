@@ -89,14 +89,14 @@ public class ActivityConfigJsonShapeTests
         var config = new CallActivityConfig("acme/mailbox:1.0.0", "poll",
             OnEmitted:
             [
-                EmissionRule.Goto("wrap-up", condition: "{{ output.done }}"),
+                EmissionRule.Goto("wrap-up", condition: "output.done"),
                 EmissionRule.Returns(new ValueMap(new Dictionary<string, object?> { ["seen"] = true }))
             ]);
 
         var json = Serialize(config);
 
         Assert.Contains("""
-                        {"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":"{{ output.done }}"}
+                        {"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":"output.done"}
                         """, json);
 
         Assert.Contains("""
