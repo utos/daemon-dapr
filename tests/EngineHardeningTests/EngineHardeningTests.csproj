@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Jint" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" />
+        <PackageReference Include="xunit"/>
+        <PackageReference Include="xunit.runner.visualstudio">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <!--
+      Not part of the CI unit-test step on purpose. These are adversarial: they build 45,000-deep
+      structures, run catastrophic regexes and allocate against the memory limit, and several of
+      them would end the test host if a single engine option regressed. They run on a schedule and
+      on demand (.github/workflows/engine-hardening.yml), and locally with
+      `dotnet test tests/EngineHardeningTests`.
+
+      Common.Workflow is referenced for the real NumberNarrowing: the number rule is the daemon's,
+      not this suite's.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="../../src/common/Common.Workflow/Common.Workflow.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="Xunit"/>
+    </ItemGroup>
+
+</Project>

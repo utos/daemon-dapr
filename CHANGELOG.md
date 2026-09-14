@@ -47,6 +47,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An engine hardening test suite** (`tests/EngineHardeningTests`), ahead of the move from
+  Scriban to JavaScript expressions. It is the language definition and the runtime guarantees of
+  that move as 197 tests against a reference Jint 4.16.2 posture. The language is a
+  JavaScript subset given as an allow-list of syntax-tree node types — no loops, classes,
+  prototypes, `function`, `var`, `this`, `try`, or `new` beyond `Set`/`Map` — checked on the tree
+  the engine runs, so iteration can only come from data that already exists. Behind it: deep-frozen
+  inputs, a run-time surface that is also an allow-list, no route from data to `Function` or the
+  host, native recursion in `JSON.stringify`/`flat` as a `RangeError` rather than a dead process,
+  allocation and regex attacks stopped by a named limit, and the ordinary programs the lockdown
+  must leave working. The one native recursion Jint's stack guard does not probe — a property miss
+  on a 20,000-link prototype chain, sebastienros/jint#4076, which ends the host — is unreachable
+  from the language and pinned as such. Not part of the pull-request CI (a regression in one
+  engine option would take the test host down); runs weekly and on demand via
+  `engine-hardening.yml`. Adds `Jint` to the package pins; nothing under `src/` changes.
 - **An `on_emitted` rule carries an action** (spec `v0.0.14`): a guard plus exactly one of `handle`,
   `transition` or `result`, where it was a flat dispatch. `handle` is what a rule used to be and
   continues the consuming loop; the other two leave it, and they exist because without them a
