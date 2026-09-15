@@ -1,17 +1,20 @@
 using Jint;
 using Jint.Native;
 
-namespace EngineHardeningTests.Support;
+namespace Execution.Infrastructure.Templating;
 
 /// <summary>
-/// The surface allow-list (`plans/scripting-language.md` §6.2): everything on <c>globalThis</c> and
-/// on every built-in prototype that is not named here is deleted before user code runs, and what
-/// remains is frozen. Allow, not deny — a new built-in in a future Jint is absent until listed.
+/// The run-time surface of <c>api/docs/template-expressions.md</c> § Surface, as an allow-list:
+/// everything on the global object and on every built-in prototype that is not named here is
+/// deleted before user code runs, and what remains is frozen — including the global object
+/// itself, which no program can name. A new built-in in a future Jint is absent until listed.
 /// </summary>
-public static class EngineLockdown
+internal static class EngineLockdown
 {
-    // Mutating array methods stay on purpose: the FREEZE decides what may be mutated (locals yes,
-    // inputs no). The list only removes what can do unbounded native work or reach code.
+    // Mutating array methods stay on purpose: the FREEZE decides what may be mutated (locals
+    // yes, scope values no). The list only removes what does unbounded native work or reaches
+    // code — repeat/padStart/padEnd allocate outside the memory sampler, Array.from manufactures
+    // elements from a number, Function.prototype.constructor leads back to Function.
     private static readonly Dictionary<string, string[]> PrototypeMembers = new()
     {
         ["Array"] =
@@ -28,69 +31,58 @@ public static class EngineLockdown
             "toLowerCase", "toUpperCase", "startsWith", "endsWith", "split", "replace", "replaceAll",
             "substring", "charAt", "charCodeAt", "codePointAt", "concat", "length", "constructor",
             "normalize", "match", "matchAll", "search", "localeCompare",
-            // Not repeat / padStart / padEnd: one call allocates outside the memory sampler.
         ],
         ["Object"] = ["hasOwnProperty", "toString", "valueOf", "constructor"],
         ["Number"] = ["toFixed", "toString", "valueOf", "constructor"],
         ["Boolean"] = ["toString", "valueOf", "constructor"],
-        // No `constructor`: with it gone, a function value has no route back to Function.
         ["Function"] = ["call", "apply", "bind", "length", "name"],
     };
 
-    // No `globalThis`: with `var`, `function` and `this` outside the language, nothing legitimate
-    // needs the global object, and `globalThis.x = 1` was the one way an expression could leave
-    // something behind for the next one on the same engine.
     private static readonly string[] Globals =
     [
         "undefined", "NaN", "Infinity",
-        "Array", "String", "Number", "Boolean", "Object", "Math", "JSON", "Set", "Map",
+        "Array", "String", "Number", "Boolean", "Object", "Math", "JSON", "Set", "Map", "Symbol",
         "parseInt", "parseFloat", "isNaN", "isFinite",
         "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI",
-        "Symbol", // Symbol.iterator is what spread needs
         "utos",
     ];
 
     private static readonly string[] Statics =
     [
         "prototype", "name", "length",
-        // Not Array.from: with `{length: n}` it manufactures n elements from a number, which is
-        // the one thing a language without loops must not offer. Array.of only re-wraps arguments.
         "of", "isArray", "keys", "values", "entries", "fromEntries", "assign", "freeze",
         "hasOwn", "getPrototypeOf", "isInteger", "isFinite", "isNaN", "isSafeInteger",
         "parseFloat", "parseInt", "getOwnPropertyNames", "fromCharCode", "fromCodePoint",
         "MAX_SAFE_INTEGER", "MIN_SAFE_INTEGER", "EPSILON", "MAX_VALUE", "MIN_VALUE",
         "POSITIVE_INFINITY", "NEGATIVE_INFINITY", "NaN",
-        // Math, everything but random
         "abs", "ceil", "floor", "round", "trunc", "sign", "min", "max", "pow", "sqrt", "cbrt",
         "log", "log2", "log10", "exp", "hypot", "sin", "cos", "tan", "atan", "atan2",
         "PI", "E", "LN2", "LN10", "LOG2E", "LOG10E", "SQRT2", "SQRT1_2",
-        // JSON
         "parse", "stringify",
     ];
 
+    /// <param name="scopeRoots">Kept as globals but skipped by the freeze walk: they were frozen host-side on the way in.</param>
     public static void Apply(Engine engine, IEnumerable<string> scopeRoots)
     {
         var roots = scopeRoots.ToArray();
         var members = new JsObject(engine);
-        foreach (var (proto, names) in PrototypeMembers)
-            members.Set(proto, Strings(engine, names));
+        foreach (var (prototype, names) in PrototypeMembers)
+            members.Set(prototype, Strings(engine, names));
 
         engine.SetValue("__members", members);
         engine.SetValue("__globals", Strings(engine, Globals.Concat(roots)));
         engine.SetValue("__statics", Strings(engine, Statics));
-        // The roots were frozen host-side on the way in; walking a 5,000-record payload in script
-        // overflows the statement budget, so the freeze walk skips them.
         engine.SetValue("__skip", Strings(engine, roots));
 
         engine.Execute(Script);
     }
 
     private static JsArray Strings(Engine engine, IEnumerable<string> values) =>
-        new(engine, [.. values.Select(v => (JsValue)new JsString(v))]);
+        new(engine, [.. values.Select(value => (JsValue)new JsString(value))]);
 
+    // Runs once per engine, before any user code, under the engine's own limits.
     private const string Script = """
         (function () {
-            // The global object, captured before the sweep removes the `globalThis` name itself.
             const G = globalThis;
             const members = __members, statics = new Set(__statics), skip = new Set(__skip);
             const keep = new Set(__globals);
@@ -118,9 +110,7 @@ public static class EngineLockdown
             }
 
             // Freeze everything reachable from every global, then the global object itself.
-            // Iterative, so depth cannot hit the recursion limit. Every expression runs in its own
-            // function scope and `var`/`function` declarations are outside the language, so nothing
-            // ever needs to define a global.
+            // Iterative, so depth cannot hit the recursion limit.
             const seen = new Set([G]);
             const stack = [];
             for (const name of names(G)) {

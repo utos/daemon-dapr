@@ -6,13 +6,15 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Jint" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" />
         <PackageReference Include="xunit"/>
         <PackageReference Include="xunit.runner.visualstudio">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
+        <!-- The grammar (UTOS-E0##) is the shared validator's; GrammarTests drive it on bundles. -->
+        <PackageReference Include="Utos.Workflow" />
+        <PackageReference Include="Utos.Workflow.Validation" />
     </ItemGroup>
 
     <!--
@@ -22,11 +24,13 @@
       on demand (.github/workflows/engine-hardening.yml), and locally with
       `dotnet test tests/EngineHardeningTests`.
 
-      Common.Workflow is referenced for the real NumberNarrowing: the number rule is the daemon's,
-      not this suite's.
+      Execution.Infrastructure is referenced for the real JintTemplateEngine: what these tests
+      attack is the engine the daemon runs, not a copy.
     -->
     <ItemGroup>
-        <ProjectReference Include="../../src/common/Common.Workflow/Common.Workflow.csproj"/>
+        <ProjectReference Include="../../src/execution/Execution.Domain/Execution.Domain.csproj"/>
+        <ProjectReference Include="../../src/execution/Execution.Application/Execution.Application.csproj"/>
+        <ProjectReference Include="../../src/execution/Execution.Infrastructure/Execution.Infrastructure.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

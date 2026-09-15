@@ -30,7 +30,7 @@ public class WorkflowMappingTests
 
         httpActivity.OnSuccess.Add(new Wire.TransitionRule
         {
-            Condition = "{{ output.n > 10 }}",
+            Condition = "output.n > 10",
             Transition = new Wire.TransitionTarget
             {
                 Name = "wait",
@@ -54,7 +54,7 @@ public class WorkflowMappingTests
         // emitting loop threads its cursor across the back-edge the same way any loop does.
         httpActivity.OnSuccess.Add(new Wire.TransitionRule
         {
-            Condition = "{{ output.n > 0 }}",
+            Condition = "output.n > 0",
             Emit = new Wire.EmitAction
             {
                 Value = new Struct { Fields = { ["batch"] = Value.ForString("{{ output.items }}") } },
@@ -110,7 +110,7 @@ public class WorkflowMappingTests
                         // presence instead of ActionCase would turn it into no action at all.
                         new Wire.EmissionRule
                         {
-                            Condition = "{{ output.kind == 'receipt' }}",
+                            Condition = "output.kind === 'receipt'",
                             Handle = new Wire.HandlerDispatch
                             {
                                 Workflow = "acme/handler:1.0.0",
@@ -120,7 +120,7 @@ public class WorkflowMappingTests
                         },
                         new Wire.EmissionRule
                         {
-                            Condition = "{{ output.done }}",
+                            Condition = "output.done",
                             Transition = new Wire.TransitionTarget { Name = "wait" }
                         },
                         new Wire.EmissionRule { Result = new Struct() }
@@ -139,7 +139,7 @@ public class WorkflowMappingTests
                     new Wire.PromiseBranch
                     {
                         Name = "pricing",
-                        Condition = "{{ input.enabled }}",
+                        Condition = "input.enabled",
                         Workflow = "acme/pricer:1.0.0",
                         StartActivity = "quote",
                         ForEach = new Wire.ForEachConfig { Collection = "{{ input.addons }}", Alias = "addon" }

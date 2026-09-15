@@ -24,8 +24,8 @@ public class TransitionSelectionTests
         var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
             onSuccess:
             [
-                Wf.Goto("small", condition: "{{ output.count < 10 }}"),
-                Wf.Goto("medium", condition: "{{ output.count < 100 }}"),
+                Wf.Goto("small", condition: "output.count < 10"),
+                Wf.Goto("medium", condition: "output.count < 100"),
                 Wf.Goto("large")
             ]))));
 
@@ -42,8 +42,8 @@ public class TransitionSelectionTests
         var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
             onSuccess:
             [
-                Wf.Goto("small", condition: "{{ output.count < 10 }}"),
-                Wf.Goto("medium", condition: "{{ output.count < 100 }}"),
+                Wf.Goto("small", condition: "output.count < 10"),
+                Wf.Goto("medium", condition: "output.count < 100"),
                 Wf.Goto("large")
             ]))));
 
@@ -56,7 +56,7 @@ public class TransitionSelectionTests
     public void When_no_rule_matches_there_is_no_rule_to_name()
     {
         var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
-            onSuccess: [Wf.Goto("never", condition: "{{ output.count > 10 }}")]))));
+            onSuccess: [Wf.Goto("never", condition: "output.count > 10")]))));
 
         var decision = _interpreter.Advance(session, "a", null, Output(("count", 1)));
 
@@ -69,7 +69,7 @@ public class TransitionSelectionTests
         var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
             onSuccess:
             [
-                Wf.Goto("hit", condition: "{{ output.count > 10 }}"),
+                Wf.Goto("hit", condition: "output.count > 10"),
                 Wf.Goto("fallback")
             ]))));
 
@@ -82,7 +82,7 @@ public class TransitionSelectionTests
     public void No_rule_matching_ends_the_path()
     {
         var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
-            onSuccess: [Wf.Goto("never", condition: "{{ output.count > 10 }}")]))));
+            onSuccess: [Wf.Goto("never", condition: "output.count > 10")]))));
 
         var decision = _interpreter.Advance(session, "a", null, Output(("count", 1)));
 
@@ -173,7 +173,7 @@ public class TransitionSelectionTests
         var graph = Wf.Graph(("a", Wf.Http("https://example.com",
             onSuccess:
             [
-                Wf.Goto("prod", condition: "{{ env.stage == 'production' }}"),
+                Wf.Goto("prod", condition: "env.stage === 'production'"),
                 Wf.Goto("staging")
             ])));
 
@@ -264,7 +264,7 @@ public class TransitionSelectionTests
             onSuccess:
             [
                 Wf.Emit(Wf.Fields(("v", "{{ output.count }}")), "a",
-                    condition: "{{ output.count > 0 }}"),
+                    condition: "output.count > 0"),
                 Wf.Result(Wf.Fields(("done", true)))
             ]))));
 

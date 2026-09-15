@@ -41,7 +41,7 @@ public class PromiseExpansionTests
     public void A_branch_whose_condition_is_false_is_not_started()
     {
         var graph = GraphWith(
-            Wf.Branch("pricing", "quote", condition: "{{ input.wantPricing }}"),
+            Wf.Branch("pricing", "quote", condition: "input.wantPricing"),
             Wf.Branch("shipping", "estimate"));
 
         var expansion = _interpreter.ExpandPromise(

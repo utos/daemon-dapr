@@ -88,12 +88,9 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             number++;
 
             // Check condition first — skip this rule if condition doesn't match
-            if (!string.IsNullOrEmpty(rule.Condition))
-            {
-                var shouldTransition = templateEngine.Evaluate<bool>(rule.Condition, scope);
-                if (!shouldTransition)
-                    continue;
-            }
+            if (!string.IsNullOrEmpty(rule.Condition)
+                && !templateEngine.EvaluateCondition(rule.Condition, scope))
+                continue;
 
             // Condition matched (or no condition) — execute the action
             TransitionDecision decision = rule switch
@@ -144,7 +141,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             number++;
 
             if (!string.IsNullOrEmpty(rule.Condition)
-                && !templateEngine.Evaluate<bool>(rule.Condition, scope))
+                && !templateEngine.EvaluateCondition(rule.Condition, scope))
                 continue;
 
             TransitionDecision decision = rule switch
@@ -261,19 +258,21 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         foreach (var branch in promise.Branches)
         {
             // Evaluate condition if set — skip branch if false
-            if (!string.IsNullOrEmpty(branch.Condition))
-            {
-                var shouldInclude = templateEngine.Evaluate<bool>(branch.Condition, scope);
-                if (!shouldInclude)
-                    continue;
-            }
+            if (!string.IsNullOrEmpty(branch.Condition)
+                && !templateEngine.EvaluateCondition(branch.Condition, scope))
+                continue;
 
             if (branch.ForEach != null)
             {
-                // Dynamic expansion: evaluate collection, iterate with alias
-                var collection = templateEngine
-                    .Evaluate<IEnumerable<object>>(branch.ForEach.Collection, scope)
-                    .ToList();
+                // Dynamic expansion: evaluate collection, iterate with alias. The collection is a
+                // whole-field template that must yield an array; a string, an object or nothing
+                // is an authoring error, not an empty expansion.
+                var rendered = templateEngine.RenderTyped(branch.ForEach.Collection, scope);
+                if (rendered is not IEnumerable<object?> items || rendered is string)
+                    throw new TemplateException("UTOS-E105",
+                        $"forEach collection `{branch.ForEach.Collection}` must evaluate to an array.");
+
+                var collection = items.ToList();
 
                 var scopes = collection
                     .Select(item => scope.With(branch.ForEach.Alias, item))

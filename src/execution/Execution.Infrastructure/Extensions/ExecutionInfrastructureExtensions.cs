@@ -89,8 +89,10 @@ public static class ExecutionInfrastructureExtensions
         // and cancellation.
         builder.Services.AddScoped<ExecutionSubtreeReclaimer>();
 
-        // Add Templating engine
-        builder.Services.AddSingleton<ITemplateEngine, ScribanTemplateEngine>();
+        // The expression engine (api/docs/template-expressions.md) and the limits it runs under.
+        builder.Services.Configure<TemplateEngineOptions>(
+            builder.Configuration.GetSection(TemplateEngineOptions.SectionName));
+        builder.Services.AddSingleton<ITemplateEngine, JintTemplateEngine>();
 
         // Add the workflow interpreter (pure decision logic, no Dapr/EF)
         builder.Services.AddSingleton<StructRenderer>();

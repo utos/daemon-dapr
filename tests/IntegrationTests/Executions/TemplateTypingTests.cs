@@ -33,7 +33,7 @@ public class TemplateTypingTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("typing-counter-workflow", fixture.MockBaseUrl)
             .HttpGet("poll", path)
             .WithHeader("X-Count", "{{ input.count }}")
-            .OnSuccess("poll", increment, when: "{{ input.count < 3 }}")
+            .OnSuccess("poll", increment, when: "input.count < 3")
             .OnSuccess("end")
             .WithInput("count", 0)
             .Build();
@@ -117,13 +117,15 @@ public class TemplateTypingTests(DaemonTestFixture fixture)
         //
         // A large id is where it becomes visible: .NET renders a double with the shortest
         // round-trip format, so 10^16 went into the URL as "1E+16" and the daemon called an
-        // endpoint that does not exist.
-        const string path = "/typing-large-id/10000000000000000";
+        // endpoint that does not exist. The id is 2^53 now — the largest integer an expression
+        // accepts (UTOS-E104 beyond it) and, at sixteen digits, still one .NET would write with
+        // an exponent; the engine renders whole numbers as digits.
+        const string path = "/typing-large-id/9007199254740992";
         StubJson(path, """{"ok": true}""");
 
         var request = new TestWorkflowBuilder("typing-large-id-workflow", fixture.MockBaseUrl)
             .HttpGet("fetch", "/typing-large-id/{{ input.id }}")
-            .WithInput("id", 10_000_000_000_000_000L)
+            .WithInput("id", 9_007_199_254_740_992L)
             .Build("fetch");
 
         var response = await fixture.ScheduleAsync(request);
@@ -153,7 +155,7 @@ public class TemplateTypingTests(DaemonTestFixture fixture)
             .HttpGet("check", path)
             .OnSuccess("decide", transform)
             .HttpGet("decide", path)
-            .OnSuccess("taken", when: "{{ input.ready }}")
+            .OnSuccess("taken", when: "input.ready")
             .OnSuccess("skipped")
             .HttpGet("taken", taken)
             .HttpGet("skipped", skipped)

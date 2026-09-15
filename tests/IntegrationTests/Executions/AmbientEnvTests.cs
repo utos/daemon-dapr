@@ -125,7 +125,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("env-condition-workflow", fixture.MockBaseUrl)
             .HttpGet("start", "/env-cond-start")
-            .OnSuccess("enabled-path", when: "{{ env.featureFlag == \"on\" }}")
+            .OnSuccess("enabled-path", when: "env.featureFlag === \"on\"")
             .OnSuccess("disabled-path")
             .HttpGet("enabled-path", "/env-cond-enabled")
             .HttpGet("disabled-path", "/env-cond-disabled")

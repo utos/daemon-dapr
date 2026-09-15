@@ -20,7 +20,7 @@
     </ItemGroup>
 
     <!--
-      Execution.Infrastructure is referenced for the real ScribanTemplateEngine and for
+      Execution.Infrastructure is referenced for the real JintTemplateEngine and for
       DaprTimerDeadline. Neither needs a Dapr sidecar, a database or Docker — these tests
       run anywhere dotnet does, which is the point of them.
     -->

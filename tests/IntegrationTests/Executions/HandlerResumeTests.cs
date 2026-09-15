@@ -34,7 +34,7 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
                 Fields(("n", Value.ForString("{{ input.n }}"))),
                 "produce",
                 Fields(("n", Value.ForString("{{ input.n + 1 }}"))),
-                when: $"{{{{ input.n <= {values} }}}}")
+                when: $"input.n <= {values}")
             .OnResult(Fields(("produced", Value.ForNumber(values))));
     }
 
@@ -153,7 +153,9 @@ public class HandlerResumeTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("resume-filter", fixture.MockBaseUrl)
             .WorkflowCall("watch", "producer-workflow", "produce",
                 input: Fields(("n", Value.ForNumber(1))),
-                onEmitted: Dispatch("handle", condition: "{{ output.n == '2' }}"))
+                // n is a number all the way through (ForNumber, then `{{ input.n + 1 }}`); the old
+                // engine's loose `==` let '2' match it, strict equality does not.
+                onEmitted: Dispatch("handle", condition: "output.n === 2"))
             .OnResult(Fields(("produced", Value.ForString("{{ output.produced }}"))))
             .AddDependentWorkflow(HandlerWorkflow, handler => handler
                 .HttpGet("handle", handlePath)

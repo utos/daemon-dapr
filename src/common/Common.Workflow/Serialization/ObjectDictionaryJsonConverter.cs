@@ -9,11 +9,11 @@ namespace Common.Workflow.Serialization;
 /// </summary>
 /// <remarks>
 /// Nested objects become <c>Dictionary&lt;string, object?&gt;</c>, deliberately not
-/// <see cref="ValueMap"/>: these are run values that reach a template scope directly, and Scriban
-/// resolves members on something that implements a dictionary interface but falls back to
-/// reflection on anything else — a ValueMap here would make <c>{{ input.user.name }}</c> stop
-/// resolving. <see cref="ValueMapJsonConverter"/> nests as a ValueMap for the opposite reason: an
-/// authored document is flattened by the renderer before it can reach a scope.
+/// <see cref="ValueMap"/>: these are run values that reach a template scope directly, where the
+/// scope converter copies dictionaries and lists into plain JavaScript objects and arrays — one
+/// shape for every run value. <see cref="ValueMapJsonConverter"/> nests as a ValueMap for the
+/// opposite reason: an authored document is flattened by the renderer before it can reach a
+/// scope.
 /// </remarks>
 public sealed class ObjectDictionaryJsonConverter : JsonConverter<object>
 {

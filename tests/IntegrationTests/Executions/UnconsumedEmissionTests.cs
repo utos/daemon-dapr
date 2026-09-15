@@ -38,7 +38,7 @@ public class UnconsumedEmissionTests(DaemonTestFixture fixture)
                 Fields(("n", Value.ForString("{{ input.n }}"))),
                 "produce",
                 Fields(("n", Value.ForString("{{ input.n + 1 }}"))),
-                when: $"{{{{ input.n <= {values} }}}}")
+                when: $"input.n <= {values}")
             .OnResult(Fields(("produced", Value.ForNumber(values))));
     }
 

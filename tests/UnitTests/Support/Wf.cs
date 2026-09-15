@@ -2,9 +2,9 @@ using Common.Workflow;
 // Aliased rather than imported: Utos.Workflows.V1 also contains Workflow and WorkflowActivity,
 // which would collide with the domain types this builder constructs.
 using WorkflowDocument = Utos.Workflows.V1.WorkflowDocument;
+using Execution.Application.Models;
 using Execution.Domain.Interpreter;
 using Execution.Infrastructure.Templating;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace UnitTests.Support;
 
@@ -45,13 +45,13 @@ internal static class Wf
 
     public static WorkflowInterpreter Interpreter()
     {
-        var engine = new ScribanTemplateEngine(NullLogger<ScribanTemplateEngine>.Instance);
+        var engine = Engine();
         return new WorkflowInterpreter(engine, new StructRenderer(engine));
     }
 
-    public static ScribanTemplateEngine Engine()
+    public static JintTemplateEngine Engine()
     {
-        return new ScribanTemplateEngine(NullLogger<ScribanTemplateEngine>.Instance);
+        return new JintTemplateEngine(new TemplateEngineOptions());
     }
 
     public static ExecutionLimits Limits(int continueAsNewAfter = 100)

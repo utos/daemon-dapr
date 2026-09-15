@@ -74,8 +74,8 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("status-branching", fixture.MockBaseUrl)
             .HttpGet("call", "/throttled")
-                .OnFailure("reauth", when: "{{ response.status == 401 }}")
-                .OnFailure("backoff", when: "{{ response.status == 429 }}")
+                .OnFailure("reauth", when: "response.status === 401")
+                .OnFailure("backoff", when: "response.status === 429")
             .HttpGet("backoff", "/backoff")
             .HttpGet("reauth", "/reauth")
             .Build();
@@ -106,7 +106,7 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("unmatched-failure", fixture.MockBaseUrl)
             .HttpGet("call", "/server-error")
-                .OnFailure("never", when: "{{ response.status == 429 }}")
+                .OnFailure("never", when: "response.status === 429")
             .HttpGet("never", "/server-error")
             .Build();
 
@@ -133,7 +133,7 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("explicit-error", fixture.MockBaseUrl)
             .HttpGet("call", "/teapot")
-                .OnFailure("never", when: "{{ response.status == 429 }}")
+                .OnFailure("never", when: "response.status === 429")
                 .OnFailure("error")
             .HttpGet("never", "/teapot")
             .Build();

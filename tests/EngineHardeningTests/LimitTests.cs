@@ -1,10 +1,9 @@
 using EngineHardeningTests.Support;
-using Jint.Runtime;
 
 namespace EngineHardeningTests;
 
 /// <summary>
-/// §6.5. Every limit fires, quickly, and surfaces as a host exception. The language has no
+/// § Runtime guarantees. Every limit fires, quickly, as its own code. The language has no
 /// `try`/`catch` (`GrammarTests`), so there is nothing an expression could do about it even if
 /// the exception were visible — and it is not: Jint raises these outside JavaScript entirely.
 /// Without loops, every attack here gets its iteration count from the input it is handed.
@@ -20,7 +19,7 @@ public class LimitTests
         var outcome = Attack.Run(
             "input.items.map(() => input.items.map(() => input.items.map(() => 0))).length",
             Attack.ScopeWithItems(100));
-        outcome.Threw<StatementsCountOverflowException>();
+        outcome.Threw("UTOS-E110");
         Assert.True(outcome.Elapsed < Quickly, $"took {outcome.Elapsed}");
     }
 
@@ -29,42 +28,29 @@ public class LimitTests
     {
         // 40 doublings of 'x' is a terabyte; the limit is 64 MB.
         var outcome = Attack.Run("input.items.reduce(s => s + s, 'x').length", Attack.ScopeWithItems(40));
-        outcome.Threw<MemoryLimitExceededException>();
+        outcome.Threw("UTOS-E111");
         Assert.True(outcome.Elapsed < Quickly, $"took {outcome.Elapsed}");
     }
 
     [Fact]
     public void Recursion_limit_fires_on_a_self_calling_helper() =>
-        Attack.Run("const f = n => f(n + 1); f(0)").Threw<RecursionDepthOverflowException>();
+        Attack.Run("const f = n => f(n + 1); f(0)").Threw("UTOS-E113");
 
     [Fact]
     public void Wall_clock_timeout_fires_when_the_statement_budget_does_not()
     {
         // A CPU-bound comparator: few statements, much time.
-        var patient = new ReferenceEvaluator
+        var patient = Attack.Engine(o =>
         {
-            Limits = EvaluationLimits.Default with { MaxStatements = 0, Timeout = TimeSpan.FromMilliseconds(500), MemoryBytes = 4L << 30 },
-        };
+            o.MaxStatements = 0;
+            o.TimeoutMilliseconds = 500;
+            o.MemoryLimitBytes = 4L << 30;
+        });
         var outcome = Attack.Run(
             "input.items.toSorted((a, b) => input.items.reduce((s, x) => s + x, 0) * 0 + (a - b))",
             Attack.ScopeWithItems(5000), patient);
 
-        outcome.Threw<TimeoutException>();
-        Assert.True(outcome.Elapsed < Quickly, $"took {outcome.Elapsed}");
-    }
-
-    [Fact]
-    public void Cancellation_token_is_honoured()
-    {
-        var patient = new ReferenceEvaluator
-        {
-            Limits = EvaluationLimits.Default with { MaxStatements = 0, Timeout = TimeSpan.FromSeconds(60), MemoryBytes = 4L << 30 },
-        };
-        var outcome = Attack.Run(
-            "input.items.toSorted((a, b) => input.items.reduce((s, x) => s + x, 0) * 0 + (a - b))",
-            Attack.ScopeWithItems(5000), patient, cancelAfter: TimeSpan.FromMilliseconds(200));
-
-        outcome.Threw<ExecutionCanceledException>();
+        outcome.Threw("UTOS-E112");
         Assert.True(outcome.Elapsed < Quickly, $"took {outcome.Elapsed}");
     }
 
