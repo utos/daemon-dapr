@@ -21,7 +21,10 @@ public class LegitimateProgramsTests
     [InlineData("Math.max(...input.items)", "3")]
     [InlineData("JSON.parse(JSON.stringify(input)).count", "1")]
     [InlineData("'Alice <a@b.c>'.match(/<(.+)>/)[1]", "\"a@b.c\"")]
-    [InlineData("utos.base64UrlDecode('aGVsbG8')", "\"hello\"")]
+    [InlineData("Buffer.from('aGVsbG8', 'base64url').toString()", "\"hello\"")]
+    [InlineData("crypto.createHash('sha256').update('abc').digest('hex').length", "64")]
+    [InlineData("new URL('https://x.test/p?q=1').searchParams.get('q')", "\"1\"")]
+    [InlineData("(input.count << 3) | 1", "9")]
     [InlineData("Object.hasOwn(input, 'count')", "true")]
     [InlineData("output.history.find(h => h.id === '1')?.id", "\"1\"")]
     [InlineData("output.history.find(h => h.id === '9')?.id ?? 'none'", "\"none\"")]
@@ -60,7 +63,7 @@ public class LegitimateProgramsTests
             const parts = output.payload.parts ?? [output.payload];
             const flat = parts.flatMap(p => [p, ...(p.parts ?? [])]);
             const data = flat.find(p => p.mimeType === 'text/plain' && p.body?.data !== undefined)?.body.data ?? '';
-            utos.base64UrlDecode(data)
+            Buffer.from(data, 'base64url').toString()
             """;
 
         Assert.Equal("Hi there, ÿ", Attack.Run(program, scope).Returned());

@@ -28,7 +28,8 @@ public class ExecuteActivity(IEnumerable<IActivityHandler> handlers)
                 input.LogSource));
 
         return new ExecuteActivityOutput(
-            result.StatusCode, result.Success, result.Output, result.Headers, result.BodyText);
+            result.StatusCode, result.Success, result.Output, result.Headers, result.BodyText,
+            result.Body);
     }
 }
 
@@ -46,10 +47,15 @@ public sealed record ExecuteActivityInput(
 /// Plain string-to-string, so no custom converter is needed — unlike <paramref name="Output"/>,
 /// which carries arbitrary workflow values and would come back as JsonElement without one.
 /// </param>
+/// <param name="Body">
+/// The raw bytes, base64 across the boundary. Recorded alongside <paramref name="BodyText"/>, so a
+/// response is held twice in history; a cap on either is `plans/resource-limits.md`'s to set.
+/// </param>
 public sealed record ExecuteActivityOutput(
     int StatusCode,
     bool Success,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? Output,
     Dictionary<string, string> Headers,
-    string? BodyText);
+    string? BodyText,
+    byte[]? Body = null);

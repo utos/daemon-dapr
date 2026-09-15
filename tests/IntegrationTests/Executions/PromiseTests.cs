@@ -98,7 +98,7 @@ public class PromiseTests(DaemonTestFixture fixture)
             .Promise("fan-out", "all")
             .Branch("ok-branch", "child-ok", "http-step")
             .Branch("fail-branch", "child-fail", "http-step")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("child-ok", child => { child.HttpGet("http-step", "/promise-allfail-ok"); })
             .AddDependentWorkflow("child-fail", child => { child.HttpGet("http-step", "/promise-allfail-500"); })
             .Build("fan-out");
@@ -152,7 +152,7 @@ public class PromiseTests(DaemonTestFixture fixture)
             .Promise("fan-out", "any")
             .Branch("fail-branch", "child-any-fail", "http-step")
             .Branch("ok-branch", "child-any-ok", "http-step")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("child-any-fail", child => { child.HttpGet("http-step", "/promise-any-fail"); })
             .AddDependentWorkflow("child-any-ok", child =>
             {
@@ -202,7 +202,7 @@ public class PromiseTests(DaemonTestFixture fixture)
             .Promise("fan-out", "race")
             .Branch("racer-a", "child-race-a", "http-step")
             .Branch("racer-b", "child-race-b", "http-step")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("child-race-a", child =>
             {
                 child.HttpGet("http-step", "/promise-race-a")
@@ -252,7 +252,7 @@ public class PromiseTests(DaemonTestFixture fixture)
             .Promise("fan-out", "all")
             .ForEachBranch("item", "child-foreach", "http-step",
                 "{{ input.items }}", "item", branchInput)
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("child-foreach", child =>
             {
                 child.HttpGet("http-step", "/promise-foreach-item")

@@ -163,7 +163,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
             .Promise("fan-out", "all")
             .ForEachBranch("item", "env-child-foreach", "http-step",
                 "{{ input.items }}", "item", branchInput)
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("env-child-foreach",
                 child => { child.HttpGet("http-step", "/env-foreach-item"); })
             .WithInput("items", Value.ForList(Value.ForString("a"), Value.ForString("b")))
@@ -192,7 +192,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("env-parent-workflow", fixture.MockBaseUrl)
             .WorkflowCall("call-child", "env-child-workflow", "child-step")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("env-child-workflow",
                 child => { child.HttpGet("child-step", "/env-child/{{ env.sharedKey }}"); })
             .WithEnv("sharedKey", "inherited-value")
@@ -223,7 +223,7 @@ public class AmbientEnvTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("env-promise-parent", fixture.MockBaseUrl)
             .Promise("fan-out", "all")
             .Branch("only", "env-branch-child", "branch-step")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("env-branch-child",
                 child => { child.HttpGet("branch-step", "/env-branch/{{ env.sharedKey }}"); })
             .WithEnv("sharedKey", "branch-value")

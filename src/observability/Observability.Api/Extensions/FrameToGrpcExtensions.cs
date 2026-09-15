@@ -27,10 +27,12 @@ public static class FrameToGrpcExtensions
         var failed = outcome == ExecutionOutcome.Failed;
         response.Status = failed ? ExecutionStatus.Failed : ExecutionStatus.Completed;
 
+        // The authored code when a rule's `error` action failed the run; the generic one when the
+        // daemon did. Details travel on the execution's output stream, not the watch frame.
         if (failed)
             response.Error = new GrpcWorkflowError
             {
-                Code = WorkflowErrorCode.ExecutionFailed,
+                Code = frame.FailureCode ?? WorkflowErrorCode.ExecutionFailed,
                 Message = frame.FailureReason ?? string.Empty
             };
 

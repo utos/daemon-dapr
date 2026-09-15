@@ -50,7 +50,13 @@ public class HttpActivityHandler(
             }
 
         var response = await httpClient.SendAsync(request, ct);
-        var responseContent = await response.Content.ReadAsStringAsync(ct);
+
+        // Bytes first, text from them: one read, and the text is derived from the same bytes an
+        // expression sees as `response.body`, using the charset the server declared (UTF-8 when it
+        // declared none or one .NET does not know) — which is what ReadAsStringAsync did, minus
+        // its own second look at the content.
+        var responseBytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var responseContent = DecodeText(responseBytes, response.Content.Headers.ContentType?.CharSet);
         var duration = (DateTimeOffset.UtcNow - startTime).TotalMilliseconds;
 
         var statusCode = (int)response.StatusCode;
@@ -84,7 +90,24 @@ public class HttpActivityHandler(
             response.IsSuccessStatusCode,
             parsedBody,
             CollectHeaders(response),
-            responseContent);
+            responseContent,
+            responseBytes);
+    }
+
+    private static string DecodeText(byte[] bytes, string? charset)
+    {
+        var encoding = Encoding.UTF8;
+        if (!string.IsNullOrWhiteSpace(charset))
+            try
+            {
+                encoding = Encoding.GetEncoding(charset.Trim('"'));
+            }
+            catch (ArgumentException)
+            {
+                // An unknown or malformed charset: UTF-8 is the guess the previous read made too.
+            }
+
+        return encoding.GetString(bytes);
     }
 
     /// <summary>

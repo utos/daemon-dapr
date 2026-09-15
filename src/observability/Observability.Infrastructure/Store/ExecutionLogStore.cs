@@ -19,11 +19,13 @@ public class ExecutionLogStore : IExecutionLogStore
         ScheduleEviction(executionId);
     }
 
-    public void CompleteWith(ExecutionId executionId, DateTime timestamp, ExecutionOutcome outcome, string? failureReason)
+    public void CompleteWith(
+        ExecutionId executionId, DateTime timestamp, ExecutionOutcome outcome, string? failureReason,
+        string? failureCode = null)
     {
         var buffer = _buffers.GetOrAdd(executionId, _ => new ExecutionLogBuffer());
         // The terminal frame must land in the stream before it closes, so add then complete.
-        buffer.Add(new TerminalItem(timestamp, outcome, failureReason));
+        buffer.Add(new TerminalItem(timestamp, outcome, failureReason, failureCode));
         buffer.Complete();
         ScheduleEviction(executionId);
     }

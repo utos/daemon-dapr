@@ -32,13 +32,19 @@ public record ActivityHandlerInput(
 /// <c>response</c> template context is always a well-formed object.
 /// </param>
 /// <param name="BodyText">
-/// The raw response body. Always populated, whatever the content type — <paramref name="Output"/>
-/// is null unless the response was JSON, and without the raw text a wrong content type looks
+/// The response body as text. Always populated, whatever the content type — <paramref name="Output"/>
+/// is null unless the response was JSON, and without the text a wrong content type looks
 /// identical to an empty body.
+/// </param>
+/// <param name="Body">
+/// The response body as it arrived, before any decoding: what an expression reads as
+/// <c>response.body</c>, a <c>Buffer</c>. The only route by which a binary body, or one in an
+/// encoding the text decoding guessed wrong, reaches a workflow intact.
 /// </param>
 public record ActivityHandlerResult(
     int StatusCode,
     bool Success,
     object? Output,
     Dictionary<string, string> Headers,
-    string? BodyText);
+    string? BodyText,
+    byte[]? Body = null);

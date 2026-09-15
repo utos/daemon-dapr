@@ -1,3 +1,4 @@
+using Google.Protobuf.WellKnownTypes;
 using IntegrationTests.Shared;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
@@ -347,9 +348,10 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
     }
 
     [Fact]
-    public async Task TransitionToEnd_ShouldCompleteWorkflow()
+    public async Task A_bare_return_ends_the_run_with_no_result()
     {
-        // Arrange - Workflow with explicit transition to "end"
+        // `result: {}` — a bare `return` in the source format — ends the path with no value, and
+        // the next activity is never reached. Spec 0.0.16: this is what `transition: end` became.
         fixture.WireMockServer
             .Given(Request.Create().WithPath("/check-value").UsingGet())
             .RespondWith(Response.Create()
@@ -357,60 +359,69 @@ public class TransitionBehaviorTests(DaemonTestFixture fixture)
                 .WithHeader("Content-Type", "application/json")
                 .WithBody("{\"done\": true}"));
 
-        var request = new TestWorkflowBuilder("end-transition-workflow", fixture.MockBaseUrl)
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/never-reached").UsingGet())
+            .RespondWith(Response.Create().WithStatusCode(200));
+
+        var request = new TestWorkflowBuilder("bare-return-workflow", fixture.MockBaseUrl)
             .HttpGet("check-value", "/check-value")
-            .OnSuccess("end", when: "output.done")
+            .OnEnd(when: "output.done")
+            .OnSuccess("never")
+            .HttpGet("never", "/never-reached")
             .Build("check-value");
 
-        // Act
         var response = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(response.Id);
 
-        // Wait for workflow to complete
-        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
-        {
-            ExecutionId = response.Id
-        });
+        var execution = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
 
-        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
-
-        // Assert - Should complete successfully
-        var logEntries = fixture.WireMockServer.LogEntries.ToList();
-        var checkValueCall = logEntries.FirstOrDefault(e => e.RequestMessage.Path == "/check-value");
-
-        Assert.NotNull(checkValueCall);
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
+        Assert.Null(execution.Result);
+        Assert.NotNull(fixture.WireMockServer.LogEntries.FirstOrDefault(e => e.RequestMessage.Path == "/check-value"));
+        Assert.Null(fixture.WireMockServer.LogEntries.FirstOrDefault(e => e.RequestMessage.Path == "/never-reached"));
     }
 
     [Fact]
-    public async Task TransitionToError_ShouldFailWorkflow()
+    public async Task An_error_action_fails_the_run_with_what_the_author_wrote()
     {
-        // Arrange - Workflow with explicit transition to "error"
+        // What `transition: error` became, and what it could never do: carry a reason. The code
+        // is a literal; the message and details are templates rendered in the rule's scope.
         fixture.WireMockServer
-            .Given(Request.Create().WithPath("/check-value").UsingGet())
+            .Given(Request.Create().WithPath("/check-invalid").UsingGet())
             .RespondWith(Response.Create()
                 .WithStatusCode(200)
                 .WithHeader("Content-Type", "application/json")
-                .WithBody("{\"invalid\": true}"));
+                .WithBody("{\"invalid\": true, \"id\": \"o-7\"}"));
 
-        var request = new TestWorkflowBuilder("error-transition-workflow", fixture.MockBaseUrl)
-            .HttpGet("check-value", "/check-value")
-            .OnSuccess("error", when: "output.invalid")
+        var details = new Struct();
+        details.Fields.Add("id", Value.ForString("{{ output.id }}"));
+        details.Fields.Add("status", Value.ForString("{{ response.status }}"));
+
+        var request = new TestWorkflowBuilder("error-action-workflow", fixture.MockBaseUrl)
+            .HttpGet("check-value", "/check-invalid")
+            .OnError("INVALID_VALUE", "value {{ output.id }} was invalid", details, when: "output.invalid")
             .Build("check-value");
 
-        // Act
         var response = await fixture.ScheduleAsync(request);
 
-        // Wait for workflow to fail
-        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
-        {
-            ExecutionId = response.Id
-        });
+        var events = await fixture.ObservabilityClient
+            .WatchExecution(new WatchExecutionRequest { ExecutionId = response.Id })
+            .CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
-        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+        // The watch stream's terminal frame carries the authored code and message.
+        var terminal = events.Last(e => e.Status == ExecutionStatus.Failed);
+        Assert.Equal("INVALID_VALUE", terminal.Error.Code);
+        Assert.Equal("value o-7 was invalid", terminal.Error.Message);
 
-        // Assert - Should fail
-        var logEntries = fixture.WireMockServer.LogEntries.ToList();
-        var checkValueCall = logEntries.FirstOrDefault(e => e.RequestMessage.Path == "/check-value");
+        // So does the execution, with the rendered details.
+        var execution = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
 
-        Assert.NotNull(checkValueCall);
+        Assert.Equal(ExecutionStatus.Failed, execution.Summary.Status);
+        Assert.Equal("INVALID_VALUE", execution.Summary.Error.Code);
+        Assert.Equal("value o-7 was invalid", execution.Summary.Error.Message);
+        Assert.Equal("o-7", execution.Summary.Error.Details.Fields["id"].StringValue);
+        Assert.Equal(200, execution.Summary.Error.Details.Fields["status"].NumberValue);
     }
 }

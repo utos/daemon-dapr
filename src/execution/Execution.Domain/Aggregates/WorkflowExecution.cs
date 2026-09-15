@@ -29,6 +29,15 @@ public class WorkflowExecution : AggregateRoot<ExecutionId>
     public string? FailureReason { get; private set; }
 
     /// <summary>
+    /// The failure's code, when an authored <c>error</c> action gave it one. Null for a failure
+    /// the daemon raised itself, and null unless <see cref="Status"/> is Failed.
+    /// </summary>
+    public string? FailureCode { get; private set; }
+
+    /// <summary>The failure's structured details, when an <c>error</c> action carried any.</summary>
+    public Dictionary<string, object>? FailureDetails { get; private set; }
+
+    /// <summary>
     /// Why the execution was cancelled. Null unless <see cref="Status"/> is Cancelled, and null
     /// then too when nobody gave a reason. Kept apart from <see cref="FailureReason"/> so a run
     /// stopped on purpose never surfaces as an error.
@@ -87,7 +96,12 @@ public class WorkflowExecution : AggregateRoot<ExecutionId>
     /// WorkflowError, where a null would read as a bug in the daemon rather than a failure of
     /// the workflow.
     /// </param>
-    public void Fail(string? reason)
+    /// <param name="code">
+    /// An authored <c>error</c> action's code, or null for a failure of the daemon's own — the
+    /// distinction the run reports, so a client can tell a workflow that decided to fail from one
+    /// that broke.
+    /// </param>
+    public void Fail(string? reason, string? code = null, Dictionary<string, object>? details = null)
     {
         if (IsTerminal)
             return;
@@ -96,7 +110,7 @@ public class WorkflowExecution : AggregateRoot<ExecutionId>
             ? "Execution failed without a reported reason."
             : reason;
 
-        ApplyChange(new WorkflowExecutionFailedEvent(Id, described, DateTime.UtcNow));
+        ApplyChange(new WorkflowExecutionFailedEvent(Id, described, DateTime.UtcNow, code, details));
     }
 
     /// <summary>
@@ -144,6 +158,8 @@ public class WorkflowExecution : AggregateRoot<ExecutionId>
             case WorkflowExecutionFailedEvent e:
                 Status = ExecutionStatus.Failed;
                 FailureReason = e.Reason;
+                FailureCode = e.Code;
+                FailureDetails = e.Details;
                 break;
 
             case WorkflowExecutionCancelledEvent e:

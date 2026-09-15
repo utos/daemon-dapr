@@ -66,8 +66,11 @@ public class ActivityConfigJsonShapeTests
 
         var json = Serialize(config);
 
+        // `Error` trails `Condition`: it was added in spec 0.0.16 as the fourth action and
+        // declared last so a rule persisted before it reads back unchanged (a missing field is a
+        // null), which is the cheapest evolution a persisted shape has.
         Assert.Contains("""
-                        "OnEmitted":[{"Handle":{"Workflow":"acme/ingester:1.0.0","StartActivity":"ingest","Input":null},"Transition":null,"Result":null,"Condition":null}]
+                        "OnEmitted":[{"Handle":{"Workflow":"acme/ingester:1.0.0","StartActivity":"ingest","Input":null},"Transition":null,"Result":null,"Condition":null,"Error":null}]
                         """, json);
 
         var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
@@ -90,17 +93,25 @@ public class ActivityConfigJsonShapeTests
             OnEmitted:
             [
                 EmissionRule.Goto("wrap-up", condition: "output.done"),
-                EmissionRule.Returns(new ValueMap(new Dictionary<string, object?> { ["seen"] = true }))
+                EmissionRule.Returns(new ValueMap(new Dictionary<string, object?> { ["seen"] = true })),
+                EmissionRule.Fails("BAD_VALUE", "value {{ output.id }} is malformed",
+                    new ValueMap(new Dictionary<string, object?> { ["id"] = "{{ output.id }}" }))
             ]);
 
         var json = Serialize(config);
 
         Assert.Contains("""
-                        {"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":"output.done"}
+                        {"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":"output.done","Error":null}
                         """, json);
 
         Assert.Contains("""
-                        {"Handle":null,"Transition":null,"Result":{"seen":true},"Condition":null}
+                        {"Handle":null,"Transition":null,"Result":{"seen":true},"Condition":null,"Error":null}
+                        """, json);
+
+        // The third leaving action, and the only one with a shape of its own: the WorkflowError
+        // the run will report, templates unrendered.
+        Assert.Contains("""
+                        {"Handle":null,"Transition":null,"Result":null,"Condition":null,"Error":{"Code":"BAD_VALUE","Message":"value {{ output.id }} is malformed","Details":{"id":"{{ output.id }}"}}}
                         """, json);
 
         var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
@@ -108,6 +119,24 @@ public class ActivityConfigJsonShapeTests
         Assert.Equal("wrap-up", restored.OnEmitted[0].Transition!.Name);
         Assert.NotNull(restored.OnEmitted[1].Result);
         Assert.True(restored.OnEmitted[1].Result!.TryGetValue("seen", out var seen) && (bool)seen!);
+        Assert.Equal("BAD_VALUE", restored.OnEmitted[2].Error!.Code);
+    }
+
+    [Fact]
+    public void A_rule_persisted_before_the_error_action_still_reads()
+    {
+        // The text a 0.0.15 daemon wrote, with no `Error` field at all. It must come back as a
+        // rule with no error, not fail to deserialize — the whole reason `Error` was appended
+        // rather than the shape re-cut.
+        const string json = """
+            {"type":"workflow.call","OnEmitted":[{"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":null}],"Workflow":"acme/mailbox:1.0.0","StartActivity":"poll","Input":null,"Kind":2}
+            """;
+
+        var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
+
+        var rule = Assert.Single(restored.OnEmitted);
+        Assert.Equal("wrap-up", rule.Transition!.Name);
+        Assert.Null(rule.Error);
     }
 
     [Fact]

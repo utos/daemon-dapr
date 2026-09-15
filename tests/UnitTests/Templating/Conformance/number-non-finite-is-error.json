@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "input.count / 0",
+  "scope": { "input": { "count": 1 } },
+  "expect": { "error": "UTOS-E102" }
+}

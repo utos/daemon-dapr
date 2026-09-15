@@ -323,7 +323,10 @@ public static class WorkflowMapping
             source.ActionCase == Wire.EmissionRule.ActionOneofCase.Result
                 ? source.Result.ToDomain()
                 : null,
-            source.HasCondition ? source.Condition : null);
+            source.HasCondition ? source.Condition : null,
+            source.ActionCase == Wire.EmissionRule.ActionOneofCase.Error
+                ? source.Error.ToDomain()
+                : null);
 
     public static Wire.EmissionRule ToProto(this Domain.EmissionRule source)
     {
@@ -335,9 +338,36 @@ public static class WorkflowMapping
             result.Transition = source.Transition.ToProto();
         else if (source.Result != null)
             result.Result = source.Result.ToProto();
+        else if (source.Error != null)
+            result.Error = source.Error.ToProto();
 
         if (source.Condition != null)
             result.Condition = source.Condition;
+
+        return result;
+    }
+
+    // ---- error action ------------------------------------------------------
+
+    /// <summary>
+    /// The one wire message that is both authored and reported. Mapped leniently: an empty code
+    /// survives as empty so <c>UTOS-T005</c> can name it, and an unset message is null rather than
+    /// the empty string proto3 gives back, so "no template" and "renders to nothing" stay apart.
+    /// </summary>
+    public static Domain.ErrorAction ToDomain(this Wire.WorkflowError source) =>
+        new(source.Code,
+            source.Message.Length == 0 ? null : source.Message,
+            source.Details?.ToDomain());
+
+    public static Wire.WorkflowError ToProto(this Domain.ErrorAction source)
+    {
+        var result = new Wire.WorkflowError { Code = source.Code };
+
+        if (source.Message != null)
+            result.Message = source.Message;
+
+        if (source.Details != null)
+            result.Details = source.Details.ToProto();
 
         return result;
     }
@@ -361,6 +391,10 @@ public static class WorkflowMapping
 
     // ---- transitions -----------------------------------------------------
 
+    /// <summary>
+    /// Read from <c>ActionCase</c> for the reason the emission rule is: an empty <c>result</c> is a
+    /// complete action, and a null check would read it as no action at all.
+    /// </summary>
     public static Domain.TransitionRule ToDomain(this Wire.TransitionRule source) =>
         new(source.ActionCase == Wire.TransitionRule.ActionOneofCase.Transition
                 ? source.Transition.ToDomain()
@@ -371,7 +405,10 @@ public static class WorkflowMapping
             source.ActionCase == Wire.TransitionRule.ActionOneofCase.Emit
                 ? source.Emit.ToDomain()
                 : null,
-            source.HasCondition ? source.Condition : null);
+            source.HasCondition ? source.Condition : null,
+            source.ActionCase == Wire.TransitionRule.ActionOneofCase.Error
+                ? source.Error.ToDomain()
+                : null);
 
     public static Wire.TransitionRule ToProto(this Domain.TransitionRule source)
     {
@@ -383,6 +420,8 @@ public static class WorkflowMapping
             result.Result = source.Result.ToProto();
         else if (source.Emit != null)
             result.Emit = source.Emit.ToProto();
+        else if (source.Error != null)
+            result.Error = source.Error.ToProto();
 
         if (source.Condition != null)
             result.Condition = source.Condition;

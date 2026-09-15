@@ -205,7 +205,7 @@ public class TransitionSelectionTests
         var ex = Assert.Throws<InvalidOperationException>(
             () => _interpreter.Advance(session, "a", null, null));
 
-        Assert.Equal("Transition rule has no action set (neither transition, result nor emit)", ex.Message);
+        Assert.Equal("Transition rule has no action set (none of transition, result, emit or error)", ex.Message);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using Google.Protobuf.WellKnownTypes;
 using IntegrationTests.Shared;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
@@ -120,13 +121,12 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
     }
 
     [Fact]
-    public async Task Routing_a_failure_to_error_reports_the_original_cause()
+    public async Task An_error_action_on_the_failure_path_reports_the_author_s_code_and_can_quote_the_cause()
     {
-        // `transition: { name: error }` as a failure fallback is redundant with declaring no rule
-        // — both fail the run — but an author will write it, and it must not be the worse of the
-        // two. Letting it reach the navigator would replace the real diagnostic with the generic
-        // "Workflow transitioned to 'error'", so adopting on_failure would make failures *harder*
-        // to diagnose than leaving it out.
+        // The 0.0.16 replacement for `transition: { name: error }` on the failure path, and what
+        // that could never do: name the failure. The cause is not reported by default — the
+        // action means "fail with *this*" — but `{{ error.message }}` quotes it, and
+        // `{{ response.status }}` is there for the part that carries real detail.
         fixture.WireMockServer
             .Given(Request.Create().WithPath("/teapot").UsingGet())
             .RespondWith(Response.Create().WithStatusCode(418));
@@ -134,7 +134,7 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("explicit-error", fixture.MockBaseUrl)
             .HttpGet("call", "/teapot")
                 .OnFailure("never", when: "response.status === 429")
-                .OnFailure("error")
+                .OnFailureError("TEAPOT", "upstream said {{ response.status }}: {{ error.message }}")
             .HttpGet("never", "/teapot")
             .Build();
 
@@ -148,9 +148,101 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
 
         var terminal = events.Last(e => e.Status == ExecutionStatus.Failed);
 
-        Assert.NotNull(terminal.Error);
+        Assert.Equal("TEAPOT", terminal.Error.Code);
+        Assert.StartsWith("upstream said 418: ", terminal.Error.Message);
+        Assert.Contains("418", terminal.Error.Message[19..]);
+    }
+
+    [Fact]
+    public async Task An_unhandled_failure_still_reports_the_generic_code()
+    {
+        // The other side of the previous test: a failure the daemon raised, with no rule
+        // rewriting it, reports EXECUTION_FAILED and the cause — the pre-0.0.16 behaviour, kept.
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/teapot-unhandled").UsingGet())
+            .RespondWith(Response.Create().WithStatusCode(418));
+
+        var request = new TestWorkflowBuilder("unhandled-generic", fixture.MockBaseUrl)
+            .HttpGet("call", "/teapot-unhandled")
+            .Build();
+
+        var response = await fixture.ScheduleAsync(request);
+
+        var events = await fixture.ObservabilityClient
+            .WatchExecution(new WatchExecutionRequest { ExecutionId = response.Id })
+            .CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        var terminal = events.Last(e => e.Status == ExecutionStatus.Failed);
+        Assert.Equal("EXECUTION_FAILED", terminal.Error.Code);
         Assert.Contains("418", terminal.Error.Message);
-        Assert.DoesNotContain("transitioned to", terminal.Error.Message);
+    }
+
+    [Fact]
+    public async Task A_sub_workflow_s_authored_error_is_what_the_caller_s_failure_rule_sees()
+    {
+        // The whole reason an error has a code: the child decides to fail with ORDER_NOT_FOUND,
+        // and the caller's on_failure matches on exactly that — through the runtime's exception,
+        // which flattens everything to a string, by reading the child's stream back.
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/order-lookup").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"found": false, "id": "o-9"}"""));
+
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/order-missing").UsingGet())
+            .RespondWith(Response.Create().WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json").WithBody("{}"));
+
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/order-other").UsingGet())
+            .RespondWith(Response.Create().WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json").WithBody("{}"));
+
+        // The failure rule's own scope is where `error` is defined; the handler activity runs on
+        // its success path, so the rule hands the error on as the handler's input.
+        var carried = new Struct();
+        carried.Fields.Add("code", Value.ForString("{{ error.code }}"));
+        carried.Fields.Add("message", Value.ForString("{{ error.message }}"));
+        carried.Fields.Add("missingId", Value.ForString("{{ error.details.id }}"));
+
+        var handled = new Struct();
+        handled.Fields.Add("code", Value.ForString("{{ input.code }}"));
+        handled.Fields.Add("message", Value.ForString("{{ input.message }}"));
+        handled.Fields.Add("missingId", Value.ForString("{{ input.missingId }}"));
+
+        var childDetails = new Struct();
+        childDetails.Fields.Add("id", Value.ForString("{{ output.id }}"));
+
+        var request = new TestWorkflowBuilder("child-error-code", fixture.MockBaseUrl)
+            .WorkflowCall("lookup", "lookup-workflow", "fetch")
+                .OnFailure("missing", carried, when: "error.code === 'ORDER_NOT_FOUND'")
+                .OnFailure("other")
+            .HttpGet("missing", "/order-missing")
+                .OnResult(handled)
+            .HttpGet("other", "/order-other")
+            .AddDependentWorkflow("lookup-workflow", child => child
+                .HttpGet("fetch", "/order-lookup")
+                .OnError("ORDER_NOT_FOUND", "order {{ output.id }} does not exist", childDetails, when: "!output.found")
+                .OnEnd())
+            .Build("lookup");
+
+        var response = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(response.Id, TimeSpan.FromSeconds(60));
+
+        var execution = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
+
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
+        Assert.Single(fixture.WireMockServer.LogEntries, e => e.RequestMessage.Path == "/order-missing");
+        Assert.Empty(fixture.WireMockServer.LogEntries.Where(e => e.RequestMessage.Path == "/order-other"));
+
+        // The failure rule saw the child's error whole: the code, the rendered message and the
+        // rendered details — not a generic code wrapped around the child's text.
+        Assert.Equal("ORDER_NOT_FOUND", execution.Result.Fields["code"].StringValue);
+        Assert.Equal("order o-9 does not exist", execution.Result.Fields["message"].StringValue);
+        Assert.Equal("o-9", execution.Result.Fields["missingId"].StringValue);
     }
 
     [Fact]

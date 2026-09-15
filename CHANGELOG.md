@@ -29,6 +29,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- **Ending a path is an action, not a destination** (spec `v0.0.16`; all four Utos SDK pins bumped
+  `0.0.15` → `0.0.16.1`). The `end` and `error` transition targets are gone, and so is
+  `ReservedKeywords` — nothing is reserved, and an activity may be named `end`. A path ends with a
+  `result` — an empty struct ends it with no value, which is what a bare `return` in the source
+  format becomes — and fails with the new `error` action: a literal `code`, a `message` text
+  template and a `details` struct template, rendered in the rule's scope, on `onSuccess`,
+  `onFailure` and `onEmitted` alike. **What the author wrote is what the run reports**, end to end:
+  the output stream's terminal entry, the lifecycle event (`Code` and `Details` added as optional
+  fields — no version bump), the read model (`ErrorCode` column, migration
+  `AddExecutionErrorCode`), `GetExecution` (`Summary.Error` with `code` and `details`, the latter
+  read from the stream as a result is), `WatchExecution`'s terminal frame (`code`), and the message
+  a consuming caller receives. A failure the daemon raised still reports `EXECUTION_FAILED`.
+  **A sub-workflow's authored error reaches its caller's `on_failure` intact** — `error.code`,
+  `error.message` and the new `error.details` — through the consuming path's terminal message and,
+  for an awaited call or a promise branch, by reading the child's stream back
+  (`ReadChildFailureActivity`): the runtime's `WorkflowTaskFailedException` flattens the failure to
+  a string, and the child's stream is where the code survives. A document that still transitions to
+  `end` or `error` fails to load at `UTOS-T003`; one whose failure fallback was
+  `transition: { name: error }` — which used to rethrow the cause — writes
+  `error: { code: X, message: "{{ error.message }}" }` for the same effect with a name.
+  `TransitionRule` and `EmissionRule` gain an `Error` field, appended, so every rule persisted
+  before it reads back unchanged (pinned in `ActivityConfigJsonShapeTests`).
+- **The expression language exposes Node.js globals; `utos.*` is withdrawn** (spec `v0.0.16`).
+  `Buffer` (a read-only host object over the bytes — a megabyte of body is one object, not a
+  million array elements; `from`/`concat`/`byteLength`/`isBuffer`, `toString`/`slice`/`equals`/
+  `indexOf`/`readUInt*`/`readInt*`/`toJSON`, encodings `utf8`, `base64`, `base64url`, `hex`,
+  `latin1`, `ascii`, `utf16le`, with Node's leniency), `crypto` (`createHash`, `createHmac`,
+  `hash`, `randomUUID`, `timingSafeEqual`; `sha256`/`sha512`/`sha384`/`sha1`/`md5`), `URL` and
+  `URLSearchParams` (on `System.Uri`, with `searchParams` writing back; `pathname`, `search`,
+  `hash` and `href` assignable, the rest read-only), the full `Date`, and bitwise, shift and
+  every assignment operator. **`response.body` is a `Buffer`** of the raw bytes — the only route a
+  binary body, or one in a charset the text decoding guessed wrong, takes to an expression — and
+  `bodyText` is now decoded from those same bytes with the declared charset. A `Buffer`, `Date`
+  or `URL` cannot leave an expression (`UTOS-E103`, with a message saying what to return instead).
+  `utos.base64UrlDecode(x)` is `Buffer.from(x, 'base64url').toString()`.
+- **Time and randomness are replaced, not removed.** `Date.now()`, `new Date()`, `Math.random()`
+  and `crypto.randomUUID()` resolve, to values derived from an `EvaluationMoment` — an instant and
+  a 128-bit CSPRNG seed — that each evaluating Dapr activity (`EvaluateTransition`,
+  `ResolveActivityInput`, `ResolvePromise`) captures as it runs and whose result the runtime
+  records, so every expression of one decision agrees and a replay agrees with the first run. The
+  derivations are the spec's (`Deterministic`: UUID v5 over the seed, the first 53 bits of
+  `SHA-256(seed ‖ n)`) and are pinned by the corpus below. Deliberately not
+  `WorkflowContext.NewGuid()`, which is replay-safe but derived from the instance id and time, and
+  the spec forbids a guessable seed. A scope with no moment evaluates at the Unix epoch with the
+  nil seed — fixed, so nothing falls back to the wall clock by omission. The interpreter's three
+  entry points take an optional `EvaluationMoment`.
+- **`WorkflowErrorContext` and `error` in scope carry `details`** (null when the failure had none).
+  `IExecutionLifecycleListener.OnFailedAsync` and `IExecutionLogStore.CompleteWith` gain an
+  optional failure code.
 - **Template expressions are JavaScript** (spec `v0.0.15`; all four Utos SDK pins bumped
   `0.0.14.1` → `0.0.15`). `ScribanTemplateEngine` is replaced by `JintTemplateEngine`, which
   makes every guarantee of `api/docs/template-expressions.md` § Runtime: an allow-listed surface,
@@ -68,6 +117,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The evaluation conformance corpus runs in the unit tests** (`UnitTests/Templating/Conformance`,
+  vendored from `utos/api` v0.0.16 with the tag recorded in its README): every case of
+  `api/conformance/evaluation/` against `JintTemplateEngine`, including the deterministic
+  derivations and the Buffer-in-scope cases. Where the hardening suite proves what the engine
+  refuses, this proves what it computes — and that a second evaluator would compute the same.
+- Hardening tests for the Node globals (`NodeGlobalsTests`): the instant and never the clock, the
+  real `Date` constructor unreachable through an instance, the seed-derived sequences, a Buffer
+  read-only and non-extensible, host objects unable to leave, misuse a script error rather than a
+  daemon one, the installed objects frozen, a 1 MB body as one Buffer.
 - **An engine hardening test suite** (`tests/EngineHardeningTests`), ahead of the move from
   Scriban to JavaScript expressions. It is the language definition and the runtime guarantees of
   that move as 197 tests against a reference Jint 4.16.2 posture. The language is a

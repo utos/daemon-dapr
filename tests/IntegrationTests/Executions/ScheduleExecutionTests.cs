@@ -157,21 +157,37 @@ public class ScheduleExecutionValidationTests(DaemonTestFixture fixture)
     [Theory]
     [InlineData("end")]
     [InlineData("error")]
-    [InlineData("End")]
-    [InlineData("ERROR")]
-    public async Task WithReservedKeywordAsActivityName_ShouldFail(string reservedName)
+    public async Task An_activity_may_be_named_after_a_former_keyword(string name)
     {
-        // Arrange
+        // Until spec 0.0.15 these were reserved (UTOS-A003) so that a transition target was never
+        // ambiguous. Ending and failing a path are actions now, nothing is reserved, and the rule
+        // is retired — so this must load and run, not be refused.
         var request = new TestWorkflowBuilder("test-workflow", fixture.MockBaseUrl)
-            .HttpGet(reservedName, "/success")
+            .HttpGet(name, "/success")
             .Build();
 
-        // Act & Assert
+        var response = await fixture.ScheduleAsync(request);
+
+        Assert.False(string.IsNullOrEmpty(response.Id));
+    }
+
+    [Theory]
+    [InlineData("end")]
+    [InlineData("error")]
+    public async Task A_transition_to_a_former_keyword_is_an_unresolved_target(string name)
+    {
+        // The other half of the same change: a document written for 0.0.15 that still
+        // transitions to `end` or `error` fails at load, by name, rather than running differently.
+        var request = new TestWorkflowBuilder("test-workflow", fixture.MockBaseUrl)
+            .HttpGet("call", "/success")
+            .OnSuccess(name)
+            .Build();
+
         var exception = await Assert.ThrowsAsync<RpcException>(async () =>
             await fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
-        Assert.Contains("UTOS-A003", exception.Status.Detail);
+        Assert.Contains("UTOS-T003", exception.Status.Detail);
     }
 
     // ============================================================================

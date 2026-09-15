@@ -4,6 +4,7 @@ using Common.Workflow.Serialization;
 using Dapr.Workflow;
 using Execution.Domain.Interpreter;
 using Execution.Domain.Services;
+using Execution.Domain.Templating;
 using Common.Workflow;
 
 namespace Execution.Infrastructure.Dapr.Activities;
@@ -46,7 +47,10 @@ public class ResolveActivityInputActivity(
         var executionContext = await contextStore.LoadContextAsync(input.ExecutionId);
         var session = WorkflowSession.From(executionContext, input.WorkflowKey);
 
-        var resolved = interpreter.ResolveInput(session, input.ActivityName, input.ActivityInput);
+        // Drawn here, inside the activity, so a replay reads this result rather than drawing
+        // again — see EvaluateTransitionActivity.
+        var resolved = interpreter.ResolveInput(
+            session, input.ActivityName, input.ActivityInput, EvaluationMoment.Capture());
 
         return resolved switch
         {

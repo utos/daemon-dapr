@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "const o = {}; o.self = o; o",
+  "scope": { "input": {} },
+  "expect": { "error": "UTOS-E103" }
+}

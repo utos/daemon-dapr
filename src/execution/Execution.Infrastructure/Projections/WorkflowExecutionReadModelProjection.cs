@@ -160,6 +160,7 @@ public class WorkflowExecutionReadModelProjection(
         readModel.Status = ReadModelStatus.Failed;
         readModel.FailedAt = @event.DateOccurred;
         readModel.ErrorMessage = @event.Reason;
+        readModel.ErrorCode = @event.Code;
 
         logger.LogDebug("Updated read model to {Status} for execution {ExecutionId}", ReadModelStatus.Failed,
             @event.ExecutionId);

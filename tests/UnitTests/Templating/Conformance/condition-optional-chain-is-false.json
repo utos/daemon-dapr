@@ -1,0 +1,6 @@
+{
+  "form": "condition",
+  "expression": "output.missing?.deep === 'x'",
+  "scope": { "output": { "status": "ready" } },
+  "expect": { "value": false }
+}

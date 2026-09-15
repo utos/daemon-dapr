@@ -130,6 +130,7 @@ public static class ExecutionInfrastructureExtensions
             options.RegisterActivity<RaiseChildOutputActivity>();
             options.RegisterActivity<AckChildOutputActivity>();
             options.RegisterActivity<CancelChildExecutionActivity>();
+            options.RegisterActivity<ReadChildFailureActivity>();
         });
 
         // Projection engine and projections (idempotent read model updates)

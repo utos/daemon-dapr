@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "const u = new URL('https://api.example.test/orders?page=2&q=a%20b'); [u.hostname, u.pathname, u.searchParams.get('q'), new URLSearchParams({ q: 'a b', n: 1 }).toString()]",
+  "scope": { "input": {} },
+  "expect": { "value": ["api.example.test", "/orders", "a b", "q=a+b&n=1"] }
+}

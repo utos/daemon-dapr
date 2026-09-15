@@ -13,8 +13,9 @@ public abstract record WorkflowStep
     {
     }
 
-    /// <summary>The path reached 'end'. Whatever result was already produced stands.</summary>
-    public sealed record Complete : WorkflowStep;
+    // There is no `Complete` step. A path ending is the driver's loop finding no next activity,
+    // decided by a rule (a `result` action, or the rules running out) — never by a name reaching
+    // the navigator, since spec 0.0.16 has no `end` keyword for it to recognise.
 
     /// <summary>The execution cannot continue.</summary>
     public sealed record Fail(string Reason) : WorkflowStep;

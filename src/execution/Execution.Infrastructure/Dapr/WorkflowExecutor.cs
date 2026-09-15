@@ -172,15 +172,12 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             object? workflowOutput = null;
 
 
+            // The loop runs until a transition names no next activity: the rules ran out, or a
+            // rule returned. Ending is the absence of a target, never a target — there is no
+            // `end` keyword to recognise, and the failing case below is an explicit result too.
             while (currentActivityName != null)
             {
                 var step = WorkflowNavigator.Next(graph, currentActivityName, cursor, limits);
-
-                if (step is WorkflowStep.Complete)
-                {
-                    logger.LogInformation("Workflow reached 'end' transition (execution {WorkflowExecutionId})", logExecutionId);
-                    break;
-                }
 
                 if (step is WorkflowStep.Fail failure)
                     throw new InvalidOperationException(failure.Reason);
@@ -238,10 +235,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     unhandledFailure = ExceptionDispatchInfo.Capture(activityEx);
                     outcomeKind = ActivityOutcomeKind.Failed;
 
-                    // Codes stay coarse until the pipeline records structured causes; a rule
-                    // branches on response.status, which is the part that carries real detail.
-                    activityError = new WorkflowErrorContext(
-                        WorkflowErrorCode.ExecutionFailed, activityEx.Message);
+                    // What `error.code` is in the rule about to run. A sub-workflow that failed by
+                    // an `error` action arrives as a WorkflowFailedException carrying the author's
+                    // code and details, and those are what the rule matches on; anything else the
+                    // daemon raised itself, and reports the generic code — a rule branches on
+                    // response.status for those, which is the part that carries real detail.
+                    activityError = activityEx is WorkflowFailedException authored
+                        ? new WorkflowErrorContext(authored.Code, authored.Message, authored.Details)
+                        : new WorkflowErrorContext(WorkflowErrorCode.ExecutionFailed, activityEx.Message);
 
                     // A failed HTTP activity still has a response, and it is the whole reason
                     // on_failure can tell a 429 from a 401.
@@ -270,18 +271,16 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
                 // No rule matched the failure, so it was never handled — rethrow it as it was,
                 // rather than letting the run fall through to a normal completion.
-                //
-                // Routing a failure to `error` is rethrown the same way. It says "fail the run",
-                // and the most useful thing to fail it with is the cause; letting it reach the
-                // navigator instead would replace a real diagnostic with the generic "workflow
-                // transitioned to 'error'". This makes an explicit terminal rule on the failure
-                // path mean exactly what omitting one means, rather than a strictly worse way of
-                // writing it.
-                if (transition.Unhandled
-                    || (outcomeKind == ActivityOutcomeKind.Failed
-                        && string.Equals(transition.NextActivityName, ReservedKeywords.Error,
-                            StringComparison.OrdinalIgnoreCase)))
+                if (transition.Unhandled)
                     unhandledFailure!.Throw();
+
+                // A rule said fail, and said why: the run fails with exactly what the author
+                // wrote, on either path. On the failure path that replaces the cause being
+                // handled — which is the point of the action; an author who wants the cause
+                // reported writes `message: "{{ error.message }}"`, and one who wants it reported
+                // unchanged declares no rule at all. The subscription, if any, was already left.
+                if (transition.Error is { } raised)
+                    throw new WorkflowFailedException(raised.Code, raised.Message, raised.Details);
 
                 // An emit is emit-and-continue: the value becomes durable before the run moves
                 // on, so a consumer reading the stream in order can never see the effect of a
@@ -380,9 +379,16 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         }
         catch (Exception ex)
         {
+            // The three fields every report of this failure carries. Authored by a rule's `error`
+            // action — here or in a child this run was handling — they are the author's; raised by
+            // the daemon, the code is the generic one and there are no details.
+            var (failureCode, failureDetails) = ex is WorkflowFailedException authored
+                ? (authored.Code, authored.Details)
+                : (WorkflowErrorCode.ExecutionFailed, null);
+
             logger.LogError(
-                "Workflow execution failed: {ErrorMessage} (execution {WorkflowExecutionId})",
-                ex.Message, logExecutionId);
+                "Workflow execution failed [{FailureCode}]: {ErrorMessage} (execution {WorkflowExecutionId})",
+                failureCode, ex.Message, logExecutionId);
 
             // A failure is a terminal message too, and it goes out *first* — ahead of the
             // abandonment sweep and ahead of recording the entry.
@@ -401,7 +407,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 await context.CallActivityAsync(nameof(RaiseChildOutputActivity),
                     new RaiseChildOutputInput(
                         input.ParentExecutionId!.Value, input.OutputEventName,
-                        new ChildOutputMessage(ChildOutputKind.Error, null, ex.Message)));
+                        new ChildOutputMessage(ChildOutputKind.Error, null, ex.Message,
+                            failureCode, failureDetails)));
 
             // A failure abandons a subscription just as surely as reaching the end does — more
             // so, since the failure may be the very thing that stopped the run returning to its
@@ -410,11 +417,12 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
                 new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Error,
-                    ErrorMessage: ex.Message));
+                    ErrorCode: failureCode, ErrorMessage: ex.Message, ErrorDetails: failureDetails));
 
             if (!isChild)
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
-                    new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Failed, ex.Message));
+                    new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Failed,
+                        ex.Message, failureCode, failureDetails));
 
             throw;
         }
@@ -423,8 +431,9 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
     /// <summary>Where a matched rule sends the run, as a log reads it.</summary>
     private static string DescribeTarget(EvaluateTransitionOutput transition) =>
         transition.Dispatch != null ? $"handler {transition.Dispatch.Workflow}"
+        : transition.Error != null ? $"error {transition.Error.Code}"
         : transition.ReturnValue != null ? "result"
-        : transition.NextActivityName ?? ReservedKeywords.End;
+        : transition.NextActivityName ?? "end of path";
 
     /// <summary>
     /// Performs the activity's work and returns its output, which the transition is then
@@ -520,7 +529,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             // survive the Dapr boundary. Turning that into a failure is this side's decision.
             if (!result.Success)
                 throw new HttpActivityFailedException(
-                    run.ActivityName, result.StatusCode, result.Headers, result.BodyText);
+                    run.ActivityName, result.StatusCode, result.Headers, result.BodyText, result.Body);
 
             logger.LogInformation(
                 "Activity '{WorkflowActivity}' completed in {DurationMs}ms (execution {WorkflowExecutionId})",
@@ -528,7 +537,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             return ActivityOutcome.Completed(
                 result.Output,
-                new HttpResponseContext(result.StatusCode, result.Headers, result.BodyText));
+                new HttpResponseContext(result.StatusCode, result.Headers, result.BodyText, result.Body));
         }
         catch (Exception activityEx)
         {
@@ -643,7 +652,21 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 context, logger, run, logExecutionId, subscriptions, childExecutionId);
         }
 
-        var childOutput = await childTask;
+        object? childOutput;
+        try
+        {
+            childOutput = await childTask;
+        }
+        // The SDK's own type, and by name for the runtime's underlying TaskFailedException, which
+        // has surfaced directly in some SDK versions: either way the child's failure arrived
+        // flattened to a message. Its code and details are on the child's stream, written before
+        // the child reported — read them back so this run fails, or handles the failure, with
+        // what the author wrote.
+        catch (Exception ex) when (ex is WorkflowTaskFailedException
+                                   || ex.GetType().Name.EndsWith("TaskFailedException", StringComparison.Ordinal))
+        {
+            throw await ReadChildFailureAsync(context, childExecutionId);
+        }
 
         // The child's stream has served its only purpose. Reclaimed here rather than left to the
         // terminal cleanup because a parent looping over a sub-workflow call need never reach a
@@ -653,6 +676,19 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             new DeleteOutputStreamInput(childExecutionId));
 
         return ActivityOutcome.Completed(childOutput);
+    }
+
+    /// <summary>
+    /// The failure an awaited child recorded, as the exception this run fails with. The stream is
+    /// left in place: it is the record of why, and the terminal cleanup reclaims it.
+    /// </summary>
+    private static async Task<WorkflowFailedException> ReadChildFailureAsync(
+        WorkflowContext context, ExecutionId childExecutionId)
+    {
+        var failure = await context.CallActivityAsync<ReadChildFailureOutput>(
+            nameof(ReadChildFailureActivity), new ReadChildFailureInput(childExecutionId));
+
+        return new WorkflowFailedException(failure.Code, failure.Message, failure.Details);
     }
 
     /// <summary>
@@ -729,10 +765,18 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 await context.CallActivityAsync(nameof(DeleteOutputStreamActivity),
                     new DeleteOutputStreamInput(handlerExecutionId));
 
+                // Rethrown as what the handler failed with, code and details intact, so a rule
+                // on this consumer can match an error the handler raised on purpose.
                 if (message.Kind == ChildOutputKind.Error)
-                    throw new InvalidOperationException(
-                        $"Emission handler '{dispatch.Workflow}' dispatched from activity "
-                        + $"'{callActivityName}' failed: {message.ErrorMessage}");
+                {
+                    logger.LogError(
+                        "Emission handler '{HandlerWorkflow}' dispatched from activity '{WorkflowActivity}' "
+                        + "failed [{FailureCode}]: {ErrorMessage} (execution {WorkflowExecutionId})",
+                        dispatch.Workflow, callActivityName, message.ErrorCode ?? WorkflowErrorCode.ExecutionFailed,
+                        message.ErrorMessage, logExecutionId);
+
+                    throw AsFailure(message);
+                }
 
                 return;
             }
@@ -865,11 +909,26 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             new DeleteOutputStreamInput(childExecutionId));
 
         if (message.Kind == ChildOutputKind.Error)
-            throw new InvalidOperationException(
-                $"Sub-workflow at activity '{run.ActivityName}' failed: {message.ErrorMessage}");
+        {
+            logger.LogError(
+                "Sub-workflow at activity '{WorkflowActivity}' failed [{FailureCode}]: {ErrorMessage} (execution {WorkflowExecutionId})",
+                run.ActivityName, message.ErrorCode ?? WorkflowErrorCode.ExecutionFailed, message.ErrorMessage,
+                logExecutionId);
+
+            throw AsFailure(message);
+        }
 
         return ActivityOutcome.Completed(message.Value);
     }
+
+    /// <summary>
+    /// A child's terminal error message as the exception this run fails with: the author's code
+    /// and details when the child failed by an <c>error</c> action, the generic code otherwise.
+    /// </summary>
+    private static WorkflowFailedException AsFailure(ChildOutputMessage message) =>
+        new(message.ErrorCode ?? WorkflowErrorCode.ExecutionFailed,
+            message.ErrorMessage ?? string.Empty,
+            message.ErrorDetails);
 
     private static async Task<object?> FanOutAsync(
         WorkflowContext context,
@@ -984,11 +1043,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 return resolved.Results;
 
             case PromiseProgress.BranchFailed branchFailed:
-                // The branch's own error is the useful one, so re-await it to rethrow rather
-                // than reporting something invented here.
-                await branchTasks[branchFailed.BranchName];
-                throw new InvalidOperationException(
-                    $"Promise branch '{branchFailed.BranchName}' failed");
+                // The branch's own error is the useful one, and it is on the branch's stream
+                // with the code and details the runtime's exception lost — see
+                // ReadChildFailureActivity. The branch name goes to the log; the failure itself
+                // is reported as the branch authored it.
+                logger.LogError(
+                    "Promise activity '{WorkflowActivity}' failed: branch '{PromiseBranch}' failed (execution {WorkflowExecutionId})",
+                    activityName, branchFailed.BranchName, logExecutionId);
+                throw await ReadChildFailureAsync(context, branchExecutionIds[branchFailed.BranchName]);
 
             case PromiseProgress.Failed failed:
                 throw new InvalidOperationException(failed.Reason);

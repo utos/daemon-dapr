@@ -12,28 +12,32 @@ public class WorkflowNavigatorTests
 
     [Theory]
     [InlineData("end")]
-    [InlineData("END")]
-    [InlineData("End")]
-    public void End_keyword_completes_the_execution(string keyword)
-    {
-        var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
-
-        var step = WorkflowNavigator.Next(graph, keyword, Fresh(), Wf.Limits());
-
-        Assert.IsType<WorkflowStep.Complete>(step);
-    }
-
-    [Theory]
     [InlineData("error")]
-    [InlineData("ERROR")]
-    public void Error_keyword_fails_the_execution(string keyword)
+    [InlineData("End")]
+    public void A_former_keyword_is_an_ordinary_unknown_activity(string name)
     {
+        // Until spec 0.0.15 these were terminal keywords, matched case-insensitively. They are
+        // nothing now: ending a path is a `result` action and failing it an `error` action, and
+        // the shared validator refuses a bundle that still transitions to them (UTOS-T003). A
+        // bundle that reached the navigator regardless gets the same answer as any other name
+        // that is not an activity — not a silent completion.
         var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
 
-        var step = WorkflowNavigator.Next(graph, keyword, Fresh(), Wf.Limits());
+        var step = WorkflowNavigator.Next(graph, name, Fresh(), Wf.Limits());
 
         var fail = Assert.IsType<WorkflowStep.Fail>(step);
-        Assert.Equal("Workflow transitioned to 'error'", fail.Reason);
+        Assert.Equal($"Activity '{name}' not found in workflow 'test:1.0.0'", fail.Reason);
+    }
+
+    [Fact]
+    public void An_activity_may_be_named_end()
+    {
+        // Nothing is reserved, so `end` is a name like any other and runs.
+        var graph = Wf.Graph(("end", Wf.Http("https://example.com")));
+
+        var step = WorkflowNavigator.Next(graph, "end", Fresh(), Wf.Limits());
+
+        Assert.Equal("end", Assert.IsType<WorkflowStep.Run>(step).ActivityName);
     }
 
     [Fact]
@@ -136,19 +140,6 @@ public class WorkflowNavigatorTests
         }
 
         Assert.Equal(3, cursor.TransitionsThisSegment);
-    }
-
-    [Fact]
-    public void Reaching_end_never_continues_as_new()
-    {
-        var graph = Wf.Graph(("a", Wf.Http("https://example.com")));
-        var limits = Wf.Limits(continueAsNewAfter: 1);
-
-        var first = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", Fresh(), limits);
-        var looping = (WorkflowStep.Run)WorkflowNavigator.Next(graph, "a", first.Cursor, limits);
-
-        // The cursor is well past the threshold, but 'end' outranks it.
-        Assert.IsType<WorkflowStep.Complete>(WorkflowNavigator.Next(graph, "end", looping.Cursor, limits));
     }
 
     [Fact]

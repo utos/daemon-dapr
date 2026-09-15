@@ -20,6 +20,9 @@ public class ExecutionSummary
     public DateTime? FinishedAt { get; set; }
     public string? ErrorMessage { get; set; }
 
+    /// <summary>The failure's authored code, or null when the daemon raised the failure.</summary>
+    public string? ErrorCode { get; set; }
+
     /// <summary>Why the run was cancelled. Null unless Status is Cancelled — and null then too
     /// when no reason was given. Separate from ErrorMessage so a deliberate stop never reads as
     /// a failure.</summary>

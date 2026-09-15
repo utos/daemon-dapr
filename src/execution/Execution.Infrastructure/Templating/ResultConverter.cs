@@ -68,8 +68,7 @@ internal static class ResultConverter
         {
             var prototype = obj.Prototype;
             if (prototype is not null && !ReferenceEquals(prototype, engine.Intrinsics.Object.PrototypeObject))
-                throw new TemplateException(EvaluationCodes.ResultNotPlainData,
-                    $"An expression cannot produce a {obj.GetType().Name}; return plain objects and arrays.");
+                throw new TemplateException(EvaluationCodes.ResultNotPlainData, Refusal(obj));
 
             if (!stack.Add(obj))
                 throw new TemplateException(EvaluationCodes.ResultNotPlainData, "The result contains a cycle.");
@@ -95,4 +94,19 @@ internal static class ResultConverter
 
         throw new TemplateException(EvaluationCodes.ResultNotPlainData, $"An expression cannot produce a {value.Type}.");
     }
+
+    /// <summary>
+    /// Says what to write instead for the values an author is most likely to return whole. Bytes
+    /// and dates leave as the text the author chooses — explicit beats a silent conversion.
+    /// </summary>
+    private static string Refusal(ObjectInstance obj) => obj switch
+    {
+        Node.BufferInstance =>
+            "An expression cannot produce a Buffer; return buffer.toString('base64'), toString('hex') or toString() instead.",
+        _ when obj.GetType().Name.Contains("Date", StringComparison.Ordinal) =>
+            "An expression cannot produce a Date; return date.toISOString() or date.getTime() instead.",
+        Node.UrlObjects.UrlInstance or Node.UrlObjects.SearchParamsInstance =>
+            "An expression cannot produce a URL; return url.href or url.toString() instead.",
+        _ => $"An expression cannot produce a {obj.GetType().Name}; return plain objects and arrays."
+    };
 }

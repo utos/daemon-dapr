@@ -1,0 +1,8 @@
+{
+  "form": "value",
+  "expression": "[Math.random(), Math.random(), Math.random()]",
+  "scope": { "input": {} },
+  "clock": "2026-09-15T10:00:00.000Z",
+  "seed": "6f2c8f5e-3b1a-4c7d-9e0f-1a2b3c4d5e6f",
+  "expect": { "value": [0.8639976234635078, 0.5082082876016434, 0.8948015306139667] }
+}

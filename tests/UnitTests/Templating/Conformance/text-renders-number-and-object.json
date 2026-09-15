@@ -1,0 +1,6 @@
+{
+  "form": "text",
+  "expression": "({ n: 5.0, list: [1, 2.5], nothing: null })",
+  "scope": { "input": {} },
+  "expect": { "value": "{\"n\":5,\"list\":[1,2.5],\"nothing\":null}" }
+}

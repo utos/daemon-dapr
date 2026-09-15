@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "input.items.toSorted((a, b) => a - b)",
+  "scope": { "input": { "items": [3, 1, 2] } },
+  "expect": { "value": [1, 2, 3] }
+}

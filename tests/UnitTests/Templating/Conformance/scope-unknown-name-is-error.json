@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "item.sku",
+  "scope": { "input": { "sku": "A1" } },
+  "expect": { "error": "UTOS-E120" }
+}

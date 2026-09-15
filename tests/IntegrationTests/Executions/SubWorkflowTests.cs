@@ -25,7 +25,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("parent-simple", fixture.MockBaseUrl)
             .WorkflowCall("call-child", "child-simple", "child-step")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("child-simple", child => { child.HttpGet("child-step", "/sub-workflow-simple"); })
             .Build("call-child");
 
@@ -124,7 +124,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("workflow-a", fixture.MockBaseUrl)
             .WorkflowCall("call-b", "workflow-b", "call-c")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("workflow-b", b =>
             {
                 b.WorkflowCall("call-c", "workflow-c", "do-http")
@@ -290,7 +290,7 @@ public class SubWorkflowTests(DaemonTestFixture fixture)
             .WorkflowSpawn("start-child", "child-detached", "wait")
             .OnSuccess("after", handleToInput)
             .HttpPost("after", "/parent-after", """{"childId": "{{ input.childId }}"}""")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("child-detached", child =>
             {
                 child.Timer("wait", TimeSpan.FromSeconds(6)).OnSuccess("hit");

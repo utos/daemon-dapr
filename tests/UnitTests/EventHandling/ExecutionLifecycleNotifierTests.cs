@@ -76,7 +76,9 @@ public class ExecutionLifecycleNotifierTests
             return Task.CompletedTask;
         }
 
-        public Task OnFailedAsync(ExecutionId executionId, DateTime occurredAt, string reason, CancellationToken ct = default)
+        public Task OnFailedAsync(
+            ExecutionId executionId, DateTime occurredAt, string reason, string? code = null,
+            CancellationToken ct = default)
         {
             Failed.Add((executionId, occurredAt, reason));
             return Task.CompletedTask;
@@ -88,7 +90,9 @@ public class ExecutionLifecycleNotifierTests
         public Task OnCompletedAsync(ExecutionId executionId, DateTime occurredAt, CancellationToken ct = default) =>
             throw new InvalidOperationException("listener failed");
 
-        public Task OnFailedAsync(ExecutionId executionId, DateTime occurredAt, string reason, CancellationToken ct = default) =>
+        public Task OnFailedAsync(
+            ExecutionId executionId, DateTime occurredAt, string reason, string? code = null,
+            CancellationToken ct = default) =>
             throw new InvalidOperationException("listener failed");
     }
 }
