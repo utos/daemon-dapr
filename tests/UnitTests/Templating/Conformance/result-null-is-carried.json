@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "({ cursor: null, count: input.count })",
+  "scope": { "input": { "count": 2 } },
+  "expect": { "value": { "cursor": null, "count": 2 } }
+}

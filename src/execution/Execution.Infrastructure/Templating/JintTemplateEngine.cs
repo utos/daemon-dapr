@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Acornima.Ast;
 using Execution.Application.Models;
 using Execution.Domain.Templating;
+using Execution.Infrastructure.Templating.Node;
 using Jint;
 using Jint.Native;
 using Jint.Runtime;
@@ -21,9 +22,12 @@ namespace Execution.Infrastructure.Templating;
 /// <para>
 /// One Jint engine serves all the expressions evaluated against one <see cref="TemplateScope"/>
 /// — the interpreter builds a scope per activity decision and evaluates every field of that
-/// decision against it. Building an engine (options, host library, scope copy, lockdown) costs
+/// decision against it. Building an engine (options, Node globals, scope copy, lockdown) costs
 /// ~2–3 ms; an expression on a built engine ~5 µs. Each expression runs in its own function
-/// scope, so nothing one leaves behind reaches the next.
+/// scope, so nothing one leaves behind reaches the next — except the counters behind
+/// <c>Math.random()</c> and <c>crypto.randomUUID()</c>, which count across the activity's
+/// expressions on purpose, so two never draw the same value. The scope's
+/// <see cref="TemplateScope.Moment"/> is what <c>Date.now()</c> and those sequences derive from.
 /// </para>
 /// <para>
 /// The grammar is not re-checked here. Every bundle the daemon executes went through
@@ -221,8 +225,11 @@ public sealed class JintTemplateEngine : ITemplateEngine
             options.Constraints.StackOverflowGuard = true;
         });
 
-        HostLibrary.Install(engine);
-        ScopeConverter.Inject(engine, scope);
+        // Order matters: the Node globals before the scope (a `response.body` is a Buffer, whose
+        // prototype the scope converter needs), and both before the lockdown, which deletes the
+        // temporaries they leave and freezes everything they installed.
+        var node = NodeGlobals.Install(engine, scope.Moment);
+        ScopeConverter.Inject(engine, scope, node.BufferPrototype);
         EngineLockdown.Apply(engine, scope.Values.Keys);
         return engine;
     }

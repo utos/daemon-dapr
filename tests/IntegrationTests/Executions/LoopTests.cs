@@ -39,7 +39,7 @@ public class LoopTests(DaemonTestFixture fixture)
             .HttpGet("poll", path)
             .WithHeader("X-Marker", "{{ input.marker }}")
             .OnSuccess("poll", Append("marker"), when: NotYetAt(laps))
-            .OnSuccess("end")
+            .OnEnd()
             .WithInput("marker", Seed)
             .Build();
 
@@ -66,7 +66,7 @@ public class LoopTests(DaemonTestFixture fixture)
             .HttpGet("poll", path)
             .WithHeader("X-Marker", "{{ input.marker }}")
             .OnSuccess("poll", Append("marker"), when: NotYetAt(laps))
-            .OnSuccess("end")
+            .OnEnd()
             .WithInput("marker", Seed)
             .Build();
 
@@ -93,7 +93,7 @@ public class LoopTests(DaemonTestFixture fixture)
             .HttpGet("poll", path)
             .WithHeader("X-Marker", "{{ input.marker }}")
             .OnSuccess("poll", Append("marker"), when: NotYetAt(laps))
-            .OnSuccess("end")
+            .OnEnd()
             .WithInput("marker", Seed)
             .Build();
 
@@ -125,7 +125,7 @@ public class LoopTests(DaemonTestFixture fixture)
             .OnSuccess("step-c", Carry("marker"))
             .HttpGet("step-c", path)
             .OnSuccess("step-a", Append("marker"), when: NotYetAt(laps))
-            .OnSuccess("end")
+            .OnEnd()
             .WithInput("marker", Seed)
             .Build("step-a");
 
@@ -152,7 +152,7 @@ public class LoopTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("loop-parent-workflow", fixture.MockBaseUrl)
             .WorkflowCall("call-child", "loop-child-workflow", "child-step")
             .OnSuccess("call-child", Append("marker"), when: NotYetAt(laps))
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("loop-child-workflow",
                 child => { child.HttpGet("child-step", path); })
             .WithInput("marker", Seed)

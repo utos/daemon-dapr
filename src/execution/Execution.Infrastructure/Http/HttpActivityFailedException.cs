@@ -16,7 +16,8 @@ public sealed class HttpActivityFailedException(
     string activityName,
     int statusCode,
     IReadOnlyDictionary<string, string> headers,
-    string? bodyText)
+    string? bodyText,
+    byte[]? body = null)
     : Exception($"HTTP activity '{activityName}' failed with status {statusCode}: {Summarise(bodyText)}")
 {
     public int StatusCode { get; } = statusCode;
@@ -24,6 +25,8 @@ public sealed class HttpActivityFailedException(
     public IReadOnlyDictionary<string, string> Headers { get; } = headers;
 
     public string? BodyText { get; } = bodyText;
+
+    public byte[]? Body { get; } = body;
 
     /// <summary>
     /// The same response, shaped for <c>{{ response.x }}</c> — so a failure handler branches on a
@@ -34,7 +37,8 @@ public sealed class HttpActivityFailedException(
         return new Execution.Domain.Interpreter.HttpResponseContext(
             StatusCode,
             new Dictionary<string, string>(Headers, StringComparer.OrdinalIgnoreCase),
-            BodyText);
+            BodyText,
+            Body);
     }
 
     /// <summary>

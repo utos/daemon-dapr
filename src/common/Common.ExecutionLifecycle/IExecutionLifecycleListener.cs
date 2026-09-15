@@ -19,5 +19,12 @@ public interface IExecutionLifecycleListener
 {
     Task OnCompletedAsync(ExecutionId executionId, DateTime occurredAt, CancellationToken ct = default);
 
-    Task OnFailedAsync(ExecutionId executionId, DateTime occurredAt, string reason, CancellationToken ct = default);
+    /// <param name="code">
+    /// The failure's code — an authored <c>error</c> action's, or null when the daemon raised the
+    /// failure itself. Structured details are deliberately not carried here: a listener that
+    /// needs them reads the execution's output stream, which is the record.
+    /// </param>
+    Task OnFailedAsync(
+        ExecutionId executionId, DateTime occurredAt, string reason, string? code = null,
+        CancellationToken ct = default);
 }

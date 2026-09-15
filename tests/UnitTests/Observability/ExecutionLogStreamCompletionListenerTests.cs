@@ -21,7 +21,7 @@ public class ExecutionLogStreamCompletionListenerTests
 
         await new ExecutionLogStreamCompletionListener(store).OnCompletedAsync(Id, At);
 
-        Assert.Equal([(Id, At, ExecutionOutcome.Completed, null)], store.Completions);
+        Assert.Equal([(Id, At, ExecutionOutcome.Completed, null, null)], store.Completions);
     }
 
     [Fact]
@@ -31,15 +31,29 @@ public class ExecutionLogStreamCompletionListenerTests
 
         await new ExecutionLogStreamCompletionListener(store).OnFailedAsync(Id, At, "HTTP 500");
 
-        Assert.Equal([(Id, At, ExecutionOutcome.Failed, "HTTP 500")], store.Completions);
+        Assert.Equal([(Id, At, ExecutionOutcome.Failed, "HTTP 500", null)], store.Completions);
+    }
+
+    [Fact]
+    public async Task A_run_failed_by_an_error_action_carries_the_authored_code()
+    {
+        // The code is what a watching client switches on; dropping it here would report every
+        // authored failure as the generic one, which is what the action exists to avoid.
+        var store = new RecordingLogStore();
+
+        await new ExecutionLogStreamCompletionListener(store).OnFailedAsync(Id, At, "no such order", "ORDER_NOT_FOUND");
+
+        Assert.Equal([(Id, At, ExecutionOutcome.Failed, "no such order", "ORDER_NOT_FOUND")], store.Completions);
     }
 
     private sealed class RecordingLogStore : IExecutionLogStore
     {
-        public List<(ExecutionId, DateTime, ExecutionOutcome, string?)> Completions { get; } = [];
+        public List<(ExecutionId, DateTime, ExecutionOutcome, string?, string?)> Completions { get; } = [];
 
-        public void CompleteWith(ExecutionId executionId, DateTime timestamp, ExecutionOutcome outcome, string? failureReason)
-            => Completions.Add((executionId, timestamp, outcome, failureReason));
+        public void CompleteWith(
+            ExecutionId executionId, DateTime timestamp, ExecutionOutcome outcome, string? failureReason,
+            string? failureCode = null)
+            => Completions.Add((executionId, timestamp, outcome, failureReason, failureCode));
 
         public void AddEntry(ExecutionId executionId, ExecutionLogEntry entry) => throw new NotSupportedException();
         public void Complete(ExecutionId executionId) => throw new NotSupportedException();

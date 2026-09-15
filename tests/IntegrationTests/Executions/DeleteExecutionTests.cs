@@ -124,7 +124,7 @@ public class DeleteExecutionTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("delete-cascade-parent", fixture.MockBaseUrl)
             .WorkflowCall("call-child", "delete-cascade-child-wf", "child-step")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("delete-cascade-child-wf",
                 child => { child.HttpGet("child-step", "/delete-cascade-child"); })
             .Build("call-child");
@@ -176,7 +176,7 @@ public class DeleteExecutionTests(DaemonTestFixture fixture)
             .WorkflowSpawn("start-child", "delete-detached-child-wf", "wait")
             .OnSuccess("after", handleToInput)
             .HttpPost("after", "/delete-detached-parent-after", """{"childId": "{{ input.childId }}"}""")
-            .OnSuccess("end")
+            .OnEnd()
             .AddDependentWorkflow("delete-detached-child-wf", child =>
             {
                 // The timer keeps the child running well past the parent's completion.

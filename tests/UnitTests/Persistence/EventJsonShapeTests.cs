@@ -64,9 +64,17 @@ public class EventJsonShapeTests
     [Fact]
     public void Failed_keeps_its_shape()
     {
+        // `Code` and `Details` are the one evolution that needs no version: optional nullable
+        // fields, appended, so an event written before them reads back with nulls and one written
+        // with them reads on an older daemon by ignoring what it does not know.
         Assert.Equal(
-            """{"ExecutionId":"11111111-1111-1111-1111-111111111111","Reason":"HTTP 500","DateOccurred":"2026-07-31T12:00:00Z"}""",
+            """{"ExecutionId":"11111111-1111-1111-1111-111111111111","Reason":"HTTP 500","DateOccurred":"2026-07-31T12:00:00Z","Code":null,"Details":null}""",
             Serialize(new WorkflowExecutionFailedEvent(Id, "HTTP 500", At)));
+
+        Assert.Equal(
+            """{"ExecutionId":"11111111-1111-1111-1111-111111111111","Reason":"no such order","DateOccurred":"2026-07-31T12:00:00Z","Code":"ORDER_NOT_FOUND","Details":{"orderId":"o-1"}}""",
+            Serialize(new WorkflowExecutionFailedEvent(Id, "no such order", At, "ORDER_NOT_FOUND",
+                new Dictionary<string, object> { ["orderId"] = "o-1" })));
     }
 
     private static WorkflowBundle EmptyBundle() =>

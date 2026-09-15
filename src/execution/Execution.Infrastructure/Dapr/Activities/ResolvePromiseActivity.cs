@@ -5,6 +5,7 @@ using Common.Workflow;
 using Dapr.Workflow;
 using Execution.Domain.Interpreter;
 using Execution.Domain.Services;
+using Execution.Domain.Templating;
 
 namespace Execution.Infrastructure.Dapr.Activities;
 
@@ -47,7 +48,10 @@ public class ResolvePromiseActivity(
         var executionContext = await contextStore.LoadContextAsync(input.ExecutionId);
         var session = WorkflowSession.From(executionContext, input.WorkflowKey);
 
-        var expansion = interpreter.ExpandPromise(session, input.ActivityName, input.ActivityInput);
+        // Drawn here, inside the activity, so a replay reads this result rather than drawing
+        // again — see EvaluateTransitionActivity.
+        var expansion = interpreter.ExpandPromise(
+            session, input.ActivityName, input.ActivityInput, EvaluationMoment.Capture());
 
         var branches = expansion.Branches
             .Select(b => new PromiseBranchResolution(b.BranchName, b.WorkflowKey, b.StartActivity, b.Input))

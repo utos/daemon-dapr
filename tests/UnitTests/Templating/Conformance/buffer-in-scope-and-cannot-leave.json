@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "response.body",
+  "scope": { "response": { "status": 200, "headers": { "content-type": "image/png" }, "body": { "$buffer": "iVBORw0KGgo=" }, "bodyText": null } },
+  "expect": { "error": "UTOS-E103" }
+}

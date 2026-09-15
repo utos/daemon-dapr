@@ -215,9 +215,11 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
         // addressed by their own id, and this is what says they did not inherit that shape.
         const string producePath = "/nested-produce";
         const string relayPath = "/nested-relay";
+        const string relayDonePath = "/nested-relay-done";
         const string handlePath = "/nested-handle";
         StubJson(producePath);
         StubJson(relayPath);
+        StubJson(relayDonePath);
         StubJson(handlePath);
 
         const int values = 3;
@@ -241,13 +243,15 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                         }
                     }])
                 .OnResult(Fields(("relayed", Value.ForString("{{ output.produced }}")))))
-            // The middle document's handler, which is where the relay happens. Emit-and-end: hand
-            // the value up, then finish. Finishing is what acknowledges the producer and asks for
-            // the next value; `emit` still needs a target (UTOS-T004), and `end` means "done".
+            // The middle document's handler, which is where the relay happens. Emit, then finish:
+            // finishing is what acknowledges the producer and asks for the next value. `emit`
+            // needs a target (UTOS-T004) and there is no `end` keyword to name, so the target is
+            // an activity whose rules run out — a GET nobody counts.
             .AddDependentWorkflow(RelayWorkflow, relay => relay
                 .HttpGet("relay", relayPath)
                 .WithHeader("X-Value", "{{ input.n }}")
-                .OnEmit(Fields(("n", Value.ForString("{{ input.n }}"))), "end"))
+                .OnEmit(Fields(("n", Value.ForString("{{ input.n }}"))), "finish")
+                .HttpGet("finish", relayDonePath))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, values))
             .Build("watch-middle");
 
@@ -339,7 +343,7 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .AddDependentWorkflow(HandlerWorkflow, handler => handler
                 .HttpGet("handle", handlePath)
                 .WithHeader("X-Value", "{{ input.n }}")
-                .OnSuccess("end"))
+                .OnEnd())
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, 5))
             .Build("watch");
 

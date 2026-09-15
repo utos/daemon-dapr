@@ -53,13 +53,19 @@ public sealed record ExecutionResultProduced(
     public override bool IsTerminal => true;
 }
 
-/// <summary>Terminal: the workflow failed, or was cancelled.</summary>
+/// <summary>
+/// Terminal: the workflow failed, or was cancelled. The three fields of the
+/// <c>WorkflowError</c> a client reads; <paramref name="Details"/> is an optional nullable field
+/// added after the first shape, so an entry written without it reads back with null.
+/// </summary>
 [EventType("utos.output.error")]
 public sealed record ExecutionErrorProduced(
     ExecutionId ExecutionId,
     string Code,
     string Message,
-    DateTime DateOccurred) : ExecutionOutputEntry(ExecutionId, DateOccurred)
+    DateTime DateOccurred,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? Details = null) : ExecutionOutputEntry(ExecutionId, DateOccurred)
 {
     public override bool IsTerminal => true;
 }

@@ -34,7 +34,7 @@ public class TemplateTypingTests(DaemonTestFixture fixture)
             .HttpGet("poll", path)
             .WithHeader("X-Count", "{{ input.count }}")
             .OnSuccess("poll", increment, when: "input.count < 3")
-            .OnSuccess("end")
+            .OnEnd()
             .WithInput("count", 0)
             .Build();
 

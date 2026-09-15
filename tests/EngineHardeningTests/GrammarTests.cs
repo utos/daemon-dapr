@@ -25,11 +25,12 @@ public class GrammarTests
     [InlineData("this === undefined", "UTOS-E030")]
     [InlineData("(async () => 1)() !== null", "UTOS-E031")]
     [InlineData("new Array(5).length === 5", "UTOS-E040")]
-    [InlineData("new Date() !== null", "UTOS-E040")]
+    [InlineData("new Proxy({}, {}) !== null", "UTOS-E040")]
     [InlineData("Array(5).length === 5", "UTOS-E041")]
     [InlineData("eval('true')", "UTOS-E041")]
     [InlineData("Function('return true')()", "UTOS-E041")]
     [InlineData("delete input.count", "UTOS-E050")]
+    [InlineData("void 0 === undefined", "UTOS-E050")]
     [InlineData("(input instanceof Object) === true", "UTOS-E051")]
     [InlineData("(1, true)", "UTOS-E035")]
     [InlineData("output.status ===", "UTOS-E060")]
@@ -64,6 +65,12 @@ public class GrammarTests
     [InlineData("let s = 0; input.items.forEach(x => { s += x; }); s === 6")]
     [InlineData("typeof input.count === 'number' && 'name' in input.user")]
     [InlineData("/<(.+)>/.exec('Alice <a@b.c>')[1] === 'a@b.c'")]
+    // Spec 0.0.16: bitwise and shift operators, every assignment operator, and the Node globals'
+    // constructors are in the language.
+    [InlineData("let f = input.count; f |= 8; (f & 4) === 0 && (f >>> 1) > 0 && ~0 === -1")]
+    [InlineData("new Date(0).getTime() === 0 && new URL('https://x.test/a').pathname === '/a'")]
+    [InlineData("new URLSearchParams({ q: 'a b' }).toString() === 'q=a+b'")]
+    [InlineData("Buffer.from('aGk', 'base64').toString() === 'hi'")]
     public void Ordinary_programs_are_accepted(string condition)
     {
         var report = WorkflowBundleValidator.Validate(BundleWithCondition(condition));
@@ -82,7 +89,7 @@ public class GrammarTests
         workflow.Spec.Activities["say-hello"] = new WorkflowActivity
         {
             Http = new HttpActivityConfig { Method = "GET", Url = "https://api.example.com/hello" },
-            OnSuccess = { new TransitionRule { Condition = condition, Transition = new TransitionTarget { Name = "end" } } },
+            OnSuccess = { new TransitionRule { Condition = condition, Result = new Google.Protobuf.WellKnownTypes.Struct() } },
         };
 
         var bundle = new WorkflowBundle { EntryPoint = "greet:1.0.0" };

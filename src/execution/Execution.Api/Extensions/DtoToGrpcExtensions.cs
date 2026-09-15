@@ -71,7 +71,7 @@ public static class DtoToGrpcExtensions
         if (!string.IsNullOrEmpty(dto.ErrorMessage))
             grpc.Error = new GrpcWorkflowError
             {
-                Code = WorkflowErrorCode.ExecutionFailed,
+                Code = dto.ErrorCode ?? WorkflowErrorCode.ExecutionFailed,
                 Message = dto.ErrorMessage
             };
 
@@ -104,12 +104,19 @@ public static class DtoToGrpcExtensions
         if (!string.IsNullOrEmpty(dto.CancellationReason))
             summary.CancellationReason = dto.CancellationReason;
 
+        // What the author wrote, when a rule's `error` action failed the run: its code, and its
+        // details when it carried any. A failure the daemon raised has the generic code and none.
         if (!string.IsNullOrEmpty(dto.ErrorMessage))
+        {
             summary.Error = new GrpcWorkflowError
             {
-                Code = WorkflowErrorCode.ExecutionFailed,
+                Code = dto.ErrorCode ?? WorkflowErrorCode.ExecutionFailed,
                 Message = dto.ErrorMessage
             };
+
+            if (dto.ErrorDetails != null)
+                summary.Error.Details = dto.ErrorDetails.ToProto();
+        }
 
         var grpc = new GrpcExecutionDetails
         {
@@ -120,10 +127,9 @@ public static class DtoToGrpcExtensions
         if (dto.Input.Count > 0)
             grpc.Input = dto.Input.ToGrpc();
 
-        // Set whenever the run produced a result entry, empty included: a completed run that
-        // returned nothing did produce a result, and reporting that as an absent field would make
-        // it indistinguishable from a run that failed. Which runs have one is the handler's call,
-        // not this mapping's.
+        // Set when the run returned a value. A run that ended with none leaves it unset, per spec
+        // 0.0.16 — the status is what says it completed. Which runs have one is the handler's
+        // call, not this mapping's.
         if (dto.Result != null)
             grpc.Result = dto.Result.ToProto();
 
@@ -164,6 +170,8 @@ public static class DtoToGrpcExtensions
 
             case ExecutionErrorProduced error:
                 entry.Error = new GrpcWorkflowError { Code = error.Code, Message = error.Message };
+                if (error.Details != null)
+                    entry.Error.Details = ToStruct(error.Details);
                 break;
 
             default:

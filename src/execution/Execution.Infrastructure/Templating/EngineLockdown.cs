@@ -38,15 +38,19 @@ internal static class EngineLockdown
         ["Function"] = ["call", "apply", "bind", "length", "name"],
     };
 
+    // The Node globals — Buffer, crypto, URL, URLSearchParams — are host objects whose members
+    // are exactly what NodeGlobals put there, so they are kept whole and only frozen; Date keeps
+    // its standard prototype, with its constructor and `now` replaced before this runs.
     private static readonly string[] Globals =
     [
         "undefined", "NaN", "Infinity",
         "Array", "String", "Number", "Boolean", "Object", "Math", "JSON", "Set", "Map", "Symbol",
         "parseInt", "parseFloat", "isNaN", "isFinite",
         "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI",
-        "utos",
+        "Buffer", "crypto", "Date", "URL", "URLSearchParams",
     ];
 
+    // `random` is Math's, replaced by the seed-derived sequence before this list is applied.
     private static readonly string[] Statics =
     [
         "prototype", "name", "length",
@@ -56,7 +60,7 @@ internal static class EngineLockdown
         "MAX_SAFE_INTEGER", "MIN_SAFE_INTEGER", "EPSILON", "MAX_VALUE", "MIN_VALUE",
         "POSITIVE_INFINITY", "NEGATIVE_INFINITY", "NaN",
         "abs", "ceil", "floor", "round", "trunc", "sign", "min", "max", "pow", "sqrt", "cbrt",
-        "log", "log2", "log10", "exp", "hypot", "sin", "cos", "tan", "atan", "atan2",
+        "log", "log2", "log10", "exp", "hypot", "sin", "cos", "tan", "atan", "atan2", "random",
         "PI", "E", "LN2", "LN10", "LOG2E", "LOG10E", "SQRT2", "SQRT1_2",
         "parse", "stringify",
     ];

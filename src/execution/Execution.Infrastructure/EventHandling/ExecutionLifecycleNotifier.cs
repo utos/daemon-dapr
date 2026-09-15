@@ -26,7 +26,7 @@ public class ExecutionLifecycleNotifier(IEnumerable<IExecutionLifecycleListener>
 
             case WorkflowExecutionFailedEvent e:
                 foreach (var listener in listeners)
-                    await listener.OnFailedAsync(e.ExecutionId, e.DateOccurred, e.Reason, cancellationToken);
+                    await listener.OnFailedAsync(e.ExecutionId, e.DateOccurred, e.Reason, e.Code, cancellationToken);
                 break;
         }
     }

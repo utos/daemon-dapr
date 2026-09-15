@@ -30,6 +30,12 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     /// Why the activity failed, surfaced as <c>{{ error.x }}</c>. Set only when
     /// <paramref name="outcome"/> is <see cref="ActivityOutcomeKind.Failed"/>.
     /// </param>
+    /// <param name="moment">
+    /// The instant and seed this evaluation's expressions read time and randomness from — captured
+    /// once by the caller, so every expression of the decision agrees and a replay agrees with the
+    /// first run. Null is the fixed <see cref="EvaluationMoment.Unset"/>, for callers with no clock
+    /// of their own.
+    /// </param>
     public TransitionDecision Advance(
         WorkflowSession session,
         string activityName,
@@ -37,7 +43,8 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         object? activityOutput,
         ActivityOutcomeKind outcome = ActivityOutcomeKind.Succeeded,
         HttpResponseContext? response = null,
-        WorkflowErrorContext? error = null)
+        WorkflowErrorContext? error = null,
+        EvaluationMoment? moment = null)
     {
         var activity = Require(session, activityName);
         var input = session.InputFor(activityInput);
@@ -59,6 +66,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         var passThrough = outcome == ActivityOutcomeKind.Failed ? input : output;
 
         var scope = new TemplateScope()
+            .WithMoment(moment)
             .WithInput(input)
             .WithOutput(output)
             .WithEnv(session.Env)
@@ -97,13 +105,14 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             {
                 { Transition: not null } => Goto(rule.Transition, scope, passThrough),
 
-                { Result: not null } =>
-                    new TransitionDecision.Return(structRenderer.Render(rule.Result, scope)),
+                { Result: not null } => Return(rule.Result, scope),
 
                 { Emit: not null } => Emit(rule.Emit, scope, passThrough, activityName),
 
+                { Error: not null } => Fail(rule.Error, scope),
+
                 _ => throw new InvalidOperationException(
-                    "Transition rule has no action set (neither transition, result nor emit)")
+                    "Transition rule has no action set (none of transition, result, emit or error)")
             };
 
             return decision with { Match = new RuleMatch(list, number, rules.Count) };
@@ -155,11 +164,12 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
 
                 { Transition: not null } => Goto(rule.Transition, scope, passThrough),
 
-                { Result: not null } =>
-                    new TransitionDecision.Return(structRenderer.Render(rule.Result, scope)),
+                { Result: not null } => Return(rule.Result, scope),
+
+                { Error: not null } => Fail(rule.Error, scope),
 
                 _ => throw new InvalidOperationException(
-                    "Emission rule has no action set (neither handle, transition nor result)")
+                    "Emission rule has no action set (none of handle, transition, result or error)")
             };
 
             return decision with { Match = new RuleMatch("onEmitted", number, rules.Count) };
@@ -211,12 +221,14 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     public ResolvedActivityInput ResolveInput(
         WorkflowSession session,
         string activityName,
-        IReadOnlyDictionary<string, object>? activityInput)
+        IReadOnlyDictionary<string, object>? activityInput,
+        EvaluationMoment? moment = null)
     {
         var activity = Require(session, activityName);
         var input = session.InputFor(activityInput);
 
         var scope = new TemplateScope()
+            .WithMoment(moment)
             .WithInput(input)
             .WithEnv(session.Env);
 
@@ -239,7 +251,8 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     public PromiseExpansion ExpandPromise(
         WorkflowSession session,
         string activityName,
-        IReadOnlyDictionary<string, object>? activityInput)
+        IReadOnlyDictionary<string, object>? activityInput,
+        EvaluationMoment? moment = null)
     {
         var activity = Require(session, activityName);
 
@@ -250,6 +263,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         var input = session.InputFor(activityInput);
 
         var scope = new TemplateScope()
+            .WithMoment(moment)
             .WithInput(input)
             .WithEnv(session.Env);
 
@@ -325,6 +339,39 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     private TransitionDecision Goto(TransitionTarget target, TemplateScope scope, object? activityOutput)
     {
         return new TransitionDecision.Goto(target.Name, ResolveTransitionInput(target, scope, activityOutput));
+    }
+
+    /// <summary>
+    /// An empty map is "end with no value", per <c>activity.proto</c>: nothing is rendered, and the
+    /// decision carries null so the run ends exactly as it does when its rules run out. Anything
+    /// else is rendered, and a map whose templates all render to nothing is still a value — the
+    /// author wrote fields.
+    /// </summary>
+    private TransitionDecision Return(ValueMap result, TemplateScope scope)
+    {
+        return new TransitionDecision.Return(
+            result.Fields.Count == 0 ? null : structRenderer.Render(result, scope));
+    }
+
+    /// <summary>
+    /// The reason is rendered here, in the rule's own scope, so that <c>{{ error.message }}</c>
+    /// and <c>{{ response.status }}</c> mean what they mean on every other field of the rule. The
+    /// code is never rendered: it is the literal a consumer switches on.
+    /// </summary>
+    private TransitionDecision Fail(ErrorAction error, TemplateScope scope)
+    {
+        // UTOS-T005 rejects an empty code at load; this is the backstop for a bundle that reached
+        // the interpreter without it, so the run still reports *something* a client can match.
+        var code = string.IsNullOrEmpty(error.Code) ? WorkflowErrorContext.UnspecifiedCode : error.Code;
+
+        var message = error.Message == null
+            ? string.Empty
+            : templateEngine.RenderToString(error.Message, scope);
+
+        return new TransitionDecision.Fail(
+            code,
+            message,
+            error.Details == null ? null : structRenderer.Render(error.Details, scope));
     }
 
     /// <summary>

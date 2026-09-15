@@ -58,6 +58,13 @@ public class WorkflowExecutionReadModel : Entity<ExecutionId>
     public string? ErrorMessage { get; set; }
 
     /// <summary>
+    /// The failure's code when an authored <c>error</c> action gave it one; null for a failure
+    /// the daemon raised, which reports the generic code. Structured details are not projected:
+    /// a client reading them goes to the output stream's terminal entry, as it does for a result.
+    /// </summary>
+    public string? ErrorCode { get; set; }
+
+    /// <summary>
     /// When the workflow execution was cancelled
     /// </summary>
     public DateTime? CancelledAt { get; set; }

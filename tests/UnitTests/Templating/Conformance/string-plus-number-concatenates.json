@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "input.historyId + 1",
+  "scope": { "input": { "historyId": "12345" } },
+  "expect": { "value": "123451" }
+}

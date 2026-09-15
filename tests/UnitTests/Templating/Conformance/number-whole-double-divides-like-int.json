@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "[input.a / input.q, input.b / input.q]",
+  "scope": { "input": { "a": 20.0, "b": 20, "q": 8 } },
+  "expect": { "value": [2.5, 2.5] }
+}

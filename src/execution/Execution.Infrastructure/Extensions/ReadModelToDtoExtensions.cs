@@ -33,6 +33,7 @@ public static class ReadModelToDtoExtensions
             ErrorMessage = readModel.ErrorMessage != null && readModel.ErrorMessage.Length > 200
                 ? readModel.ErrorMessage.Substring(0, 200)
                 : readModel.ErrorMessage,
+            ErrorCode = readModel.ErrorCode,
             CancellationReason = readModel.CancellationReason
         };
     }
@@ -95,7 +96,8 @@ public static class ReadModelToDtoExtensions
             FailedAt = readModel.FailedAt,
             CancelledAt = readModel.CancelledAt,
             CancellationReason = readModel.CancellationReason,
-            ErrorMessage = readModel.ErrorMessage
+            ErrorMessage = readModel.ErrorMessage,
+            ErrorCode = readModel.ErrorCode
         };
     }
 

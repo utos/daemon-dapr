@@ -1,4 +1,6 @@
+using System.Text.Json.Serialization;
 using Common.SeedWork;
+using Common.Workflow.Serialization;
 using Dapr.Workflow;
 using Execution.Application.Services;
 using Execution.Domain.Aggregates;
@@ -6,10 +8,18 @@ using Execution.Infrastructure.Persistence;
 
 namespace Execution.Infrastructure.Dapr.Activities;
 
+/// <param name="FailureCode">
+/// On a <see cref="ExecutionLifecycleTransition.Failed"/> transition: the authored code, when a
+/// rule's <c>error</c> action failed the run; null when the daemon did. Optional, so history
+/// written before it still reads.
+/// </param>
 public sealed record WriteLifecycleEventInput(
     ExecutionId ExecutionId,
     ExecutionLifecycleTransition Transition,
-    string? FailureReason);
+    string? FailureReason,
+    string? FailureCode = null,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? FailureDetails = null);
 
 /// <summary>
 /// Durable boundary around a lifecycle transition. Whether the transition applies at all is
@@ -28,7 +38,8 @@ public class WriteLifecycleEventActivity(
         {
             ExecutionLifecycleTransition.Active => execution => execution.MarkActive(),
             ExecutionLifecycleTransition.Completed => execution => execution.Complete(),
-            ExecutionLifecycleTransition.Failed => execution => execution.Fail(input.FailureReason),
+            ExecutionLifecycleTransition.Failed => execution =>
+                execution.Fail(input.FailureReason, input.FailureCode, input.FailureDetails),
             ExecutionLifecycleTransition.Cancelled => execution => execution.Cancel(input.FailureReason),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(input), input.Transition, "Unknown execution lifecycle transition")

@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "({ f: () => 1 })",
+  "scope": { "input": {} },
+  "expect": { "error": "UTOS-E103" }
+}

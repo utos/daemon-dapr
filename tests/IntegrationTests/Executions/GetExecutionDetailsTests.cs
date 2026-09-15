@@ -102,10 +102,11 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
     }
 
     [Fact]
-    public async Task GetExecution_ReturnsAnEmptyResult_WhenTheRunEndedWithoutReturning()
+    public async Task GetExecution_ReportsNoResult_WhenTheRunEndedWithoutAValue()
     {
-        // Not the same as having no result: the run produced one, and the result was nothing.
-        // Reporting it as absent would make it indistinguishable from a run that failed.
+        // Spec 0.0.16: a run that ended without a value — its rules ran out, or a bare `return` —
+        // leaves `result` unset. It used to report an empty struct, on the argument that absence
+        // was indistinguishable from failure; the status is what distinguishes them.
         var request = new TestWorkflowBuilder("get-no-result-test", fixture.MockBaseUrl)
             .HttpGet("call", "/success")
             .Build();
@@ -116,8 +117,8 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
 
-        Assert.NotNull(details.Result);
-        Assert.Empty(details.Result.Fields);
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+        Assert.Null(details.Result);
     }
 
     [Fact]

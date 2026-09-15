@@ -1,0 +1,7 @@
+{
+  "form": "value",
+  "before": "const leaked = 1; leaked",
+  "expression": "typeof leaked",
+  "scope": { "input": {} },
+  "expect": { "value": "undefined" }
+}

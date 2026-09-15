@@ -17,9 +17,11 @@ public class ExecutionLogStreamCompletionListener(IExecutionLogStore store) : IE
         return Task.CompletedTask;
     }
 
-    public Task OnFailedAsync(ExecutionId executionId, DateTime occurredAt, string reason, CancellationToken ct = default)
+    public Task OnFailedAsync(
+        ExecutionId executionId, DateTime occurredAt, string reason, string? code = null,
+        CancellationToken ct = default)
     {
-        store.CompleteWith(executionId, occurredAt, ExecutionOutcome.Failed, reason);
+        store.CompleteWith(executionId, occurredAt, ExecutionOutcome.Failed, reason, code);
         return Task.CompletedTask;
     }
 }

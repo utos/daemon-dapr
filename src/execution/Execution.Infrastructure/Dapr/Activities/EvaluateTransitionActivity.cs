@@ -1,10 +1,10 @@
 using Common.SeedWork;
 using System.Text.Json.Serialization;
 using Common.Workflow.Serialization;
-using Common.Workflow;
 using Dapr.Workflow;
 using Execution.Domain.Interpreter;
 using Execution.Domain.Services;
+using Execution.Domain.Templating;
 
 namespace Execution.Infrastructure.Dapr.Activities;
 
@@ -12,6 +12,11 @@ namespace Execution.Infrastructure.Dapr.Activities;
 /// Durable boundary around <see cref="WorkflowInterpreter.Advance"/>. The decision itself is
 /// domain logic; this exists so its result is recorded in the orchestration history once
 /// rather than recomputed on every replay.
+/// <para>
+/// That once-ness is also what makes <see cref="EvaluationMoment.Capture"/> correct here: the
+/// instant and the seed every expression of this decision reads are drawn as the activity runs,
+/// and a replay reads the recorded result rather than drawing again.
+/// </para>
 /// </summary>
 public class EvaluateTransitionActivity(
     IExecutionContextStore contextStore,
@@ -26,13 +31,13 @@ public class EvaluateTransitionActivity(
 
         var decision = interpreter.Advance(
             session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Outcome,
-            input.Response, input.Error);
+            input.Response, input.Error, EvaluationMoment.Capture());
 
         // Leaving is only meaningful on the emitted path — everywhere else there is no
         // subscription to leave — so the driver is told the conclusion rather than the two facts
         // it would otherwise have to combine.
         var leaves = input.Outcome == ActivityOutcomeKind.Emitted
-                     && decision is TransitionDecision.Goto or TransitionDecision.Return;
+                     && decision is TransitionDecision.Goto or TransitionDecision.Return or TransitionDecision.Fail;
 
         var output = decision switch
         {
@@ -44,8 +49,9 @@ public class EvaluateTransitionActivity(
             TransitionDecision.Resume resume => new EvaluateTransitionOutput(
                 resume.ActivityName, resume.Input, null),
 
+            // No next activity: the path ends, with the value or — a bare `return` — without one.
             TransitionDecision.Return result => new EvaluateTransitionOutput(
-                ReservedKeywords.End, null, result.Value, LeavesSubscription: leaves),
+                null, null, result.Value, LeavesSubscription: leaves),
 
             // The emitted value rides alongside the target rather than becoming a step of its
             // own: the driver appends it and then continues, so one evaluation still yields one
@@ -67,7 +73,13 @@ public class EvaluateTransitionActivity(
             TransitionDecision.Propagate => new EvaluateTransitionOutput(
                 null, null, null, Unhandled: true),
 
-            _ => new EvaluateTransitionOutput(ReservedKeywords.End, null, null)
+            // The rule said fail, and said why. Rendered already; the driver raises it as-is.
+            TransitionDecision.Fail fail => new EvaluateTransitionOutput(
+                null, null, null, LeavesSubscription: leaves,
+                Error: new RaisedError(fail.Code, fail.Message, fail.Details)),
+
+            // The rules ran out on an ordinary path: the run is done.
+            _ => new EvaluateTransitionOutput(null, null, null)
         };
 
         return output with
@@ -92,11 +104,17 @@ public sealed record EvaluateTransitionInput(
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? ActivityOutput,
     ActivityOutcomeKind Outcome = ActivityOutcomeKind.Succeeded,
-    // Plain ints, strings and a string map — no converter needed, unlike ActivityOutput, which
-    // carries arbitrary workflow values.
+    // Plain ints, strings, a string map and bytes — no converter needed, unlike ActivityOutput,
+    // which carries arbitrary workflow values.
     HttpResponseContext? Response = null,
     WorkflowErrorContext? Error = null);
 
+/// <param name="NextActivityName">
+/// Where the run goes. Null means the path ends here — the rules ran out, or a rule returned —
+/// unless <paramref name="Dispatch"/>, <paramref name="Unhandled"/> or <paramref name="Error"/>
+/// says otherwise, each of which the driver checks first. There is no keyword for "end" any more:
+/// the absence of a next activity is the end.
+/// </param>
 /// <param name="EmittedValue">
 /// What an <c>emit</c> action produced, to be appended to the execution's output stream before
 /// the run continues to <paramref name="NextActivityName"/>. Null means the rule was not an emit:
@@ -120,9 +138,15 @@ public sealed record EvaluateTransitionInput(
 /// still reads.
 /// </param>
 /// <param name="LeavesSubscription">
-/// The consumer is done consuming: this value's rule was a <c>transition</c> or a <c>result</c>,
-/// so the producer is cancelled now rather than whenever this run happens to end — which, for the
-/// long-running consumer the two actions exist to serve, could be much later or never.
+/// The consumer is done consuming: this value's rule was a <c>transition</c>, a <c>result</c> or
+/// an <c>error</c>, so the producer is cancelled now rather than whenever this run happens to end
+/// — which, for the long-running consumer these actions exist to serve, could be much later or
+/// never.
+/// </param>
+/// <param name="Error">
+/// A rule's <c>error</c> action matched: the run fails with exactly this. Distinct from
+/// <paramref name="Unhandled"/>, which rethrows the failure that was being handled; this one
+/// replaces it with what the author wrote.
 /// </param>
 public sealed record EvaluateTransitionOutput(
     string? NextActivityName,
@@ -137,7 +161,8 @@ public sealed record EvaluateTransitionOutput(
     bool LeavesSubscription = false,
     string? MatchedList = null,
     int MatchedRule = 0,
-    int RuleCount = 0);
+    int RuleCount = 0,
+    RaisedError? Error = null);
 
 /// <summary>Which document an emitted value is handed to, and where it starts.</summary>
 public sealed record DispatchTarget(
@@ -145,3 +170,10 @@ public sealed record DispatchTarget(
     string StartActivity,
     [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? Input);
+
+/// <summary>An <c>error</c> action, rendered: what the run will report.</summary>
+public sealed record RaisedError(
+    string Code,
+    string Message,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? Details);

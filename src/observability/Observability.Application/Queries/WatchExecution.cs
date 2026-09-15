@@ -69,7 +69,8 @@ public class WatchExecutionHandler(
                 ? "Execution failed"
                 : "Execution completed",
             terminal.Outcome,
-            terminal.FailureReason),
+            terminal.FailureReason,
+            terminal.FailureCode),
 
         _ => null
     };

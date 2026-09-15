@@ -402,6 +402,31 @@ public class ActivityBuilder
     }
 
     /// <summary>
+    /// Ends the path with no value — an empty <c>result</c>, which is what a bare <c>return</c>
+    /// in the source format becomes. There is no <c>end</c> target since spec 0.0.16.
+    /// </summary>
+    public ActivityBuilder OnEnd(string? when = null)
+    {
+        var rule = new TransitionRule { Result = new Struct() };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnSuccess.Add(rule);
+        return this;
+    }
+
+    /// <summary>
+    /// Fails the run with what the author wrote: a literal <paramref name="code"/>, a
+    /// <paramref name="message"/> text template and <paramref name="details"/> struct template.
+    /// </summary>
+    public ActivityBuilder OnError(string code, string? message = null, Struct? details = null, string? when = null)
+    {
+        _activity.OnSuccess.Add(ErrorRule(code, message, details, when));
+        return this;
+    }
+
+    /// <summary>
     /// Where the run goes when this activity fails. Note the asymmetry with
     /// <see cref="OnSuccess"/>: if no rule here matches, the failure is unhandled and keeps
     /// travelling, rather than the run completing.
@@ -431,6 +456,31 @@ public class ActivityBuilder
 
         _activity.OnFailure.Add(rule);
         return this;
+    }
+
+    /// <summary>
+    /// Fails the run with an authored error when this activity fails — replacing the cause with
+    /// what the author wrote, which may of course quote it: <c>{{ error.message }}</c>.
+    /// </summary>
+    public ActivityBuilder OnFailureError(string code, string? message = null, Struct? details = null, string? when = null)
+    {
+        _activity.OnFailure.Add(ErrorRule(code, message, details, when));
+        return this;
+    }
+
+    internal static TransitionRule ErrorRule(string code, string? message, Struct? details, string? when)
+    {
+        var error = new Utos.Workflows.V1.WorkflowError { Code = code };
+        if (message != null)
+            error.Message = message;
+        if (details != null)
+            error.Details = details;
+
+        var rule = new TransitionRule { Error = error };
+        if (when != null)
+            rule.Condition = when;
+
+        return rule;
     }
 
     /// <summary>
@@ -612,6 +662,17 @@ public class PromiseBranchListBuilder
     public PromiseBranchListBuilder OnResult(Struct resultValue, string? when = null)
     {
         var rule = new TransitionRule { Result = resultValue };
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnSuccess.Add(rule);
+        return this;
+    }
+
+    /// <summary>Ends the path with no value once the promise resolves.</summary>
+    public PromiseBranchListBuilder OnEnd(string? when = null)
+    {
+        var rule = new TransitionRule { Result = new Struct() };
         if (when != null)
             rule.Condition = when;
 

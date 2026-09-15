@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "let flags = input.flags; flags |= 8; [(flags & 4) !== 0, flags >>> 1, 1 << 4, ~0]",
+  "scope": { "input": { "flags": 5 } },
+  "expect": { "value": [true, 6, 16, -1] }
+}

@@ -15,4 +15,5 @@ public sealed record ExecutionFrame(
     string Category,
     string Message,
     ExecutionOutcome? Terminal = null,
-    string? FailureReason = null);
+    string? FailureReason = null,
+    string? FailureCode = null);

@@ -5,10 +5,16 @@ namespace Execution.Domain.Interpreter;
 /// Available on both the success and failure paths, which is what lets an <c>on_failure</c> rule
 /// tell a 429 from a 401 without an error-code taxonomy.
 /// </summary>
+/// <param name="Body">
+/// The raw response bytes, surfaced as a <c>Buffer</c> — the only way a binary body, or a body in
+/// an encoding <paramref name="BodyText"/> guessed wrong, reaches an expression intact. Null on a
+/// response recorded before the field existed, which a replay of such a run still reads.
+/// </param>
 public sealed record HttpResponseContext(
     int StatusCode,
     Dictionary<string, string> Headers,
-    string? BodyText)
+    string? BodyText,
+    byte[]? Body = null)
 {
     /// <summary>
     /// The scope value for <c>response</c>. Every key is present even when there was no response
@@ -32,6 +38,8 @@ public sealed record HttpResponseContext(
                     header => header.Key.ToLowerInvariant(),
                     header => (object?)header.Value,
                     StringComparer.Ordinal),
+            // A byte[] in scope is what the engine presents as a Buffer; nothing else is one.
+            ["body"] = response?.Body,
             ["bodyText"] = response?.BodyText
         };
     }

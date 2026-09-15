@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "input.items.push(4)",
+  "scope": { "input": { "items": [3, 1, 2] } },
+  "expect": { "error": "UTOS-E120" }
+}

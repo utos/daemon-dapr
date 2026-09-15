@@ -168,11 +168,11 @@ public sealed record PromiseBranch(
 /// What to do with one value the consumed child emitted. Rules are evaluated in order and the
 /// first whose <see cref="Condition"/> holds wins, exactly as a <see cref="TransitionRule"/>'s do.
 ///
-/// Exactly one of <see cref="Handle"/>, <see cref="Transition"/> and <see cref="Result"/> is set,
-/// and the split that matters is not three ways but two: <see cref="Handle"/> continues the
-/// consuming loop, the other two leave it. Before they existed a consumer could not stop
-/// consuming at all — its only exit was the producer terminating, which for a poller never
-/// happens.
+/// Exactly one of <see cref="Handle"/>, <see cref="Transition"/>, <see cref="Result"/> and
+/// <see cref="Error"/> is set, and the split that matters is not four ways but two:
+/// <see cref="Handle"/> continues the consuming loop, the others leave it. Before they existed a
+/// consumer could not stop consuming at all — its only exit was the producer terminating, which
+/// for a poller never happens.
 /// </summary>
 /// <param name="Handle">
 /// Run a document for this value, wait for it, then come back for the next one. The producer
@@ -184,14 +184,21 @@ public sealed record PromiseBranch(
 /// is the consumer's own, so the target is an ordinary activity in the consumer's own graph.
 /// </param>
 /// <param name="Result">
-/// Stop consuming and end the consumer with this value. The same action <c>on_success</c> carries;
-/// what differs is that this one fires while the producer is still running.
+/// Stop consuming and end the consumer with this value — with no value when the map is empty.
+/// The same action <c>on_success</c> carries; what differs is that this one fires while the
+/// producer is still running.
+/// </param>
+/// <param name="Error">
+/// Stop consuming and fail the consumer with this reason. Declared last for the reason
+/// <see cref="TransitionRule"/> gives: positional callers and persisted rules written before it
+/// read unchanged.
 /// </param>
 public sealed record EmissionRule(
     HandlerDispatch? Handle = null,
     TransitionTarget? Transition = null,
     ValueMap? Result = null,
-    string? Condition = null)
+    string? Condition = null,
+    ErrorAction? Error = null)
 {
     // No `HasAction` here, deliberately. A computed property on a record that reaches the event
     // stream is *persisted*: it is written on every rule, pins wider text in
@@ -208,6 +215,10 @@ public sealed record EmissionRule(
 
     public static EmissionRule Returns(ValueMap result, string? condition = null) =>
         new(Result: result, Condition: condition);
+
+    public static EmissionRule Fails(
+        string code, string? message = null, ValueMap? details = null, string? condition = null) =>
+        new(Error: new ErrorAction(code, message, details), Condition: condition);
 }
 
 /// <summary>

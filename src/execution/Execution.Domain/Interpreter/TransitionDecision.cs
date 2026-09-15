@@ -17,8 +17,23 @@ public abstract record TransitionDecision
     /// <summary>Continue at <paramref name="ActivityName"/> with <paramref name="Input"/>.</summary>
     public sealed record Goto(string ActivityName, Dictionary<string, object>? Input) : TransitionDecision;
 
-    /// <summary>End this path, producing <paramref name="Value"/> as its result.</summary>
+    /// <summary>
+    /// End this path, producing <paramref name="Value"/> as its result — or, when null, no result
+    /// at all: an empty <c>result</c> is a bare <c>return</c>, and the run ends exactly as it does
+    /// when its rules run out. The two are one case because on the emitted path they mean the same
+    /// thing to the driver — the consumer is done consuming — where <see cref="End"/> never occurs.
+    /// </summary>
     public sealed record Return(object? Value) : TransitionDecision;
+
+    /// <summary>
+    /// End this path as a failure, with the reason the rule's <c>error</c> action gave it —
+    /// <paramref name="Message"/> and <paramref name="Details"/> already rendered. The code is the
+    /// author's literal; it is what the run reports and what a caller's <c>on_failure</c> matches.
+    /// </summary>
+    public sealed record Fail(
+        string Code,
+        string Message,
+        Dictionary<string, object>? Details) : TransitionDecision;
 
     /// <summary>
     /// Append <paramref name="Value"/> to this execution's output stream, then continue at

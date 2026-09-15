@@ -30,13 +30,22 @@ public class ExecutionDetails
     public string? CancellationReason { get; set; }
     public string? ErrorMessage { get; set; }
 
+    /// <summary>The failure's authored code, or null when the daemon raised the failure.</summary>
+    public string? ErrorCode { get; set; }
+
+    /// <summary>
+    /// The failure's structured details, read from the output stream's terminal entry the way
+    /// <see cref="Result"/> is. Null when the run did not fail, or failed without any.
+    /// </summary>
+    public ValueMap? ErrorDetails { get; set; }
+
     /// <summary>
     /// What the run returned — the <c>result</c> terminal entry of its output stream.
     /// <para>
-    /// Null means there is none to report: the run has not finished, or it failed or was
+    /// Null means there is no value to report: the run has not finished; it failed or was
     /// cancelled and reports <see cref="ErrorMessage"/> or <see cref="CancellationReason"/>
-    /// instead. A run that completed without returning anything is <see cref="ValueMap.Empty"/>
-    /// rather than null — it produced a result, and the result was nothing.
+    /// instead; or it completed without a value — a bare <c>return</c>, or its rules running out
+    /// — which spec 0.0.16 reports as an unset result, the status being what says it completed.
     /// </para>
     /// </summary>
     public ValueMap? Result { get; set; }

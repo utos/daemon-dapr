@@ -9,7 +9,12 @@ public abstract record ExecutionStreamItem;
 
 public sealed record LogItem(ExecutionLogEntry Entry) : ExecutionStreamItem;
 
-public sealed record TerminalItem(DateTime Timestamp, ExecutionOutcome Outcome, string? FailureReason)
+/// <param name="FailureCode">
+/// An authored <c>error</c> action's code; null for a failure the daemon raised, which the frame
+/// reports under the generic code.
+/// </param>
+public sealed record TerminalItem(
+    DateTime Timestamp, ExecutionOutcome Outcome, string? FailureReason, string? FailureCode = null)
     : ExecutionStreamItem;
 
 public enum ExecutionOutcome

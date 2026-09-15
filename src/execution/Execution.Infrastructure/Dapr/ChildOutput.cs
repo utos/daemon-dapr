@@ -46,10 +46,19 @@ public enum ChildOutputKind
 /// message. Mirrors the shape of the output stream, because it is the same sequence of entries —
 /// the stream is the durable record, this is the delivery.
 /// </summary>
+/// <param name="ErrorCode">
+/// On an <see cref="ChildOutputKind.Error"/> message: the code the child failed with, when a
+/// rule's <c>error</c> action gave it one. Null for a failure the child's daemon-side raised. It
+/// travels with the message so the caller's <c>on_failure</c> sees the author's code, not a
+/// generic one wrapped around the child's text.
+/// </param>
 public sealed record ChildOutputMessage(
     ChildOutputKind Kind,
     // Without the converter the value arrives as JsonElement and every template reading it
     // breaks, exactly as it would crossing any other Dapr boundary.
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? Value,
-    string? ErrorMessage = null);
+    string? ErrorMessage = null,
+    string? ErrorCode = null,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? ErrorDetails = null);

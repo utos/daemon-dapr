@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Common.Workflow;
 using Execution.Domain.Templating;
+using Execution.Infrastructure.Templating.Node;
 using Jint;
 using Jint.Native;
+using Jint.Native.Object;
 
 namespace Execution.Infrastructure.Templating;
 
@@ -18,25 +20,35 @@ internal static class ScopeConverter
     // in, where the previous engine carried it exactly. Refusing is the only honest answer.
     private const long MaxSafeInteger = 9_007_199_254_740_992;
 
-    public static void Inject(Engine engine, TemplateScope scope)
+    /// <param name="bufferPrototype">What a <c>byte[]</c> in scope — <c>response.body</c> — becomes.</param>
+    public static void Inject(Engine engine, TemplateScope scope, ObjectInstance bufferPrototype)
     {
         var freeze = engine.Evaluate("Object.freeze");
+        var context = new Context(engine, freeze, bufferPrototype);
         foreach (var (name, value) in scope.Values)
         {
-            engine.SetValue(name, ToJs(engine, value, freeze, name));
+            engine.SetValue(name, ToJs(context, value, name));
             engine.Execute("Object.defineProperty(globalThis, " + JsonSerializer.Serialize(name)
                            + ", { writable: false, configurable: false });");
         }
     }
 
-    private static JsValue ToJs(Engine engine, object? value, JsValue freeze, string path)
+    private sealed record Context(Engine Engine, JsValue Freeze, ObjectInstance BufferPrototype);
+
+    private static JsValue ToJs(Context context, object? value, string path)
     {
+        var engine = context.Engine;
+        var freeze = context.Freeze;
         switch (value)
         {
             case null: return JsValue.Null;
             case string s: return new JsString(s);
             case bool b: return b ? JsBoolean.True : JsBoolean.False;
             case int i: return JsNumber.Create(i);
+
+            // Before IEnumerable, which a byte[] also is. Read-only by construction, so it needs
+            // no freeze; the same bytes back a Buffer created by an expression.
+            case byte[] bytes: return new BufferInstance(engine, context.BufferPrototype, bytes);
             case long l when Math.Abs(l) > MaxSafeInteger:
                 throw new TemplateException(EvaluationCodes.IntegerBeyondSafe,
                     $"`{path}` is {l}, which cannot be represented exactly as a number; integers beyond 2^53 must be strings.");
@@ -47,16 +59,16 @@ internal static class ScopeConverter
 
             // The run's ambient environment: a string → string map presented as one object.
             case TemplateNamespace ns:
-                return Frozen(engine, Object(engine, ns.Values.Select(kv => (kv.Key, (object?)kv.Value)), freeze, path), freeze);
+                return Frozen(engine, Object(context, ns.Values.Select(kv => (kv.Key, (object?)kv.Value)), path), freeze);
 
             case ValueMap map:
-                return Frozen(engine, Object(engine, map.Fields.Select(kv => (kv.Key, kv.Value)), freeze, path), freeze);
+                return Frozen(engine, Object(context, map.Fields.Select(kv => (kv.Key, kv.Value)), path), freeze);
 
             case IReadOnlyDictionary<string, object?> map:
-                return Frozen(engine, Object(engine, map.Select(kv => (kv.Key, kv.Value)), freeze, path), freeze);
+                return Frozen(engine, Object(context, map.Select(kv => (kv.Key, kv.Value)), path), freeze);
 
             case IDictionary<string, object?> map:
-                return Frozen(engine, Object(engine, map.Select(kv => (kv.Key, kv.Value)), freeze, path), freeze);
+                return Frozen(engine, Object(context, map.Select(kv => (kv.Key, kv.Value)), path), freeze);
 
             // An HTTP response body stays a JsonElement until it crosses a Dapr boundary
             // (HttpActivityHandler.ParseJsonResponse), so one can still reach a scope.
@@ -65,7 +77,7 @@ internal static class ScopeConverter
 
             case System.Collections.IEnumerable items:
                 return Frozen(engine, new JsArray(engine,
-                    [.. items.Cast<object?>().Select((item, index) => ToJs(engine, item, freeze, path + "[" + index + "]"))]), freeze);
+                    [.. items.Cast<object?>().Select((item, index) => ToJs(context, item, path + "[" + index + "]"))]), freeze);
 
             default:
                 throw new TemplateException(EvaluationCodes.ScriptError,
@@ -99,11 +111,11 @@ internal static class ScopeConverter
         }
     }
 
-    private static JsObject Object(Engine engine, IEnumerable<(string Key, object? Value)> fields, JsValue freeze, string path)
+    private static JsObject Object(Context context, IEnumerable<(string Key, object? Value)> fields, string path)
     {
-        var obj = new JsObject(engine);
+        var obj = new JsObject(context.Engine);
         foreach (var (key, item) in fields)
-            obj.Set(key, ToJs(engine, item, freeze, path + "." + key));
+            obj.Set(key, ToJs(context, item, path + "." + key));
         return obj;
     }
 

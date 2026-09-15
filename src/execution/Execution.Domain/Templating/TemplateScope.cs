@@ -15,14 +15,31 @@ public sealed class TemplateScope
     public TemplateScope()
     {
         _values = new Dictionary<string, object?>(StringComparer.Ordinal);
+        Moment = EvaluationMoment.Unset;
     }
 
-    private TemplateScope(Dictionary<string, object?> values)
+    private TemplateScope(Dictionary<string, object?> values, EvaluationMoment moment)
     {
         _values = values;
+        Moment = moment;
     }
 
     public IReadOnlyDictionary<string, object?> Values => _values;
+
+    /// <summary>
+    /// When this scope's expressions run, as far as they can tell. Not a name in scope — nothing
+    /// reads it as a variable — but a property of the scope, because it is fixed per evaluation
+    /// exactly as the values are, and an engine built for the scope is built for its moment.
+    /// </summary>
+    public EvaluationMoment Moment { get; }
+
+    /// <summary>The moment to evaluate at; null keeps <see cref="EvaluationMoment.Unset"/>.</summary>
+    public TemplateScope WithMoment(EvaluationMoment? moment)
+    {
+        return moment == null
+            ? this
+            : new TemplateScope(new Dictionary<string, object?>(_values, StringComparer.Ordinal), moment);
+    }
 
     /// <summary>The input the current activity received, as <c>{{ input.x }}</c>.</summary>
     public TemplateScope WithInput(object? input)
@@ -73,7 +90,7 @@ public sealed class TemplateScope
             [key] = value
         };
 
-        return new TemplateScope(copy);
+        return new TemplateScope(copy, Moment);
     }
 }
 

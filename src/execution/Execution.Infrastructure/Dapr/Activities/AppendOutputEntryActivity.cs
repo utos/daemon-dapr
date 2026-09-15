@@ -24,7 +24,9 @@ public sealed record AppendOutputEntryInput(
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? Value = null,
     string? ErrorCode = null,
-    string? ErrorMessage = null);
+    string? ErrorMessage = null,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? ErrorDetails = null);
 
 /// <summary>
 /// Durable boundary around an append to an execution's output stream, modelled on
@@ -54,7 +56,8 @@ public class AppendOutputEntryActivity(IExecutionOutputStore store)
                 input.ExecutionId,
                 input.ErrorCode ?? WorkflowErrorCode.ExecutionFailed,
                 input.ErrorMessage ?? string.Empty,
-                occurredAt),
+                occurredAt,
+                input.ErrorDetails),
 
             _ => throw new ArgumentOutOfRangeException(
                 nameof(input), input.Kind, "Unknown output entry kind")
