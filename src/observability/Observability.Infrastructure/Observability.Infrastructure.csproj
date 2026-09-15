@@ -6,6 +6,7 @@
 
     <ItemGroup>
         <PackageReference Include="CommunityToolkit.Aspire.KurrentDB" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore" />
         <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
         <ProjectReference Include="../Observability.Domain/Observability.Domain.csproj"/>
         <ProjectReference Include="../Observability.Application/Observability.Application.csproj"/>
