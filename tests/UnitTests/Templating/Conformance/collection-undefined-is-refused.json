@@ -1,0 +1,6 @@
+{
+  "form": "collection",
+  "expression": "input.missing",
+  "scope": { "input": {} },
+  "expect": { "error": "UTOS-E105" }
+}

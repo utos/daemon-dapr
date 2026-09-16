@@ -468,6 +468,21 @@ public class ActivityBuilder
         return this;
     }
 
+    /// <summary>
+    /// Re-raises the failure being handled, as it is: an empty <c>WorkflowError</c>, which is what a
+    /// bare <c>error</c> in the source format becomes (spec 0.0.17).
+    /// </summary>
+    public ActivityBuilder OnFailureReraise(string? when = null)
+    {
+        var rule = new TransitionRule { Error = new Utos.Workflows.V1.WorkflowError() };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnFailure.Add(rule);
+        return this;
+    }
+
     internal static TransitionRule ErrorRule(string code, string? message, Struct? details, string? when)
     {
         var error = new Utos.Workflows.V1.WorkflowError { Code = code };

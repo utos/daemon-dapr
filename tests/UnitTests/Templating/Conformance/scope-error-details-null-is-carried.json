@@ -1,0 +1,6 @@
+{
+  "form": "condition",
+  "expression": "error.details === null && error.details?.orderId === undefined",
+  "scope": { "output": null, "error": { "code": "EXECUTION_FAILED", "message": "HTTP activity 'fetch' failed with status 500", "details": null }, "response": { "status": 500, "headers": {}, "bodyText": "" } },
+  "expect": { "value": true }
+}

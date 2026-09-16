@@ -1,0 +1,6 @@
+{
+  "form": "collection",
+  "expression": "input.ids",
+  "scope": { "input": { "ids": "a,b,c" } },
+  "expect": { "error": "UTOS-E105" }
+}
