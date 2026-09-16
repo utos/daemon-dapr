@@ -20,7 +20,7 @@ builder.Services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavi
 // The one gRPC surface every module maps its service onto.
 builder.Services.AddGrpc();
 
-builder.AddExecutionModule(ServiceName.Database.WorkflowExecution, ServiceName.App.EventStore);
+builder.AddExecutionModule(ServiceName.Database.Utos);
 builder.AddDefinitionModule();
 builder.AddObservabilityModule();
 
