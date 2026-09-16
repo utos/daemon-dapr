@@ -2,4 +2,5 @@ using Common.SeedWork;
 
 namespace Execution.Domain.Events;
 
-public record WorkflowExecutionScheduledEvent(Guid ExecutionId, DateTime DateOccurred) : IDomainEvent;
+[EventType("utos.execution.scheduled")]
+public record WorkflowExecutionScheduledEvent(ExecutionId ExecutionId, DateTime DateOccurred) : IDomainEvent;

@@ -1,162 +1,179 @@
+using Common.SeedWork;
 using System.Text.Json.Serialization;
-using Common.Infrastructure.Serialization;
+using Common.Workflow.Serialization;
 using Dapr.Workflow;
-using Google.Protobuf.WellKnownTypes;
-using Microsoft.Extensions.Logging;
-using Execution.Domain.Constants;
+using Execution.Domain.Interpreter;
 using Execution.Domain.Services;
-using Execution.Infrastructure.Extensions;
-using Execution.Infrastructure.Templating;
+using Execution.Domain.Templating;
 
 namespace Execution.Infrastructure.Dapr.Activities;
 
+/// <summary>
+/// Durable boundary around <see cref="WorkflowInterpreter.Advance"/>. The decision itself is
+/// domain logic; this exists so its result is recorded in the orchestration history once
+/// rather than recomputed on every replay.
+/// <para>
+/// That once-ness is also what makes <see cref="EvaluationMoment.Capture"/> correct here: the
+/// instant and the seed every expression of this decision reads are drawn as the activity runs,
+/// and a replay reads the recorded result rather than drawing again.
+/// </para>
+/// </summary>
 public class EvaluateTransitionActivity(
     IExecutionContextStore contextStore,
-    ITemplateEngine templateEngine,
-    ILogger<EvaluateTransitionActivity> logger)
+    WorkflowInterpreter interpreter)
     : WorkflowActivity<EvaluateTransitionInput, EvaluateTransitionOutput>
 {
     public override async Task<EvaluateTransitionOutput> RunAsync(
         WorkflowActivityContext context, EvaluateTransitionInput input)
     {
         var executionContext = await contextStore.LoadContextAsync(input.ExecutionId);
+        var session = WorkflowSession.From(executionContext, input.WorkflowKey);
 
-        // Resolve activity definition
-        var workflow = executionContext.Bundle.Workflows[input.WorkflowKey];
-        if (!workflow.Spec.Activities.TryGetValue(input.ActivityName, out var activity))
-            throw new InvalidOperationException(
-                $"Activity '{input.ActivityName}' not found in workflow '{input.WorkflowKey}'");
+        var decision = interpreter.Advance(
+            session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Outcome,
+            input.Response, input.Error, EvaluationMoment.Capture());
 
-        // Resolve activity input (what this activity received)
-        var activityInput = input.ActivityInput ?? executionContext.Input;
+        // Leaving is only meaningful on the emitted path — everywhere else there is no
+        // subscription to leave — so the driver is told the conclusion rather than the two facts
+        // it would otherwise have to combine.
+        var leaves = input.Outcome == ActivityOutcomeKind.Emitted
+                     && decision is TransitionDecision.Goto or TransitionDecision.Return or TransitionDecision.Fail;
 
-        // Activity output passed in directly (no DB lookup)
-        var activityOutput = input.ActivityOutput;
-
-        // If no transitions, workflow ends
-        if (activity.OnSuccess == null || activity.OnSuccess.Count == 0)
-            return new EvaluateTransitionOutput(ReservedKeywords.End, null, null);
-
-        // Build template context with both input and output
-        var templateContext = new TemplateContext()
-            .SetInput(activityInput)
-            .SetOutput(activityOutput);
-
-        // Evaluate transitions in order, first matching condition wins
-        foreach (var rule in activity.OnSuccess)
+        var output = decision switch
         {
-            // Check condition first — skip this rule if condition doesn't match
-            if (rule.HasCondition && !string.IsNullOrEmpty(rule.Condition))
-            {
-                var shouldTransition = templateEngine.Evaluate<bool>(rule.Condition, templateContext, logger);
-                if (!shouldTransition)
-                    continue;
-            }
+            TransitionDecision.Goto go => new EvaluateTransitionOutput(
+                go.ActivityName, go.Input, null, LeavesSubscription: leaves),
 
-            // Condition matched (or no condition) — execute the action
-            return rule.ActionCase switch
-            {
-                Utos.Workflow.V1.TransitionRule.ActionOneofCase.Transition =>
-                    HandleTransition(rule.Transition, templateContext, activityOutput),
+            // Back for the next value on the same subscription. Identical in shape to a Goto and
+            // deliberately not folded into it: this is the one that must *not* cancel the producer.
+            TransitionDecision.Resume resume => new EvaluateTransitionOutput(
+                resume.ActivityName, resume.Input, null),
 
-                Utos.Workflow.V1.TransitionRule.ActionOneofCase.Return =>
-                    HandleReturn(rule.Return, templateContext),
+            // No next activity: the path ends, with the value or — a bare `return` — without one.
+            TransitionDecision.Return result => new EvaluateTransitionOutput(
+                null, null, result.Value, LeavesSubscription: leaves),
 
-                _ => throw new InvalidOperationException(
-                    "Transition rule has no action set (neither transition nor return)")
-            };
-        }
+            // The emitted value rides alongside the target rather than becoming a step of its
+            // own: the driver appends it and then continues, so one evaluation still yields one
+            // transition.
+            TransitionDecision.Emit emit => new EvaluateTransitionOutput(
+                emit.ActivityName, emit.Input, null, EmittedValue: emit.Value),
 
-        // No transitions matched - workflow ends
-        return new EvaluateTransitionOutput(ReservedKeywords.End, null, null);
-    }
+            // A handler to run before the next value is taken. Carries no next activity: the
+            // driver goes back to the call activity once the dispatched execution ends, and
+            // deciding that here would mean naming the call activity twice.
+            TransitionDecision.Dispatch dispatch => new EvaluateTransitionOutput(
+                null, null, null,
+                Dispatch: new DispatchTarget(
+                    dispatch.Workflow, dispatch.StartActivity, dispatch.Input)),
 
-    private EvaluateTransitionOutput HandleTransition(
-        Utos.Workflow.V1.TransitionTarget target,
-        TemplateContext templateContext,
-        object? activityOutput)
-    {
-        var nextActivityName = target.Name;
-        var mappedInput = ResolveTransitionInput(target, templateContext, activityOutput);
+            // Nothing handled the failure, so the driver must rethrow rather than continue.
+            // Matched explicitly: folding it into the fallback below would turn an unhandled
+            // failure into a normally completed run.
+            TransitionDecision.Propagate => new EvaluateTransitionOutput(
+                null, null, null, Unhandled: true),
 
-        return new EvaluateTransitionOutput(nextActivityName, mappedInput, null);
-    }
+            // The rule said fail, and said why. Rendered already; the driver raises it as-is.
+            TransitionDecision.Fail fail => new EvaluateTransitionOutput(
+                null, null, null, LeavesSubscription: leaves,
+                Error: new RaisedError(fail.Code, fail.Message, fail.Details)),
 
-    private EvaluateTransitionOutput HandleReturn(
-        Struct returnStruct,
-        TemplateContext templateContext)
-    {
-        var rendered = RenderStruct(returnStruct, templateContext);
-        return new EvaluateTransitionOutput(ReservedKeywords.End, null, rendered);
-    }
-
-    /// <summary>
-    /// Resolves the mapped input for the target activity.
-    /// If the transition target has an explicit input transform, renders it.
-    /// Otherwise, passes the raw activity output through as-is.
-    /// </summary>
-    private Dictionary<string, object>? ResolveTransitionInput(
-        Utos.Workflow.V1.TransitionTarget target,
-        TemplateContext templateContext,
-        object? activityOutput)
-    {
-        if (target.Input != null)
-            return RenderStruct(target.Input, templateContext);
-
-        // Pass-through: raw output becomes the next activity's input
-        return activityOutput as Dictionary<string, object>;
-    }
-
-    /// <summary>
-    /// Recursively renders template expressions within a protobuf Struct,
-    /// producing a Dictionary with resolved values.
-    /// </summary>
-    private Dictionary<string, object> RenderStruct(Struct protoStruct, TemplateContext templateContext)
-    {
-        var result = new Dictionary<string, object>();
-
-        foreach (var (key, value) in protoStruct.Fields)
-        {
-            var rendered = RenderValue(value, templateContext);
-            if (rendered != null)
-                result[key] = rendered;
-        }
-
-        return result;
-    }
-
-    private object? RenderValue(Value value, TemplateContext templateContext)
-    {
-        return value.KindCase switch
-        {
-            Value.KindOneofCase.StringValue => RenderStringValue(value.StringValue, templateContext),
-            Value.KindOneofCase.StructValue => RenderStruct(value.StructValue, templateContext),
-            Value.KindOneofCase.ListValue => value.ListValue.Values
-                .Select(v => RenderValue(v, templateContext))
-                .ToList(),
-            _ => value.ToObject()
+            // The rules ran out on an ordinary path: the run is done.
+            _ => new EvaluateTransitionOutput(null, null, null)
         };
-    }
 
-    private object RenderStringValue(string str, TemplateContext templateContext)
-    {
-        if (!templateEngine.HasTemplate(str))
-            return str;
-
-        return templateEngine.RenderToString(str, templateContext, logger);
+        return output with
+        {
+            MatchedList = decision.Match?.List,
+            MatchedRule = decision.Match?.Number ?? 0,
+            RuleCount = decision.Match?.Of ?? 0,
+        };
     }
 }
 
+/// <param name="Outcome">
+/// Which rule list applies. Only the driver can tell these apart — an emitted value and a result
+/// are identical by value, and a failure carries neither.
+/// </param>
 public sealed record EvaluateTransitionInput(
-    Guid ExecutionId,
+    ExecutionId ExecutionId,
     string WorkflowKey,
     string ActivityName,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? ActivityInput,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
-    object? ActivityOutput);
+    object? ActivityOutput,
+    ActivityOutcomeKind Outcome = ActivityOutcomeKind.Succeeded,
+    // Plain ints, strings, a string map and bytes — no converter needed, unlike ActivityOutput,
+    // which carries arbitrary workflow values.
+    HttpResponseContext? Response = null,
+    WorkflowErrorContext? Error = null);
 
+/// <param name="NextActivityName">
+/// Where the run goes. Null means the path ends here — the rules ran out, or a rule returned —
+/// unless <paramref name="Dispatch"/>, <paramref name="Unhandled"/> or <paramref name="Error"/>
+/// says otherwise, each of which the driver checks first. There is no keyword for "end" any more:
+/// the absence of a next activity is the end.
+/// </param>
+/// <param name="EmittedValue">
+/// What an <c>emit</c> action produced, to be appended to the execution's output stream before
+/// the run continues to <paramref name="NextActivityName"/>. Null means the rule was not an emit:
+/// a rendered value is always a dictionary — empty at the least — so null is unambiguous.
+/// </param>
+/// <param name="Unhandled">
+/// No <c>on_failure</c> rule matched, so the driver must rethrow rather than continue. Carried as
+/// a flag rather than as a null <paramref name="NextActivityName"/> because "go nowhere" already
+/// means the run finished normally, and the two outcomes must not be confusable.
+/// </param>
+/// <param name="Dispatch">
+/// The document to run for the emitted value just consumed. Set only on the emitted path, and
+/// mutually exclusive with <paramref name="NextActivityName"/> — a dispatch leaves this workflow,
+/// so there is no activity here to go to next.
+/// </param>
+/// <param name="MatchedList">
+/// Which rule list decided — <c>onSuccess</c>, <c>onFailure</c> or <c>onEmitted</c> — with
+/// <paramref name="MatchedRule"/> its 1-based position and <paramref name="RuleCount"/> the list's
+/// length. Null when no rule matched. Recorded here, in the orchestration history, so a replay
+/// logs the same rule it matched the first time. Optional fields, so history written before them
+/// still reads.
+/// </param>
+/// <param name="LeavesSubscription">
+/// The consumer is done consuming: this value's rule was a <c>transition</c>, a <c>result</c> or
+/// an <c>error</c>, so the producer is cancelled now rather than whenever this run happens to end
+/// — which, for the long-running consumer these actions exist to serve, could be much later or
+/// never.
+/// </param>
+/// <param name="Error">
+/// A rule's <c>error</c> action matched: the run fails with exactly this. Distinct from
+/// <paramref name="Unhandled"/>, which rethrows the failure that was being handled; this one
+/// replaces it with what the author wrote.
+/// </param>
 public sealed record EvaluateTransitionOutput(
     string? NextActivityName,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object>? MappedInput,
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
-    object? ReturnValue);
+    object? ReturnValue,
+    DispatchTarget? Dispatch = null,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? EmittedValue = null,
+    bool Unhandled = false,
+    bool LeavesSubscription = false,
+    string? MatchedList = null,
+    int MatchedRule = 0,
+    int RuleCount = 0,
+    RaisedError? Error = null);
+
+/// <summary>Which document an emitted value is handed to, and where it starts.</summary>
+public sealed record DispatchTarget(
+    string Workflow,
+    string StartActivity,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? Input);
+
+/// <summary>An <c>error</c> action, rendered: what the run will report.</summary>
+public sealed record RaisedError(
+    string Code,
+    string Message,
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
+    Dictionary<string, object>? Details);

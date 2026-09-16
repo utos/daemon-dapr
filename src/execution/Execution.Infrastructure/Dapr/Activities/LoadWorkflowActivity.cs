@@ -1,16 +1,13 @@
-using System.Text.Json.Serialization;
+using Common.SeedWork;
+using Common.Workflow;
 using Dapr.Workflow;
-using Execution.Domain.Serialization;
 using Execution.Domain.Services;
-using Utos.Workflow.V1;
 
 namespace Execution.Infrastructure.Dapr.Activities;
 
-public sealed record LoadWorkflowInput(Guid ExecutionId, string WorkflowKey);
+public sealed record LoadWorkflowInput(ExecutionId ExecutionId, string WorkflowKey);
 
-public sealed record LoadWorkflowOutput(
-    [property: JsonConverter(typeof(ProtobufJsonConverter<Workflow>))]
-    Workflow Workflow);
+public sealed record LoadWorkflowOutput(Workflow Workflow);
 
 public class LoadWorkflowActivity(IExecutionContextStore contextStore)
     : WorkflowActivity<LoadWorkflowInput, LoadWorkflowOutput>

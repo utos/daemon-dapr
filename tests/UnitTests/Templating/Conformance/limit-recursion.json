@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "const f = n => f(n + 1); f(0)",
+  "scope": { "input": {} },
+  "expect": { "error": "UTOS-E113" }
+}

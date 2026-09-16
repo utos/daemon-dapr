@@ -1,3 +1,5 @@
+using Common.Infrastructure.Logging;
+using Common.SeedWork;
 using Microsoft.Extensions.Logging;
 using Observability.Domain;
 
@@ -12,8 +14,6 @@ public sealed class ExecutionLogProvider(IExecutionLogStore store) : ILoggerProv
 
 internal sealed class ExecutionLogger(IExecutionLogStore store, string category) : ILogger
 {
-    private const string SystemSource = "system";
-
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
     public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
 
@@ -22,22 +22,26 @@ internal sealed class ExecutionLogger(IExecutionLogStore store, string category)
     {
         if (state is not IReadOnlyList<KeyValuePair<string, object?>> kvps) return;
 
-        Guid? executionId = null;
+        ExecutionId? executionId = null;
         string? source = null;
 
         foreach (var kv in kvps)
         {
             switch (kv.Key)
             {
-                case "WorkflowExecutionId":
+                case LogProperty.WorkflowExecutionId:
+                    // Callers log the id in whichever form they hold it. A shape missing from
+                    // this list is not an error anywhere — the entry is simply dropped — so
+                    // every form the daemon uses has to be listed.
                     executionId = kv.Value switch
                     {
-                        Guid g => g,
-                        string s when Guid.TryParse(s, out var g) => g,
+                        ExecutionId id => id,
+                        Guid g => new ExecutionId(g),
+                        string s when ExecutionId.TryParse(s, out var id) => id,
                         _ => null
                     };
                     break;
-                case "WorkflowSource":
+                case LogProperty.WorkflowSource:
                     source = kv.Value?.ToString();
                     break;
             }
@@ -45,13 +49,13 @@ internal sealed class ExecutionLogger(IExecutionLogStore store, string category)
             if (executionId.HasValue && source != null) break;
         }
 
-        if (executionId == null) return;
+        if (!executionId.HasValue) return;
 
         store.AddEntry(executionId.Value, new ExecutionLogEntry(
             DateTime.UtcNow,
             logLevel,
             formatter(state, exception),
-            source ?? SystemSource,
+            source ?? FrameSource.System,
             category));
     }
 }

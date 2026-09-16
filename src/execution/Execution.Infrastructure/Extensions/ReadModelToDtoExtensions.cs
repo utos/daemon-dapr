@@ -1,11 +1,11 @@
 using System.Text.Json;
-using Google.Protobuf;
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
-using Execution.Features.Models;
+using Common.Workflow;
+using Common.Workflow.Serialization;
+using Execution.Domain.Aggregates;
+using Execution.Application.Models;
 using Execution.Infrastructure.ReadModels;
-using ExecutionDetails = Execution.Features.Models.ExecutionDetails;
-using ExecutionSummary = Execution.Features.Models.ExecutionSummary;
+using ExecutionDetails = Execution.Application.Models.ExecutionDetails;
+using ExecutionSummary = Execution.Application.Models.ExecutionSummary;
 
 namespace Execution.Infrastructure.Extensions;
 
@@ -14,7 +14,7 @@ namespace Execution.Infrastructure.Extensions;
 /// </summary>
 public static class ReadModelToDtoExtensions
 {
-    private static readonly JsonParser Parser = new(JsonParser.Settings.Default);
+    // The bundle is stored as the domain model's own JSON — no proto formatter involved.
 
     public static ExecutionSummary ToSummaryDto(this WorkflowExecutionReadModel readModel)
     {
@@ -22,15 +22,19 @@ public static class ReadModelToDtoExtensions
         {
             Id = readModel.Id,
             Status = ParseStatus(readModel.Status),
-            WorkflowName = readModel.WorkflowName,
-            WorkflowVersion = readModel.WorkflowVersion,
+            Workflow = readModel.Identity,
+            WorkflowDigest = readModel.WorkflowDigest,
             CreatedAt = readModel.CreatedAt,
             ScheduledAt = readModel.ScheduledAt,
             StartedAt = readModel.StartedAt,
-            FinishedAt = readModel.CompletedAt ?? readModel.FailedAt,
+            // Any terminal state finishes a run, cancellation included — otherwise a cancelled
+            // execution reports no finish time at all.
+            FinishedAt = readModel.CompletedAt ?? readModel.FailedAt ?? readModel.CancelledAt,
             ErrorMessage = readModel.ErrorMessage != null && readModel.ErrorMessage.Length > 200
                 ? readModel.ErrorMessage.Substring(0, 200)
-                : readModel.ErrorMessage
+                : readModel.ErrorMessage,
+            ErrorCode = readModel.ErrorCode,
+            CancellationReason = readModel.CancellationReason
         };
     }
 
@@ -40,7 +44,7 @@ public static class ReadModelToDtoExtensions
         if (!string.IsNullOrEmpty(readModel.WorkflowDefinitionJson))
             try
             {
-                bundle = Parser.Parse<WorkflowBundle>(readModel.WorkflowDefinitionJson);
+                bundle = JsonSerializer.Deserialize<WorkflowBundle>(readModel.WorkflowDefinitionJson);
             }
             catch (Exception ex)
             {
@@ -52,7 +56,10 @@ public static class ReadModelToDtoExtensions
         if (!string.IsNullOrEmpty(readModel.InputJson))
             try
             {
-                input = JsonSerializer.Deserialize<Dictionary<string, object>>(readModel.InputJson) ??
+                // With the shared options, not none: read back without them and every value is a
+                // JsonElement, which is why the proto mapper needed a JsonElement branch at all.
+                input = JsonSerializer.Deserialize<Dictionary<string, object>>(
+                            readModel.InputJson, WorkflowJson.Options) ??
                         new Dictionary<string, object>();
             }
             catch (JsonException ex)
@@ -60,21 +67,37 @@ public static class ReadModelToDtoExtensions
                 throw new InvalidOperationException($"Failed to deserialize payload for execution {readModel.Id}", ex);
             }
 
+        var env = new Dictionary<string, string>();
+        if (!string.IsNullOrEmpty(readModel.EnvJson))
+            try
+            {
+                env = JsonSerializer.Deserialize<Dictionary<string, string>>(readModel.EnvJson) ??
+                      new Dictionary<string, string>();
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidOperationException($"Failed to deserialize env for execution {readModel.Id}", ex);
+            }
+
         return new ExecutionDetails
         {
             Id = readModel.Id,
             Status = ParseStatus(readModel.Status),
-            WorkflowName = readModel.WorkflowName,
-            WorkflowVersion = readModel.WorkflowVersion,
+            Workflow = readModel.Identity,
+            WorkflowDigest = readModel.WorkflowDigest,
             Bundle = bundle ??
                      throw new InvalidOperationException($"Workflow bundle is missing for execution {readModel.Id}"),
             Input = input,
+            Env = env,
             CreatedAt = readModel.CreatedAt,
             ScheduledAt = readModel.ScheduledAt,
             StartedAt = readModel.StartedAt,
             CompletedAt = readModel.CompletedAt,
             FailedAt = readModel.FailedAt,
-            ErrorMessage = readModel.ErrorMessage
+            CancelledAt = readModel.CancelledAt,
+            CancellationReason = readModel.CancellationReason,
+            ErrorMessage = readModel.ErrorMessage,
+            ErrorCode = readModel.ErrorCode
         };
     }
 
@@ -87,6 +110,7 @@ public static class ReadModelToDtoExtensions
             ReadModelStatus.Active => ExecutionStatus.Active,
             ReadModelStatus.Completed => ExecutionStatus.Completed,
             ReadModelStatus.Failed => ExecutionStatus.Failed,
+            ReadModelStatus.Cancelled => ExecutionStatus.Cancelled,
             _ => throw new ArgumentException($"Unknown status: {status}")
         };
     }

@@ -1,0 +1,6 @@
+{
+  "form": "condition",
+  "expression": "response.status === 429 || response.status >= 500",
+  "scope": { "output": null, "error": { "code": "TIMEOUT", "message": "no response" }, "response": { "status": null, "headers": null, "bodyText": null } },
+  "expect": { "value": false }
+}

@@ -12,10 +12,10 @@ public class EventStoreRepository(
     IEventSerializer eventSerializer,
     ILogger<EventStoreRepository> logger) : IEventStoreRepository
 {
-    public async Task<T> LoadAsync<T>(Guid aggregateId, CancellationToken cancellationToken = default)
-        where T : AggregateRoot, new()
+    public async Task<T> LoadAsync<T, TId>(TId aggregateId, CancellationToken cancellationToken = default)
+        where T : AggregateRoot<TId>, new() where TId : notnull
     {
-        var streamName = GetStreamName<T>(aggregateId);
+        var streamName = StreamNames.For<T>(aggregateId);
         var aggregate = new T();
 
         try
@@ -27,16 +27,25 @@ public class EventStoreRepository(
                 cancellationToken: cancellationToken);
 
             var domainEvents = new List<IDomainEvent>();
+            // Taken from the store rather than counted from the events: the revision is what the
+            // next append is checked against, and it is the store's fact, not ours.
+            var streamRevision = AggregateRoot<TId>.NoStream;
+
             await foreach (var resolvedEvent in events.WithCancellation(cancellationToken))
             {
-                var domainEvent = eventSerializer.DeserializeEvent(
+                streamRevision = resolvedEvent.GetEventNumber();
+
+                // Deliberately unguarded. An event that cannot be read fails the load, because
+                // the alternative — skipping it — rehydrates the aggregate with a hole in its
+                // history at the correct revision, and the next append then passes its
+                // expected-version check and makes the hole permanent.
+                domainEvents.Add(eventSerializer.DeserializeEvent(
                     resolvedEvent.Event.EventType,
                     resolvedEvent.Event.Data.ToArray(),
-                    resolvedEvent.Event.Metadata.ToArray());
-                if (domainEvent is IDomainEvent de) domainEvents.Add(de);
+                    resolvedEvent.Event.Metadata.ToArray()));
             }
 
-            aggregate.LoadFromHistory(domainEvents);
+            aggregate.LoadFromHistory(domainEvents, streamRevision);
 
             return aggregate;
         }
@@ -48,9 +57,10 @@ public class EventStoreRepository(
         }
     }
 
-    public async Task SaveAsync<T>(T aggregate) where T : AggregateRoot, new()
+    public async Task SaveAsync<T, TId>(T aggregate)
+        where T : AggregateRoot<TId>, new() where TId : notnull
     {
-        var streamName = GetStreamName<T>(aggregate.Id);
+        var streamName = StreamNames.For<T>(aggregate.Id);
 
         var uncommittedEvents = aggregate.GetDomainEvents();
 
@@ -72,17 +82,35 @@ public class EventStoreRepository(
             })
             .ToArray();
 
+        // Expected-version rather than Any: the aggregate decided what to append by reading
+        // the stream, so if the stream has moved since, that decision was made against stale
+        // state and must be reconsidered rather than blindly applied.
+        var expectedState = aggregate.Version == AggregateRoot<TId>.NoStream
+            ? StreamState.NoStream
+            : StreamState.StreamRevision((ulong)aggregate.Version);
+
         try
         {
             await eventStoreClient.AppendToStreamAsync(
                 streamName,
-                StreamState.Any,
+                expectedState,
                 eventData);
 
+            aggregate.MarkCommitted(eventData.Length);
             aggregate.ClearDomainEvents();
 
             logger.LogDebug("Saved {EventCount} events for aggregate {AggregateId}",
                 eventData.Length, aggregate.Id);
+        }
+        catch (WrongExpectedVersionException ex)
+        {
+            logger.LogDebug(
+                "Concurrent write to aggregate {AggregateId}: expected revision {ExpectedRevision}, stream had moved on",
+                aggregate.Id, aggregate.Version);
+
+            throw new ConcurrencyException(
+                $"Aggregate {aggregate.Id} was modified by another writer since it was loaded " +
+                $"at revision {aggregate.Version}.", ex);
         }
         catch (Exception ex)
         {
@@ -91,9 +119,10 @@ public class EventStoreRepository(
         }
     }
 
-    public async Task AppendEventAsync<T>(Guid aggregateId, IDomainEvent @event) where T : AggregateRoot, new()
+    public async Task AppendEventAsync<T, TId>(TId aggregateId, IDomainEvent @event)
+        where T : AggregateRoot<TId>, new() where TId : notnull
     {
-        var streamName = GetStreamName<T>(aggregateId);
+        var streamName = StreamNames.For<T>(aggregateId);
         var serializedEvent = eventSerializer.SerializeEvent(@event);
 
         var eventData = new EventData(
@@ -148,10 +177,35 @@ public class EventStoreRepository(
         }
     }
 
-    public async Task<bool> ExistsAsync<T>(Guid aggregateId, CancellationToken cancellationToken = default)
-        where T : AggregateRoot, new()
+    public async Task DeleteStreamAsync(string streamName, CancellationToken cancellationToken = default)
     {
-        var streamName = GetStreamName<T>(aggregateId);
+        try
+        {
+            await eventStoreClient.DeleteAsync(
+                streamName,
+                StreamState.Any,
+                cancellationToken: cancellationToken);
+
+            logger.LogDebug("Deleted stream {StreamName}", streamName);
+        }
+        // Deleting an absent stream with StreamState.Any surfaces as WrongExpectedVersion
+        // (expected Any, actual NoStream), not StreamNotFound. Since Any is our only version
+        // constraint, this can only mean the stream does not exist — an idempotent no-op, which
+        // is what makes a delete retried after a partial failure safe.
+        catch (WrongExpectedVersionException)
+        {
+            logger.LogDebug("Stream {StreamName} does not exist; nothing to delete", streamName);
+        }
+        catch (StreamNotFoundException)
+        {
+            logger.LogDebug("Stream {StreamName} not found; nothing to delete", streamName);
+        }
+    }
+
+    public async Task<bool> ExistsAsync<T, TId>(TId aggregateId, CancellationToken cancellationToken = default)
+        where T : AggregateRoot<TId>, new() where TId : notnull
+    {
+        var streamName = StreamNames.For<T>(aggregateId);
 
         try
         {
@@ -201,12 +255,13 @@ public class EventStoreRepository(
         }
     }
 
-    public async IAsyncEnumerable<EventWithNumber> SubscribeToStream<T>(
-        Guid aggregateId,
+    public async IAsyncEnumerable<EventWithNumber> SubscribeToStream<T, TId>(
+        TId aggregateId,
         long? afterPosition,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default) where T : AggregateRoot, new()
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        where T : AggregateRoot<TId>, new() where TId : notnull
     {
-        var streamName = GetStreamName<T>(aggregateId);
+        var streamName = StreamNames.For<T>(aggregateId);
 
         var fromStream = afterPosition.HasValue
             ? FromStream.After(StreamPosition.FromInt64(afterPosition.Value))
@@ -229,13 +284,7 @@ public class EventStoreRepository(
                 @event.GetMetadata()
             );
 
-            if (domainEvent != null) yield return new EventWithNumber(domainEvent, @event.GetEventNumber());
+            yield return new EventWithNumber(domainEvent, @event.GetEventNumber());
         }
-    }
-
-    private static string GetStreamName<T>(Guid aggregateId) where T : AggregateRoot
-    {
-        var aggregateType = typeof(T).Name.ToLowerInvariant();
-        return $"{aggregateType}-{aggregateId}";
     }
 }

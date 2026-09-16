@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Microsoft.EntityFrameworkCore;
 using Execution.Domain.Services;
 using Execution.Infrastructure.Data;
@@ -20,18 +21,29 @@ public class EfCoreExecutionContextStore(WorkflowExecutionDbContext db) : IExecu
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<ExecutionContext> LoadContextAsync(Guid executionId, CancellationToken ct = default)
+    public async Task<ExecutionContext> LoadContextAsync(ExecutionId executionId, CancellationToken ct = default)
     {
         return await db.ExecutionContexts.FindAsync([executionId], ct)
                ?? throw new InvalidOperationException($"Execution context not found for {executionId}");
     }
 
-    public async Task DeleteAllAsync(Guid executionId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ExecutionId>> ListDescendantsAsync(
+        ExecutionId rootExecutionId, CancellationToken ct = default)
     {
-        var context = await db.ExecutionContexts.FindAsync([executionId], ct);
-        if (context != null)
-            db.ExecutionContexts.Remove(context);
+        return await db.ExecutionContexts
+            .Where(context => context.RootExecutionId == rootExecutionId)
+            .Select(context => context.ExecutionId)
+            .ToListAsync(ct);
+    }
 
-        await db.SaveChangesAsync(ct);
+    public async Task DeleteAllAsync(ExecutionId rootExecutionId, CancellationToken ct = default)
+    {
+        // The run's own row and every descendant's, in one statement. This used to delete a
+        // single row despite its name, which is how a sub-workflow's context outlived the run
+        // that created it with nothing left pointing at it.
+        await db.ExecutionContexts
+            .Where(context => context.ExecutionId == rootExecutionId
+                              || context.RootExecutionId == rootExecutionId)
+            .ExecuteDeleteAsync(ct);
     }
 }

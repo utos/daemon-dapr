@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+        <!-- The shared kernel only, for ExecutionId. Deliberately not Execution.Domain: an
+             execution's identifier is common vocabulary, its aggregate is not. -->
+        <ProjectReference Include="../../common/Common.SeedWork/Common.SeedWork.csproj"/>
     </ItemGroup>
 
 </Project>

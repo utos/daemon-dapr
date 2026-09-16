@@ -1,0 +1,199 @@
+using Google.Protobuf.WellKnownTypes;
+using Common.Constants;
+using Common.Workflow.Proto;
+using Execution.Application.Models;
+using Execution.Domain.Output;
+using Execution.Domain.Services;
+using DomainExecutionStatus = Execution.Domain.Aggregates.ExecutionStatus;
+using GrpcExecution = Utos.Daemon.V1.ScheduleExecutionResponse;
+using GrpcExecutionSummary = Utos.Daemon.V1.ExecutionSummary;
+using GrpcExecutionDetails = Utos.Daemon.V1.GetExecutionResponse;
+using GrpcExecutionStatus = Utos.Daemon.V1.ExecutionStatus;
+using GrpcWorkflow = Utos.Workflows.V1.Workflow;
+using GrpcWorkflowSpec = Utos.Workflows.V1.WorkflowSpec;
+using GrpcWorkflowActivity = Utos.Workflows.V1.WorkflowActivity;
+using GrpcHttpActivityConfig = Utos.Workflows.V1.HttpActivityConfig;
+using GrpcWorkflowMetadata = Utos.Workflows.V1.WorkflowMetadata;
+using GrpcExecutionPayload = Utos.Daemon.V1.ExecutionPayload;
+using GrpcTransitionTarget = Utos.Workflows.V1.TransitionTarget;
+using GrpcWorkflowReference = Utos.Daemon.V1.WorkflowReference;
+using GrpcWorkflowError = Utos.Workflows.V1.WorkflowError;
+using GrpcOutputEntry = Utos.Daemon.V1.WatchOutputResponse;
+
+namespace Execution.Api.Extensions;
+
+/// <summary>
+/// Extension methods for converting POCO/DTO types to gRPC-generated types
+/// </summary>
+public static class DtoToGrpcExtensions
+{
+    /// <summary>
+    /// Maps the daemon's own lifecycle state onto the wire enum. The two are deliberately
+    /// separate types: the domain one is durable aggregate state and must not shift because a
+    /// transport contract was renumbered.
+    /// </summary>
+    public static GrpcExecutionStatus ToGrpc(this DomainExecutionStatus status)
+    {
+        return status switch
+        {
+            DomainExecutionStatus.Scheduled => GrpcExecutionStatus.Scheduled,
+            DomainExecutionStatus.Active => GrpcExecutionStatus.Active,
+            DomainExecutionStatus.Completed => GrpcExecutionStatus.Completed,
+            DomainExecutionStatus.Failed => GrpcExecutionStatus.Failed,
+            DomainExecutionStatus.Cancelled => GrpcExecutionStatus.Cancelled,
+            _ => GrpcExecutionStatus.Unspecified
+        };
+    }
+
+    public static GrpcExecutionSummary ToGrpc(this ExecutionSummary dto)
+    {
+        var grpc = new GrpcExecutionSummary
+        {
+            Id = dto.Id.ToString(),
+            Status = dto.Status.ToGrpc(),
+            Workflow = dto.Workflow.ToProto(dto.WorkflowDigest),
+            CreatedAt = Timestamp.FromDateTime(dto.CreatedAt.ToUniversalTime())
+        };
+
+        if (dto.ScheduledAt.HasValue)
+            grpc.ScheduledAt = Timestamp.FromDateTime(dto.ScheduledAt.Value.ToUniversalTime());
+
+        if (dto.StartedAt.HasValue)
+            grpc.StartedAt = Timestamp.FromDateTime(dto.StartedAt.Value.ToUniversalTime());
+
+        if (dto.FinishedAt.HasValue)
+            grpc.FinishedAt = Timestamp.FromDateTime(dto.FinishedAt.Value.ToUniversalTime());
+
+        // Never folded into Error: a run stopped on purpose has not failed.
+        if (!string.IsNullOrEmpty(dto.CancellationReason))
+            grpc.CancellationReason = dto.CancellationReason;
+
+        if (!string.IsNullOrEmpty(dto.ErrorMessage))
+            grpc.Error = new GrpcWorkflowError
+            {
+                Code = dto.ErrorCode ?? WorkflowErrorCode.ExecutionFailed,
+                Message = dto.ErrorMessage
+            };
+
+        return grpc;
+    }
+
+    public static GrpcExecutionDetails ToGrpc(this ExecutionDetails dto)
+    {
+        // Identity, status, timing and error all live on the embedded summary since v0.0.10;
+        // the response itself carries only the summary, the snapshotted bundle and the input.
+        var summary = new GrpcExecutionSummary
+        {
+            Id = dto.Id.ToString(),
+            Status = dto.Status.ToGrpc(),
+            Workflow = dto.Workflow.ToProto(dto.WorkflowDigest),
+            CreatedAt = Timestamp.FromDateTime(dto.CreatedAt.ToUniversalTime())
+        };
+
+        if (dto.ScheduledAt.HasValue)
+            summary.ScheduledAt = Timestamp.FromDateTime(dto.ScheduledAt.Value.ToUniversalTime());
+
+        if (dto.StartedAt.HasValue)
+            summary.StartedAt = Timestamp.FromDateTime(dto.StartedAt.Value.ToUniversalTime());
+
+        // ExecutionSummary has a single finished_at; take whichever terminal time is set.
+        var finishedAt = dto.CompletedAt ?? dto.FailedAt ?? dto.CancelledAt;
+        if (finishedAt.HasValue)
+            summary.FinishedAt = Timestamp.FromDateTime(finishedAt.Value.ToUniversalTime());
+
+        if (!string.IsNullOrEmpty(dto.CancellationReason))
+            summary.CancellationReason = dto.CancellationReason;
+
+        // What the author wrote, when a rule's `error` action failed the run: its code, and its
+        // details when it carried any. A failure the daemon raised has the generic code and none.
+        if (!string.IsNullOrEmpty(dto.ErrorMessage))
+        {
+            summary.Error = new GrpcWorkflowError
+            {
+                Code = dto.ErrorCode ?? WorkflowErrorCode.ExecutionFailed,
+                Message = dto.ErrorMessage
+            };
+
+            if (dto.ErrorDetails != null)
+                summary.Error.Details = dto.ErrorDetails.ToProto();
+        }
+
+        var grpc = new GrpcExecutionDetails
+        {
+            Summary = summary,
+            Bundle = dto.Bundle.ToProto()
+        };
+
+        if (dto.Input.Count > 0)
+            grpc.Input = dto.Input.ToGrpc();
+
+        // Set when the run returned a value. A run that ended with none leaves it unset, per spec
+        // 0.0.16 — the status is what says it completed. Which runs have one is the handler's
+        // call, not this mapping's.
+        if (dto.Result != null)
+            grpc.Result = dto.Result.ToProto();
+
+        foreach (var (key, value) in dto.Env)
+            grpc.Env.Add(key, value);
+
+        return grpc;
+    }
+
+    /// <summary>
+    /// Converts Dictionary to gRPC ExecutionPayload. The mapping itself lives in
+    /// <see cref="ValueMapping"/>, beside the one for authored document values — a local copy is
+    /// how the two ended up disagreeing about numbers.
+    /// </summary>
+    public static GrpcExecutionPayload? ToGrpc(this Dictionary<string, object> dictionary) =>
+        dictionary.ToProto();
+
+    /// <summary>
+    /// One entry of an execution's output stream, with the sequence that doubles as a cursor.
+    /// </summary>
+    public static GrpcOutputEntry ToGrpc(this OutputEntryAt source)
+    {
+        var entry = new GrpcOutputEntry
+        {
+            Sequence = source.Sequence,
+            Timestamp = Timestamp.FromDateTime(source.Entry.DateOccurred.ToUniversalTime())
+        };
+
+        switch (source.Entry)
+        {
+            case ExecutionValueEmitted emitted:
+                entry.Value = ToStruct(emitted.Value);
+                break;
+
+            case ExecutionResultProduced produced:
+                entry.Result = ToStruct(produced.Result);
+                break;
+
+            case ExecutionErrorProduced error:
+                entry.Error = new GrpcWorkflowError { Code = error.Code, Message = error.Message };
+                if (error.Details != null)
+                    entry.Error.Details = ToStruct(error.Details);
+                break;
+
+            default:
+                throw new NotSupportedException(
+                    $"No wire mapping for output entry '{source.Entry.GetType().Name}'.");
+        }
+
+        return entry;
+    }
+
+    /// <summary>
+    /// A path that ended without returning becomes an empty structure rather than an unset field:
+    /// the stream always terminates, and a client should not have to tell "returned nothing" from
+    /// "no entry at all".
+    /// </summary>
+    private static Struct ToStruct(object? value)
+    {
+        if (value is null)
+            return new Struct();
+
+        return ValueMapping.ToProtoValue(value).StructValue
+               ?? throw new InvalidOperationException(
+                   $"An output entry must carry a structure, not {value.GetType().Name}.");
+    }
+}

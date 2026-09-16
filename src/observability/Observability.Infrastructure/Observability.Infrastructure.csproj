@@ -5,9 +5,14 @@
     </ItemGroup>
 
     <ItemGroup>
+        <PackageReference Include="CommunityToolkit.Aspire.KurrentDB" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore" />
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
         <ProjectReference Include="../Observability.Domain/Observability.Domain.csproj"/>
-        <ProjectReference Include="../Observability.Features/Observability.Features.csproj"/>
-        <ProjectReference Include="../../execution/Execution.Domain/Execution.Domain.csproj"/>
+        <ProjectReference Include="../Observability.Application/Observability.Application.csproj"/>
+        <!-- Common.Infrastructure for the event store the probe asks whether an execution exists.
+             Deliberately not Execution.Domain: this module is told that a run ended, it does not
+             go and read the aggregate that decided so. -->
         <ProjectReference Include="../../common/Common.Infrastructure/Common.Infrastructure.csproj"/>
     </ItemGroup>
 

@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "Buffer.from(input.data, 'base64url').toString()",
+  "scope": { "input": { "data": "SGkgdGhlcmUsIMO_" } },
+  "expect": { "value": "Hi there, ÿ" }
+}

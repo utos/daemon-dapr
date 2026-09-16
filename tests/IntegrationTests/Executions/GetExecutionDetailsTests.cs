@@ -1,7 +1,11 @@
+using Common.Constants;
+using Google.Protobuf.WellKnownTypes;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Utos.Workflows.V1;
+using WireMock.RequestBuilders;
+using WireMock.ResponseBuilders;
 
 namespace IntegrationTests.Executions;
 
@@ -46,18 +50,18 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
 
         // Assert
         Assert.NotNull(details);
-        Assert.Equal(scheduleResponse.Id, details.Id);
-        Assert.Equal("get-basic-test", details.WorkflowName);
-        Assert.Equal("1.2.3", details.WorkflowVersion);
-        Assert.Contains(details.Status, new[]
+        Assert.Equal(scheduleResponse.Id, details.Summary.Id);
+        Assert.Equal("get-basic-test", details.Summary.Workflow.Name);
+        Assert.Equal("1.2.3", details.Summary.Workflow.Version);
+        Assert.Contains(details.Summary.Status, new[]
         {
             ExecutionStatus.Unspecified,
             ExecutionStatus.Scheduled,
@@ -65,6 +69,81 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             ExecutionStatus.Completed,
             ExecutionStatus.Failed
         });
+    }
+
+    [Fact]
+    public async Task GetExecution_ReturnsWhatTheRunReturned()
+    {
+        // The terminal `result` entry of the run's output stream, read back rather than kept in
+        // the read model — there is one source of truth for what an execution returned, and
+        // WatchOutput reads the same entry.
+        var request = new TestWorkflowBuilder("get-result-test", fixture.MockBaseUrl)
+            .HttpGet("call", "/success")
+            .OnResult(new Struct
+            {
+                Fields =
+                {
+                    ["status"] = Value.ForString("{{ output.status }}"),
+                    ["count"] = Value.ForNumber(3)
+                }
+            })
+            .Build();
+
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
+
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+        Assert.NotNull(details.Result);
+        Assert.Equal("success", details.Result.Fields["status"].StringValue);
+        Assert.Equal(3d, details.Result.Fields["count"].NumberValue);
+    }
+
+    [Fact]
+    public async Task GetExecution_ReportsNoResult_WhenTheRunEndedWithoutAValue()
+    {
+        // Spec 0.0.16: a run that ended without a value — its rules ran out, or a bare `return` —
+        // leaves `result` unset. It used to report an empty struct, on the argument that absence
+        // was indistinguishable from failure; the status is what distinguishes them.
+        var request = new TestWorkflowBuilder("get-no-result-test", fixture.MockBaseUrl)
+            .HttpGet("call", "/success")
+            .Build();
+
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
+
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+        Assert.Null(details.Result);
+    }
+
+    [Fact]
+    public async Task GetExecution_ReportsNoResult_WhenTheRunFailed()
+    {
+        // A failed run reports its error, never a result — its stream terminated with an error
+        // entry, so there is nothing to show.
+        const string path = "/get-failed-result-test";
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath(path).UsingGet())
+            .RespondWith(Response.Create().WithStatusCode(500));
+
+        var request = new TestWorkflowBuilder("get-failed-result-test", fixture.MockBaseUrl)
+            .HttpGet("call", path)
+            .Build();
+
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
+
+        Assert.Equal(ExecutionStatus.Failed, details.Summary.Status);
+        Assert.Null(details.Result);
+        Assert.NotNull(details.Summary.Error);
     }
 
     [Fact]
@@ -76,16 +155,16 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
 
         // Assert - Full workflow definition should be included
         Assert.NotNull(details.Bundle.Workflows[details.Bundle.EntryPoint]);
-        Assert.Equal(WorkflowApiVersion.V100, details.Bundle.Workflows[details.Bundle.EntryPoint].ApiVersion);
-        Assert.Equal(WorkflowKind.WorkflowUtos, details.Bundle.Workflows[details.Bundle.EntryPoint].Kind);
+        Assert.Equal(WorkflowDocument.ApiVersion, details.Bundle.Workflows[details.Bundle.EntryPoint].ApiVersion);
+        Assert.Equal(WorkflowDocument.Kind, details.Bundle.Workflows[details.Bundle.EntryPoint].Kind);
 
         Assert.NotNull(details.Bundle.Workflows[details.Bundle.EntryPoint].Metadata);
         Assert.Equal("get-workflow-def-test", details.Bundle.Workflows[details.Bundle.EntryPoint].Metadata.Name);
@@ -109,8 +188,8 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .BuildSequential();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
@@ -129,7 +208,6 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("get-input-test", fixture.MockBaseUrl)
             .HttpGet("valid-activity", "/success")
             .Build();
-        request.Input = new ExecutionPayload();
 
         // Primitive types
         request.Input.Data.Add("stringKey", Google.Protobuf.WellKnownTypes.Value.ForString("test-value"));
@@ -151,8 +229,8 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
         request.Input.Data.Add("arrayKey", arrayValue);
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
@@ -193,8 +271,8 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
@@ -212,34 +290,28 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
-        await WaitForExecutionToExist(scheduleResponse.Id, TimeSpan.FromSeconds(5));
+        var scheduleResponse = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduleResponse.Id);
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
 
         // Assert - CreatedAt is always populated
-        Assert.NotNull(details.CreatedAt);
-        var createdAt = details.CreatedAt.ToDateTime();
+        Assert.NotNull(details.Summary.CreatedAt);
+        var createdAt = details.Summary.CreatedAt.ToDateTime();
         Assert.True(Math.Abs((DateTime.UtcNow - createdAt).TotalSeconds) < 10,
             $"CreatedAt should be within 10 seconds of now. Expected: {DateTime.UtcNow}, Actual: {createdAt}");
 
         // Optional fields depend on execution state progression
-        if (details.Status >= ExecutionStatus.Scheduled) Assert.NotNull(details.ScheduledAt);
+        if (details.Summary.Status >= ExecutionStatus.Scheduled) Assert.NotNull(details.Summary.ScheduledAt);
 
-        if (details.Status >= ExecutionStatus.Active) Assert.NotNull(details.StartedAt);
+        if (details.Summary.Status >= ExecutionStatus.Active) Assert.NotNull(details.Summary.StartedAt);
 
-        if (details.Status == ExecutionStatus.Completed)
-        {
-            Assert.NotNull(details.CompletedAt);
-            Assert.Null(details.FailedAt);
-        }
-
-        if (details.Status == ExecutionStatus.Failed)
-        {
-            Assert.NotNull(details.FailedAt);
-            Assert.Null(details.CompletedAt);
-        }
+        // completed_at/failed_at collapsed into a single finished_at; status carries which.
+        if (details.Summary.Status is ExecutionStatus.Completed or ExecutionStatus.Failed)
+            Assert.NotNull(details.Summary.FinishedAt);
+        else
+            Assert.Null(details.Summary.FinishedAt);
     }
 
     [Fact]
@@ -259,24 +331,23 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         await WaitForExecutionWithStatus(scheduleResponse.Id, ExecutionStatus.Completed, TimeSpan.FromSeconds(10));
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
 
         // Assert
-        Assert.Equal(ExecutionStatus.Completed, details.Status);
-        Assert.NotNull(details.CompletedAt);
-        Assert.Null(details.FailedAt);
-        Assert.True(string.IsNullOrEmpty(details.ErrorMessage),
-            $"ErrorMessage should be null or empty for completed execution, but was: '{details.ErrorMessage}'");
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+        Assert.NotNull(details.Summary.FinishedAt);
+        Assert.True(details.Summary.Error is null,
+            $"Error should be unset for a completed execution, but was: '{details.Summary.Error?.Message}'");
 
-        // Verify CompletedAt is after CreatedAt
-        var createdAt = details.CreatedAt.ToDateTime();
-        var completedAt = details.CompletedAt.ToDateTime();
+        // Verify FinishedAt is after CreatedAt
+        var createdAt = details.Summary.CreatedAt.ToDateTime();
+        var completedAt = details.Summary.FinishedAt.ToDateTime();
         Assert.True(completedAt >= createdAt,
-            $"CompletedAt ({completedAt}) should be >= CreatedAt ({createdAt})");
+            $"FinishedAt ({completedAt}) should be >= CreatedAt ({createdAt})");
     }
 
     [Fact]
@@ -296,24 +367,23 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         await WaitForExecutionWithStatus(scheduleResponse.Id, ExecutionStatus.Failed, TimeSpan.FromSeconds(10));
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
 
         // Assert
-        Assert.Equal(ExecutionStatus.Failed, details.Status);
-        Assert.NotNull(details.FailedAt);
-        Assert.Null(details.CompletedAt);
-        Assert.NotNull(details.ErrorMessage);
-        Assert.NotEmpty(details.ErrorMessage);
+        Assert.Equal(ExecutionStatus.Failed, details.Summary.Status);
+        Assert.NotNull(details.Summary.FinishedAt);
+        Assert.NotNull(details.Summary.Error);
+        Assert.NotEmpty(details.Summary.Error.Message);
 
-        // Verify FailedAt is after CreatedAt
-        var createdAt = details.CreatedAt.ToDateTime();
-        var failedAt = details.FailedAt.ToDateTime();
+        // Verify FinishedAt is after CreatedAt
+        var createdAt = details.Summary.CreatedAt.ToDateTime();
+        var failedAt = details.Summary.FinishedAt.ToDateTime();
         Assert.True(failedAt >= createdAt,
-            $"FailedAt ({failedAt}) should be >= CreatedAt ({createdAt})");
+            $"FinishedAt ({failedAt}) should be >= CreatedAt ({createdAt})");
     }
 
     [Fact]
@@ -333,17 +403,17 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         await WaitForExecutionWithStatus(scheduleResponse.Id, ExecutionStatus.Failed, TimeSpan.FromSeconds(10));
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
 
         // Assert
-        Assert.Equal(ExecutionStatus.Failed, details.Status);
-        Assert.NotNull(details.ErrorMessage);
-        Assert.NotEmpty(details.ErrorMessage);
-        Assert.NotNull(details.FailedAt);
+        Assert.Equal(ExecutionStatus.Failed, details.Summary.Status);
+        Assert.NotNull(details.Summary.Error);
+        Assert.NotEmpty(details.Summary.Error.Message);
+        Assert.NotNull(details.Summary.FinishedAt);
     }
 
     [Fact]
@@ -365,15 +435,15 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         await WaitForExecutionWithStatus(scheduleResponse.Id, ExecutionStatus.Failed, TimeSpan.FromSeconds(10));
 
         var details = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
 
         // Assert - GetExecution should return full error message (not truncated like list view)
-        Assert.NotNull(details.ErrorMessage);
-        Assert.NotEmpty(details.ErrorMessage);
+        Assert.NotNull(details.Summary.Error);
+        Assert.NotEmpty(details.Summary.Error.Message);
         // Note: The actual error format depends on how the workflow executor packages errors
         // We're just verifying it's not truncated to 200 chars like in the list view
     }
@@ -387,7 +457,7 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Poll and track status changes
         var statuses = new List<ExecutionStatus>();
@@ -399,10 +469,10 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
                 var details = await fixture.DaemonClient.GetExecutionAsync(
                     new GetExecutionRequest { ExecutionId = scheduleResponse.Id });
 
-                if (!statuses.Contains(details.Status)) statuses.Add(details.Status);
+                if (!statuses.Contains(details.Summary.Status)) statuses.Add(details.Summary.Status);
 
                 // Stop when we reach terminal state
-                if (details.Status is ExecutionStatus.Completed or ExecutionStatus.Failed)
+                if (details.Summary.Status is ExecutionStatus.Completed or ExecutionStatus.Failed)
                     break;
 
                 await Task.Delay(100);
@@ -432,28 +502,6 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
     }
 
     /// <summary>
-    /// Helper to wait for an execution to exist in the read model
-    /// </summary>
-    private async Task<bool> WaitForExecutionToExist(string executionId, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-
-        while (DateTime.UtcNow < deadline)
-            try
-            {
-                await fixture.DaemonClient.GetExecutionAsync(
-                    new GetExecutionRequest { ExecutionId = executionId });
-                return true;
-            }
-            catch (Grpc.Core.RpcException ex) when (ex.StatusCode == Grpc.Core.StatusCode.NotFound)
-            {
-                await Task.Delay(100);
-            }
-
-        return false;
-    }
-
-    /// <summary>
     /// Helper to wait for an execution to reach a specific status
     /// </summary>
     private async Task<bool> WaitForExecutionWithStatus(
@@ -469,7 +517,7 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
                 var details = await fixture.DaemonClient.GetExecutionAsync(
                     new GetExecutionRequest { ExecutionId = executionId });
 
-                if (details.Status == expectedStatus)
+                if (details.Summary.Status == expectedStatus)
                     return true;
 
                 await Task.Delay(100);

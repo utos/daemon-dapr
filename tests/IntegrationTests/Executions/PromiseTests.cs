@@ -38,28 +38,26 @@ public class PromiseTests(DaemonTestFixture fixture)
 
         var request = new TestWorkflowBuilder("promise-all-parent", fixture.MockBaseUrl)
             // Branch target activities (workflow-type) in the parent workflow
-            .WorkflowCall("call-wf1", "child-wf1", "http-step")
-            .WorkflowCall("call-wf2", "child-wf2", "http-step")
             // Promise activity references those workflow-call activities
             .Promise("fan-out", "all")
-            .Branch("branch1", "call-wf1")
-            .Branch("branch2", "call-wf2")
-            .OnReturn(promiseReturnStruct)
+            .Branch("branch1", "child-wf1", "http-step")
+            .Branch("branch2", "child-wf2", "http-step")
+            .OnResult(promiseReturnStruct)
             // Dependent workflows
             .AddDependentWorkflow("child-wf1", child =>
             {
                 child.HttpGet("http-step", "/promise-all-branch1")
-                    .OnReturn(returnStruct);
+                    .OnResult(returnStruct);
             })
             .AddDependentWorkflow("child-wf2", child =>
             {
                 child.HttpGet("http-step", "/promise-all-branch2")
-                    .OnReturn(returnStruct);
+                    .OnResult(returnStruct);
             })
             .Build("fan-out");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -76,7 +74,7 @@ public class PromiseTests(DaemonTestFixture fixture)
         // Assert — Execution completed successfully
         var execution = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = response.Id });
-        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
     }
 
     [Fact]
@@ -97,18 +95,16 @@ public class PromiseTests(DaemonTestFixture fixture)
                 .WithBody("Internal Server Error"));
 
         var request = new TestWorkflowBuilder("promise-allfail-parent", fixture.MockBaseUrl)
-            .WorkflowCall("call-ok", "child-ok", "http-step")
-            .WorkflowCall("call-fail", "child-fail", "http-step")
             .Promise("fan-out", "all")
-            .Branch("ok-branch", "call-ok")
-            .Branch("fail-branch", "call-fail")
-            .OnSuccess("end")
+            .Branch("ok-branch", "child-ok", "http-step")
+            .Branch("fail-branch", "child-fail", "http-step")
+            .OnEnd()
             .AddDependentWorkflow("child-ok", child => { child.HttpGet("http-step", "/promise-allfail-ok"); })
             .AddDependentWorkflow("child-fail", child => { child.HttpGet("http-step", "/promise-allfail-500"); })
             .Build("fan-out");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -124,7 +120,7 @@ public class PromiseTests(DaemonTestFixture fixture)
         {
             var execution = await fixture.DaemonClient.GetExecutionAsync(
                 new GetExecutionRequest { ExecutionId = response.Id });
-            status = execution.Status;
+            status = execution.Summary.Status;
             if (status == ExecutionStatus.Failed) break;
             await Task.Delay(250);
         } while (DateTime.UtcNow < deadline);
@@ -153,22 +149,20 @@ public class PromiseTests(DaemonTestFixture fixture)
         returnStruct.Fields.Add("result", Value.ForString("{{ output.result }}"));
 
         var request = new TestWorkflowBuilder("promise-any-parent", fixture.MockBaseUrl)
-            .WorkflowCall("call-fail", "child-any-fail", "http-step")
-            .WorkflowCall("call-ok", "child-any-ok", "http-step")
             .Promise("fan-out", "any")
-            .Branch("fail-branch", "call-fail")
-            .Branch("ok-branch", "call-ok")
-            .OnSuccess("end")
+            .Branch("fail-branch", "child-any-fail", "http-step")
+            .Branch("ok-branch", "child-any-ok", "http-step")
+            .OnEnd()
             .AddDependentWorkflow("child-any-fail", child => { child.HttpGet("http-step", "/promise-any-fail"); })
             .AddDependentWorkflow("child-any-ok", child =>
             {
                 child.HttpGet("http-step", "/promise-any-ok")
-                    .OnReturn(returnStruct);
+                    .OnResult(returnStruct);
             })
             .Build("fan-out");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -180,7 +174,7 @@ public class PromiseTests(DaemonTestFixture fixture)
         // Assert — Execution completed (any mode: one success is enough)
         var execution = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = response.Id });
-        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
     }
 
     [Fact]
@@ -205,26 +199,24 @@ public class PromiseTests(DaemonTestFixture fixture)
         returnStruct.Fields.Add("result", Value.ForString("{{ output.result }}"));
 
         var request = new TestWorkflowBuilder("promise-race-parent", fixture.MockBaseUrl)
-            .WorkflowCall("call-a", "child-race-a", "http-step")
-            .WorkflowCall("call-b", "child-race-b", "http-step")
             .Promise("fan-out", "race")
-            .Branch("racer-a", "call-a")
-            .Branch("racer-b", "call-b")
-            .OnSuccess("end")
+            .Branch("racer-a", "child-race-a", "http-step")
+            .Branch("racer-b", "child-race-b", "http-step")
+            .OnEnd()
             .AddDependentWorkflow("child-race-a", child =>
             {
                 child.HttpGet("http-step", "/promise-race-a")
-                    .OnReturn(returnStruct);
+                    .OnResult(returnStruct);
             })
             .AddDependentWorkflow("child-race-b", child =>
             {
                 child.HttpGet("http-step", "/promise-race-b")
-                    .OnReturn(returnStruct);
+                    .OnResult(returnStruct);
             })
             .Build("fan-out");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -236,7 +228,7 @@ public class PromiseTests(DaemonTestFixture fixture)
         // Assert — Execution completed, one of the racers won
         var execution = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = response.Id });
-        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
     }
 
     [Fact]
@@ -257,14 +249,14 @@ public class PromiseTests(DaemonTestFixture fixture)
         branchInput.Fields.Add("itemValue", Value.ForString("{{ item }}"));
 
         var request = new TestWorkflowBuilder("promise-foreach-parent", fixture.MockBaseUrl)
-            .WorkflowCall("call-item-wf", "child-foreach", "http-step")
             .Promise("fan-out", "all")
-            .ForEachBranch("item", "call-item-wf", "{{ input.items }}", "item", branchInput)
-            .OnSuccess("end")
+            .ForEachBranch("item", "child-foreach", "http-step",
+                "{{ input.items }}", "item", branchInput)
+            .OnEnd()
             .AddDependentWorkflow("child-foreach", child =>
             {
                 child.HttpGet("http-step", "/promise-foreach-item")
-                    .OnReturn(returnStruct);
+                    .OnResult(returnStruct);
             })
             .WithInput("items", Value.ForList(
                 Value.ForString("alpha"),
@@ -273,7 +265,7 @@ public class PromiseTests(DaemonTestFixture fixture)
             .Build("fan-out");
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
         {
@@ -291,6 +283,6 @@ public class PromiseTests(DaemonTestFixture fixture)
         // Assert — Execution completed
         var execution = await fixture.DaemonClient.GetExecutionAsync(
             new GetExecutionRequest { ExecutionId = response.Id });
-        Assert.Equal(ExecutionStatus.Completed, execution.Status);
+        Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
     }
 }

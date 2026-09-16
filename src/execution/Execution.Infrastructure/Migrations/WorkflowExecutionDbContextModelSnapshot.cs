@@ -17,7 +17,7 @@ namespace Execution.Infrastructure.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.3")
+                .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -37,49 +37,24 @@ namespace Execution.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<string>("Env")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("EnvJson");
+
                     b.Property<string>("Input")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)")
                         .HasColumnName("InputJson");
 
+                    b.Property<Guid?>("RootExecutionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("ExecutionId");
 
+                    b.HasIndex("RootExecutionId");
+
                     b.ToTable("ExecutionContexts", (string)null);
-                });
-
-            modelBuilder.Entity("Execution.Infrastructure.ReadModels.SubWorkflowCall", b =>
-                {
-                    b.Property<Guid>("ParentExecutionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ChildExecutionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ActivityName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("BranchName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("InvocationType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("PromiseMode")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.HasKey("ParentExecutionId", "ChildExecutionId");
-
-                    b.HasIndex("ChildExecutionId");
-
-                    b.HasIndex("ParentExecutionId", "ActivityName");
-
-                    b.ToTable("SubWorkflowCalls", (string)null);
                 });
 
             modelBuilder.Entity("Execution.Infrastructure.ReadModels.WorkflowExecutionReadModel", b =>
@@ -89,11 +64,24 @@ namespace Execution.Infrastructure.Migrations
                         .HasColumnType("uniqueidentifier")
                         .HasDefaultValueSql("NEWSEQUENTIALID()");
 
+                    b.Property<string>("CancellationReason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("EnvJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("ErrorMessage")
                         .HasMaxLength(4000)
@@ -131,15 +119,9 @@ namespace Execution.Infrastructure.Migrations
                     b.Property<string>("WorkflowDefinitionJson")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("WorkflowName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("WorkflowVersion")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
+                    b.Property<string>("WorkflowDigest")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
 
@@ -149,9 +131,53 @@ namespace Execution.Infrastructure.Migrations
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("WorkflowName", "WorkflowVersion");
+                    b.HasIndex("WorkflowDigest");
 
                     b.ToTable("WorkflowExecutions", (string)null);
+                });
+
+            modelBuilder.Entity("Execution.Infrastructure.ReadModels.WorkflowExecutionReadModel", b =>
+                {
+                    b.OwnsOne("Common.Workflow.WorkflowIdentity", "Identity", b1 =>
+                        {
+                            b1.Property<Guid>("WorkflowExecutionReadModelId")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<string>("Name")
+                                .IsRequired()
+                                .HasMaxLength(200)
+                                .HasColumnType("nvarchar(200)")
+                                .HasColumnName("WorkflowName");
+
+                            b1.Property<string>("Namespace")
+                                .HasMaxLength(200)
+                                .HasColumnType("nvarchar(200)")
+                                .HasColumnName("WorkflowNamespace");
+
+                            b1.Property<string>("Registry")
+                                .HasMaxLength(200)
+                                .HasColumnType("nvarchar(200)")
+                                .HasColumnName("WorkflowRegistry");
+
+                            b1.Property<string>("Version")
+                                .IsRequired()
+                                .HasMaxLength(50)
+                                .HasColumnType("nvarchar(50)")
+                                .HasColumnName("WorkflowVersion");
+
+                            b1.HasKey("WorkflowExecutionReadModelId");
+
+                            b1.HasIndex("Name", "Version");
+
+                            b1.ToTable("WorkflowExecutions");
+
+                            b1.WithOwner()
+                                .HasForeignKey("WorkflowExecutionReadModelId");
+                        });
+
+                    b.Navigation("Identity")
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

@@ -1,63 +1,171 @@
 using Common.SeedWork;
-using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Common.Workflow;
 using Execution.Domain.Events;
 
 namespace Execution.Domain.Aggregates;
 
-public class WorkflowExecution : AggregateRoot
+/// <summary>
+/// The lifecycle of one workflow execution, and the only thing permitted to write to its
+/// stream.
+///
+/// Two rules shape this type:
+///
+/// Guards live in the command methods, never in <see cref="When"/>. <see cref="When"/> is also
+/// the rehydration path, so a guard there would make a stream that already contains a
+/// contradiction impossible to load — an aggregate that cannot replay its own history is
+/// unrecoverable, and the history is whatever was written before the rules existed.
+///
+/// Transitions are idempotent rather than strict: a repeated or late one is ignored, and the
+/// first terminal state wins. The durable orchestration that drives them is at-least-once, so
+/// a transition can arrive twice through no fault of the caller. Throwing would turn a
+/// harmless duplicate write into a failed execution, and a throw raised while handling a
+/// failure would replace the real reason with this one.
+/// </summary>
+public class WorkflowExecution : AggregateRoot<ExecutionId>
 {
     public ExecutionStatus Status { get; private set; }
+
+    /// <summary>Why the execution failed. Null unless <see cref="Status"/> is Failed.</summary>
+    public string? FailureReason { get; private set; }
+
+    /// <summary>
+    /// The failure's code, when an authored <c>error</c> action gave it one. Null for a failure
+    /// the daemon raised itself, and null unless <see cref="Status"/> is Failed.
+    /// </summary>
+    public string? FailureCode { get; private set; }
+
+    /// <summary>The failure's structured details, when an <c>error</c> action carried any.</summary>
+    public Dictionary<string, object>? FailureDetails { get; private set; }
+
+    /// <summary>
+    /// Why the execution was cancelled. Null unless <see cref="Status"/> is Cancelled, and null
+    /// then too when nobody gave a reason. Kept apart from <see cref="FailureReason"/> so a run
+    /// stopped on purpose never surfaces as an error.
+    /// </summary>
+    public string? CancellationReason { get; private set; }
+
+    public bool IsTerminal =>
+        Status is ExecutionStatus.Completed or ExecutionStatus.Failed or ExecutionStatus.Cancelled;
 
     public WorkflowExecution()
     {
     }
 
-    public WorkflowExecution(WorkflowBundle bundle, Dictionary<string, object> input, string startActivity)
+    public WorkflowExecution(WorkflowBundle bundle, Dictionary<string, object> input, string startActivity,
+        Dictionary<string, string>? env = null, ExecutionId? executionId = null, string? digest = null)
     {
-        var executionId = Guid.NewGuid();
+        // A detached sub-workflow supplies its own replay-safe id so re-scheduling is idempotent;
+        // the gRPC path passes null and gets a fresh one.
+        var id = executionId ?? ExecutionId.New();
 
-        ApplyChange(new WorkflowExecutionCreatedEvent(executionId, bundle, input, startActivity, DateTime.UtcNow));
+        ApplyChange(new WorkflowExecutionCreatedEvent(
+            id, bundle, input, startActivity, DateTime.UtcNow, env, digest));
     }
 
+    /// <summary>Accepted for execution. Ignored once the run has progressed past it.</summary>
     public void Schedule()
     {
+        if (Status != ExecutionStatus.Unspecified)
+            return;
+
         ApplyChange(new WorkflowExecutionScheduledEvent(Id, DateTime.UtcNow));
     }
 
+    /// <summary>
+    /// The orchestration has started running. Permitted from Unspecified as well as Scheduled,
+    /// so a run whose Scheduled event never landed is not stuck short of Active.
+    /// </summary>
+    public void MarkActive()
+    {
+        if (Status is not (ExecutionStatus.Unspecified or ExecutionStatus.Scheduled))
+            return;
+
+        ApplyChange(new WorkflowExecutionActiveEvent(Id, DateTime.UtcNow));
+    }
+
+    public void Complete()
+    {
+        if (IsTerminal)
+            return;
+
+        ApplyChange(new WorkflowExecutionCompletedEvent(Id, DateTime.UtcNow));
+    }
+
+    /// <param name="reason">
+    /// Substituted when absent: the reason is surfaced to clients as the message of a
+    /// WorkflowError, where a null would read as a bug in the daemon rather than a failure of
+    /// the workflow.
+    /// </param>
+    /// <param name="code">
+    /// An authored <c>error</c> action's code, or null for a failure of the daemon's own — the
+    /// distinction the run reports, so a client can tell a workflow that decided to fail from one
+    /// that broke.
+    /// </param>
+    public void Fail(string? reason, string? code = null, Dictionary<string, object>? details = null)
+    {
+        if (IsTerminal)
+            return;
+
+        var described = string.IsNullOrWhiteSpace(reason)
+            ? "Execution failed without a reported reason."
+            : reason;
+
+        ApplyChange(new WorkflowExecutionFailedEvent(Id, described, DateTime.UtcNow, code, details));
+    }
+
+    /// <summary>
+    /// Stopped on purpose. Like the other terminals this is idempotent and loses to a state the
+    /// run already reached: a cancel that arrives after the work finished does not rewrite that
+    /// history into "cancelled". Callers that need to know which happened read
+    /// <see cref="Status"/> back.
+    /// </summary>
+    public void Cancel(string? reason = null)
+    {
+        if (IsTerminal)
+            return;
+
+        ApplyChange(new WorkflowExecutionCancelledEvent(Id, reason, DateTime.UtcNow));
+    }
+
+    /// <summary>
+    /// A plain fold, in stream order, with no guards. Last write wins — matching how the read
+    /// model projects status — so a legacy stream containing a contradiction resolves the same
+    /// way in both places. The command methods above are what stop a new stream from ever
+    /// containing one.
+    /// </summary>
     protected override void When(IDomainEvent @event)
     {
         switch (@event)
         {
             case WorkflowExecutionCreatedEvent e:
-                Handle(e);
+                Id = e.ExecutionId;
+                CreatedAt = e.DateOccurred;
+                Status = ExecutionStatus.Unspecified;
                 break;
-            case WorkflowExecutionScheduledEvent e:
-                Handle(e);
+
+            case WorkflowExecutionScheduledEvent:
+                Status = ExecutionStatus.Scheduled;
                 break;
-            // Lifecycle events (Active, Completed, Failed) are written directly to the stream
-            // by WriteLifecycleEventActivity — no aggregate handling needed.
+
             case WorkflowExecutionActiveEvent:
+                Status = ExecutionStatus.Active;
+                break;
+
             case WorkflowExecutionCompletedEvent:
-            case WorkflowExecutionFailedEvent:
+                Status = ExecutionStatus.Completed;
+                break;
+
+            case WorkflowExecutionFailedEvent e:
+                Status = ExecutionStatus.Failed;
+                FailureReason = e.Reason;
+                FailureCode = e.Code;
+                FailureDetails = e.Details;
+                break;
+
+            case WorkflowExecutionCancelledEvent e:
+                Status = ExecutionStatus.Cancelled;
+                CancellationReason = e.Reason;
                 break;
         }
-    }
-
-    private void Handle(WorkflowExecutionCreatedEvent @event)
-    {
-        Id = @event.ExecutionId;
-        CreatedAt = @event.DateOccurred;
-
-        Status = ExecutionStatus.Unspecified;
-    }
-
-    private void Handle(WorkflowExecutionScheduledEvent _)
-    {
-        if (Status != ExecutionStatus.Unspecified)
-            throw new DomainException(
-                $"Cannot schedule workflow execution. Expected status 'Unspecified', but current status is '{Status}'.");
-
-        Status = ExecutionStatus.Scheduled;
     }
 }

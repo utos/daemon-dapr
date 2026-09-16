@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" />
+        <PackageReference Include="xunit"/>
+        <PackageReference Include="xunit.runner.visualstudio">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <!-- The grammar (UTOS-E0##) is the shared validator's; GrammarTests drive it on bundles. -->
+        <PackageReference Include="Utos.Workflow" />
+        <PackageReference Include="Utos.Workflow.Validation" />
+    </ItemGroup>
+
+    <!--
+      Not part of the CI unit-test step on purpose. These are adversarial: they build 45,000-deep
+      structures, run catastrophic regexes and allocate against the memory limit, and several of
+      them would end the test host if a single engine option regressed. They run on a schedule and
+      on demand (.github/workflows/engine-hardening.yml), and locally with
+      `dotnet test tests/EngineHardeningTests`.
+
+      Execution.Infrastructure is referenced for the real JintTemplateEngine: what these tests
+      attack is the engine the daemon runs, not a copy.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="../../src/execution/Execution.Domain/Execution.Domain.csproj"/>
+        <ProjectReference Include="../../src/execution/Execution.Application/Execution.Application.csproj"/>
+        <ProjectReference Include="../../src/execution/Execution.Infrastructure/Execution.Infrastructure.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="Xunit"/>
+    </ItemGroup>
+
+</Project>

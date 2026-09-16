@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+      What one context may ask another about a loaded definition, layered over the model the same
+      way Common.Workflow.Validation layers the document's shape rules over it. It lives here
+      rather than in the definition module because the module that answers the question and the
+      module that asks it must not reference each other.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="../Common.Workflow/Common.Workflow.csproj"/>
+    </ItemGroup>
+
+</Project>

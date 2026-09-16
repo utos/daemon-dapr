@@ -30,7 +30,7 @@ public class WorkflowExecutionBehaviorTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to complete
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -38,7 +38,7 @@ public class WorkflowExecutionBehaviorTests(DaemonTestFixture fixture)
             ExecutionId = response.Id
         });
 
-        await call.CollectUntilCompletion(TimeSpan.FromSeconds(300));
+        await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
         // Assert - Verify WireMock received the HTTP call
         var logEntries = fixture.WireMockServer.LogEntries;
@@ -80,7 +80,7 @@ public class WorkflowExecutionBehaviorTests(DaemonTestFixture fixture)
             .BuildSequential();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Wait for workflow to complete
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest

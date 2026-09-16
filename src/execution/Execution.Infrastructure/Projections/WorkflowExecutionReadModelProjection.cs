@@ -1,7 +1,8 @@
 using System.Text.Json;
 using Common.Infrastructure.Projections;
 using Common.SeedWork;
-using Google.Protobuf;
+using Common.Workflow;
+using Common.Workflow.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Execution.Domain.Events;
@@ -15,22 +16,21 @@ public class WorkflowExecutionReadModelProjection(
     ILogger<WorkflowExecutionReadModelProjection> logger)
     : DbProjection(dbContext, logger)
 {
-    private static readonly JsonFormatter Formatter = new(JsonFormatter.Settings.Default);
+    // Persisted as the domain model's own JSON, matching what ReadModelToDtoExtensions reads back.
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = false,
-        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.Strict
-    };
+    // Shared with everything else that reads or writes untyped run data. The local copy this
+    // replaces set only WriteIndented = false and NumberHandling.Strict — both already the
+    // defaults — so it configured nothing while omitting the converter it needed.
+    private static JsonSerializerOptions JsonOptions => WorkflowJson.Options;
 
     public override bool CanHandle(Type eventType)
     {
         return eventType == typeof(WorkflowExecutionCreatedEvent)
-               || eventType == typeof(SubWorkflowCreatedEvent)
                || eventType == typeof(WorkflowExecutionScheduledEvent)
                || eventType == typeof(WorkflowExecutionActiveEvent)
                || eventType == typeof(WorkflowExecutionCompletedEvent)
-               || eventType == typeof(WorkflowExecutionFailedEvent);
+               || eventType == typeof(WorkflowExecutionFailedEvent)
+               || eventType == typeof(WorkflowExecutionCancelledEvent);
     }
 
     protected override async Task ProjectEventAsync(IDomainEvent @event, long position,
@@ -40,10 +40,6 @@ public class WorkflowExecutionReadModelProjection(
         {
             case WorkflowExecutionCreatedEvent e:
                 await HandleCreatedEvent(e, cancellationToken);
-                break;
-
-            case SubWorkflowCreatedEvent e:
-                await HandleSubWorkflowCreatedEvent(e, cancellationToken);
                 break;
 
             case WorkflowExecutionScheduledEvent e:
@@ -61,8 +57,14 @@ public class WorkflowExecutionReadModelProjection(
             case WorkflowExecutionFailedEvent e:
                 await HandleFailedEvent(e, cancellationToken);
                 break;
+
+            case WorkflowExecutionCancelledEvent e:
+                await HandleCancelledEvent(e, cancellationToken);
+                break;
         }
     }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     private Task HandleCreatedEvent(WorkflowExecutionCreatedEvent @event, CancellationToken _)
     {
@@ -74,35 +76,18 @@ public class WorkflowExecutionReadModelProjection(
             Id = @event.ExecutionId,
             ParentExecutionId = null,
             Status = ReadModelStatus.Unspecified,
-            WorkflowName = entryWorkflow.Metadata.Name,
-            WorkflowVersion = entryWorkflow.Metadata.Version,
-            WorkflowDefinitionJson = Formatter.Format(@event.Bundle),
-            InputJson = @event.Input.Count > 0 ? JsonSerializer.Serialize(@event.Input, JsonOptions) : null
+            // WorkflowIdentity normalises absent-vs-empty for namespace and registry, so "no
+            // namespace" has a single representation for both querying and response mapping.
+            Identity = WorkflowIdentity.From(entryWorkflow.Metadata),
+            WorkflowDigest = NullIfEmpty(@event.Digest),
+            WorkflowDefinitionJson = JsonSerializer.Serialize(@event.Bundle),
+            InputJson = @event.Input.Count > 0 ? JsonSerializer.Serialize(@event.Input, JsonOptions) : null,
+            EnvJson = @event.Env.Count > 0 ? JsonSerializer.Serialize(@event.Env) : null
         };
 
         dbContext.WorkflowExecutions.Add(readModel);
 
         logger.LogDebug("Created read model for execution {ExecutionId}", @event.ExecutionId);
-
-        return Task.CompletedTask;
-    }
-
-    private Task HandleSubWorkflowCreatedEvent(SubWorkflowCreatedEvent @event, CancellationToken _)
-    {
-        var readModel = new WorkflowExecutionReadModel
-        {
-            Id = @event.ExecutionId,
-            ParentExecutionId = @event.ParentExecutionId,
-            Status = ReadModelStatus.Active,
-            WorkflowName = @event.WorkflowName,
-            WorkflowVersion = @event.WorkflowVersion,
-            StartedAt = @event.DateOccurred
-        };
-
-        dbContext.WorkflowExecutions.Add(readModel);
-
-        logger.LogDebug("Created read model for sub-workflow execution {ExecutionId} (parent: {ParentId})",
-            @event.ExecutionId, @event.ParentExecutionId);
 
         return Task.CompletedTask;
     }
@@ -175,8 +160,31 @@ public class WorkflowExecutionReadModelProjection(
         readModel.Status = ReadModelStatus.Failed;
         readModel.FailedAt = @event.DateOccurred;
         readModel.ErrorMessage = @event.Reason;
+        readModel.ErrorCode = @event.Code;
 
         logger.LogDebug("Updated read model to {Status} for execution {ExecutionId}", ReadModelStatus.Failed,
+            @event.ExecutionId);
+    }
+
+    private async Task HandleCancelledEvent(WorkflowExecutionCancelledEvent @event, CancellationToken cancellationToken)
+    {
+        var readModel = await dbContext.WorkflowExecutions
+            .FirstOrDefaultAsync(e => e.Id == @event.ExecutionId, cancellationToken);
+
+        if (readModel == null)
+        {
+            logger.LogWarning("Read model not found for execution {ExecutionId}", @event.ExecutionId);
+            return;
+        }
+
+        readModel.Status = ReadModelStatus.Cancelled;
+        readModel.CancelledAt = @event.DateOccurred;
+
+        // Deliberately not ErrorMessage: a run stopped on purpose has not errored, and a client
+        // reading the summary should not need to know the status to interpret the field.
+        readModel.CancellationReason = @event.Reason;
+
+        logger.LogDebug("Updated read model to {Status} for execution {ExecutionId}", ReadModelStatus.Cancelled,
             @event.ExecutionId);
     }
 }

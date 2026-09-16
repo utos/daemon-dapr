@@ -6,13 +6,23 @@
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
+        <PackageReference Include="FluentValidation"/>
+        <PackageReference Include="Mediator.Abstractions" />
+        <!--
+          The Mediator implementation is source-generated once, here at the composition root:
+          it is the only place from which every module's application layer is visible.
+        -->
+        <PackageReference Include="Mediator.SourceGenerator" PrivateAssets="all" />
     </ItemGroup>
 
+    <!-- Modules are composed through their Api layer; nothing deeper is referenced. -->
     <ItemGroup>
         <ProjectReference Include="../../common/Common.Constants/Common.Constants.csproj"/>
+        <ProjectReference Include="../../common/Common.Application/Common.Application.csproj"/>
         <ProjectReference Include="../../tools/Tools.ServiceDefaults/Tools.ServiceDefaults.csproj"/>
-        <ProjectReference Include="../../execution/Execution.Infrastructure/Execution.Infrastructure.csproj"/>
-        <ProjectReference Include="../../observability/Observability.Infrastructure/Observability.Infrastructure.csproj"/>
+        <ProjectReference Include="../../definition/Definition.Api/Definition.Api.csproj"/>
+        <ProjectReference Include="../../execution/Execution.Api/Execution.Api.csproj"/>
+        <ProjectReference Include="../../observability/Observability.Api/Observability.Api.csproj"/>
     </ItemGroup>
 
 </Project>

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- No Utos.*, no Grpc.*: the wire format stops at Observability.Api. -->
+    <ItemGroup>
+        <PackageReference Include="Mediator.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Observability.Domain/Observability.Domain.csproj"/>
+        <ProjectReference Include="../../common/Common.SeedWork/Common.SeedWork.csproj"/>
+        <!-- How this module learns a run ended, without knowing the module that ran it. -->
+        <ProjectReference Include="../../common/Common.ExecutionLifecycle/Common.ExecutionLifecycle.csproj"/>
+    </ItemGroup>
+
+</Project>

@@ -1,0 +1,8 @@
+{
+  "form": "value",
+  "expression": "[new Date().toISOString(), Date.now() === new Date().getTime(), new Date(Date.now() + 3600 * 1000).toISOString(), new Date('2026-01-01T00:00:00Z').getUTCFullYear()]",
+  "scope": { "input": {} },
+  "clock": "2026-09-15T10:00:00.000Z",
+  "seed": "6f2c8f5e-3b1a-4c7d-9e0f-1a2b3c4d5e6f",
+  "expect": { "value": ["2026-09-15T10:00:00.000Z", true, "2026-09-15T11:00:00.000Z", 2026] }
+}

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- No Utos.*, no Grpc.*: the wire format stops at Execution.Api. -->
+    <ItemGroup>
+        <PackageReference Include="FluentValidation"/>
+        <PackageReference Include="Mediator.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Execution.Domain/Execution.Domain.csproj"/>
+        <!-- The wire error codes, which a cancelled run's terminal output entry carries. -->
+        <ProjectReference Include="../../common/Common.Constants/Common.Constants.csproj"/>
+        <!-- The contract for resolving a reference, not the module that answers it. -->
+        <ProjectReference Include="../../common/Common.Workflow.Resolution/Common.Workflow.Resolution.csproj"/>
+    </ItemGroup>
+
+</Project>

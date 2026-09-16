@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Definition.Application/Definition.Application.csproj"/>
+        <ProjectReference Include="../Definition.Infrastructure/Definition.Infrastructure.csproj"/>
+        <ProjectReference Include="../../common/Common.Workflow.Proto/Common.Workflow.Proto.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Utos.Workflow" />
+        <PackageReference Include="Utos.Workflow.Validation" />
+        <PackageReference Include="Utos.Daemon.Server" />
+        <PackageReference Include="FluentValidation"/>
+        <PackageReference Include="Grpc.AspNetCore" />
+        <PackageReference Include="Mediator.Abstractions" />
+    </ItemGroup>
+
+</Project>

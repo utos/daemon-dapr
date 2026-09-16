@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "utos.base64UrlDecode(input.data)",
+  "scope": { "input": { "data": "SGk" } },
+  "expect": { "error": "UTOS-E120" }
+}

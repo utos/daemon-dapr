@@ -1,14 +1,32 @@
 using System.Text.Json.Serialization;
 using Common.SeedWork;
-using Utos.Workflow.V1;
-using Execution.Domain.Serialization;
+using Common.Workflow;
+using Common.Workflow.Serialization;
 
 namespace Execution.Domain.Events;
 
+[EventType("utos.execution.created")]
 public record WorkflowExecutionCreatedEvent(
-    Guid ExecutionId,
-    [property: JsonConverter(typeof(WorkflowBundleJsonConverter))]
+    ExecutionId ExecutionId,
     WorkflowBundle Bundle,
+    // Annotated rather than left to EventSerializer's options, which are deliberately the
+    // defaults: without this the values rehydrate as JsonElement, and every consumer downstream —
+    // the projection, the execution context, the gRPC egress — has to know that. The converter
+    // writes exactly what the default writer wrote, which EventJsonShapeTests pins.
+    [property: JsonConverter(typeof(StringObjectDictionaryJsonConverter))]
     Dictionary<string, object> Input,
     string StartActivity,
-    DateTime DateOccurred) : IDomainEvent;
+    DateTime DateOccurred,
+    // Ambient environment for the run. Nullable rather than upcast: an added optional field is
+    // the cheaper of the two evolutions, and it costs no version bump. Events persisted before
+    // this field existed carry no value — read it through Env rather than directly.
+    Dictionary<string, string>? AmbientEnv = null,
+    // Content digest of the snapshotted bundle, resolved at schedule time. Not derivable
+    // from the bundle itself. Nullable for the same reason as AmbientEnv (and because
+    // sub-workflow runs never set it).
+    string? Digest = null) : IDomainEvent
+{
+    /// <summary>Ambient environment, empty for events written before the field existed.</summary>
+    [JsonIgnore]
+    public Dictionary<string, string> Env => AmbientEnv ?? new Dictionary<string, string>();
+}

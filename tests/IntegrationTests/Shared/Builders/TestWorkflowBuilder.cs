@@ -1,8 +1,20 @@
+using Common.Constants;
 using Google.Protobuf.WellKnownTypes;
 using Utos.Daemon.V1;
-using Utos.Workflow.V1;
+using Utos.Workflows.V1;
 
 namespace IntegrationTests.Shared.Builders;
+
+/// <summary>
+/// What a test wants to run. Since v0.0.10 a bundle is no longer shipped on the schedule
+/// call, so this is loaded into the daemon's definition store first and then scheduled by
+/// reference — see <c>DaemonTestFixture.ScheduleAsync</c>.
+/// </summary>
+public sealed record TestWorkflowRequest(
+    WorkflowBundle Bundle,
+    ExecutionPayload Input,
+    string StartActivity,
+    Dictionary<string, string> Env);
 
 public class TestWorkflowBuilder
 {
@@ -12,6 +24,7 @@ public class TestWorkflowBuilder
     private readonly string? _description;
     private readonly List<(string Name, WorkflowActivity Activity)> _activities = [];
     private readonly ExecutionPayload _input = new();
+    private readonly Dictionary<string, string> _env = new();
     private readonly Dictionary<string, Workflow> _dependentWorkflows = new();
 
     public TestWorkflowBuilder(string workflowName, string mockBaseUrl,
@@ -43,14 +56,42 @@ public class TestWorkflowBuilder
         return AddHttpActivity(name, path, "DELETE", null, customUrl);
     }
 
+    /// <summary>
+    /// Awaits the sub-workflow; its result becomes the activity's output.
+    /// <paramref name="onEmitted"/> makes this caller the child's privileged consumer — without
+    /// it the caller sees only the terminal value, and the child emits without waiting.
+    /// </summary>
     public ActivityBuilder WorkflowCall(string activityName, string targetWorkflow,
-        string startActivity, Struct? input = null)
+        string startActivity, Struct? input = null,
+        IEnumerable<EmissionRule>? onEmitted = null) =>
+        SubWorkflow(activityName, targetWorkflow, startActivity, input,
+            config =>
+            {
+                var call = new CallActivityConfig();
+                if (onEmitted != null)
+                    call.OnEmitted.AddRange(onEmitted);
+                config.Call = call;
+            });
+
+    /// <summary>
+    /// Starts the sub-workflow and moves on. The activity's output is a handle to the run rather
+    /// than a result, and the child outlives the parent.
+    /// </summary>
+    public ActivityBuilder WorkflowSpawn(string activityName, string targetWorkflow,
+        string startActivity, Struct? input = null) =>
+        SubWorkflow(activityName, targetWorkflow, startActivity, input,
+            config => config.Spawn = new SpawnActivityConfig());
+
+    private ActivityBuilder SubWorkflow(string activityName, string targetWorkflow,
+        string startActivity, Struct? input, Action<WorkflowActivityConfig> setMode)
     {
         var config = new WorkflowActivityConfig
         {
             Workflow = targetWorkflow,
             StartActivity = startActivity
         };
+
+        setMode(config);
 
         if (input != null)
             config.Input = input;
@@ -71,8 +112,8 @@ public class TestWorkflowBuilder
 
         var workflow = new Workflow
         {
-            ApiVersion = WorkflowApiVersion.V100,
-            Kind = WorkflowKind.WorkflowUtos,
+            ApiVersion = WorkflowDocument.ApiVersion,
+            Kind = WorkflowDocument.Kind,
             Metadata = new WorkflowMetadata
             {
                 Name = workflowName,
@@ -99,7 +140,14 @@ public class TestWorkflowBuilder
         return this;
     }
 
-    public ScheduleExecutionRequest Build(string? startActivity = null)
+    /// <summary>Ambient config for the run, reachable from every activity as {{ env.key }}.</summary>
+    public TestWorkflowBuilder WithEnv(string key, string value)
+    {
+        _env[key] = value;
+        return this;
+    }
+
+    public TestWorkflowRequest Build(string? startActivity = null)
     {
         var spec = new WorkflowSpec();
         foreach (var (name, activity) in _activities)
@@ -107,8 +155,8 @@ public class TestWorkflowBuilder
 
         var workflow = new Workflow
         {
-            ApiVersion = WorkflowApiVersion.V100,
-            Kind = WorkflowKind.WorkflowUtos,
+            ApiVersion = WorkflowDocument.ApiVersion,
+            Kind = WorkflowDocument.Kind,
             Metadata = new WorkflowMetadata
             {
                 Name = _workflowName,
@@ -118,21 +166,108 @@ public class TestWorkflowBuilder
             Spec = spec
         };
 
-        var bundle = new WorkflowBundle { EntryPoint = _workflowName };
-        bundle.Workflows.Add(_workflowName, workflow);
+        // A sub-workflow activity names its target by canonical identity once the bundle is built
+        // (UTOS-B006), while a test names it by workflow name — resolved here, the same way the
+        // CLI resolves a dependency alias. Every workflow in the bundle is rewritten, not just the
+        // entry point, because a dependent may itself call another one.
+        var identities = _dependentWorkflows.ToDictionary(
+            dependent => dependent.Key,
+            dependent => WorkflowIdentity.FormatMetadata(dependent.Value.Metadata));
+
+        // Keyed by canonical identity rather than by name: UTOS-B005 requires every key to equal
+        // the identity derived from that workflow's own metadata, which is what makes a bundle
+        // self-describing.
+        var identity = WorkflowIdentity.FormatMetadata(workflow.Metadata);
+
+        ResolveSubWorkflowReferences(spec, identities, identity);
+        foreach (var (name, dependent) in _dependentWorkflows)
+            ResolveSubWorkflowReferences(dependent.Spec, identities, identities[name]);
+
+        var bundle = new WorkflowBundle { EntryPoint = identity };
+        bundle.Workflows.Add(identity, workflow);
 
         foreach (var (name, depWorkflow) in _dependentWorkflows)
-            bundle.Workflows.Add(name, depWorkflow);
+            bundle.Workflows.Add(identities[name], depWorkflow);
 
-        return new ScheduleExecutionRequest
-        {
-            Bundle = bundle,
-            Input = _input,
-            StartActivity = startActivity ?? (_activities.Count > 0 ? _activities[0].Name : "")
-        };
+        return new TestWorkflowRequest(
+            bundle,
+            _input,
+            startActivity ?? (_activities.Count > 0 ? _activities[0].Name : ""),
+            _env);
     }
 
-    public ScheduleExecutionRequest BuildSequential(string? startActivity = null)
+    /// <summary>
+    /// Rewrites every place a document is named — a sub-workflow activity, a promise branch, an
+    /// <c>onEmitted</c> rule — from a workflow name to the canonical identity it resolves to,
+    /// standing in for what the CLI does to a dependency alias.
+    /// <para>
+    /// <c>self</c> resolves to <paramref name="ownIdentity"/>, the identity of the document the
+    /// reference is written in, which is why this is called once per document rather than over
+    /// the bundle. That is also the only reason a daemon test may write <c>self</c> at all: the
+    /// word never reaches a bundle, so resolving it here is what keeps these fixtures readable
+    /// without pretending the daemon understands it.
+    /// </para>
+    /// <para>
+    /// Anything unrecognised is left alone, so a test can still assert on a deliberately dangling
+    /// reference.
+    /// </para>
+    /// </summary>
+    private static void ResolveSubWorkflowReferences(
+        WorkflowSpec spec, IReadOnlyDictionary<string, string> identities, string ownIdentity)
+    {
+        string Resolve(string reference) =>
+            reference == SelfReference ? ownIdentity
+            : identities.TryGetValue(reference, out var identity) ? identity
+            : reference;
+
+        foreach (var activity in spec.Activities.Values)
+        {
+            switch (activity.ConfigCase)
+            {
+                case WorkflowActivity.ConfigOneofCase.Workflow:
+                    activity.Workflow.Workflow = Resolve(activity.Workflow.Workflow);
+
+                    if (activity.Workflow.ModeCase == WorkflowActivityConfig.ModeOneofCase.Call)
+                        foreach (var rule in activity.Workflow.Call.OnEmitted)
+                        {
+                            // Only a handler names a document. A transition names an activity in
+                            // the consuming workflow and a result names nothing, so neither is
+                            // resolved — the same distinction the CLI draws when it rewrites
+                            // aliases.
+                            if (rule.ActionCase != EmissionRule.ActionOneofCase.Handle) continue;
+
+                            // The CLI rejects this (UTOS-S011), so a fixture that writes it is
+                            // testing a document no author could build. Worth failing loudly here
+                            // rather than at the far end: a handler in the consumer's own graph can
+                            // transition back to the call activity, which in the handler's own
+                            // execution starts a second producer instead of resuming the first —
+                            // once per value, which presents as the suite hanging.
+                            if (rule.Handle.Workflow == SelfReference)
+                                throw new InvalidOperationException(
+                                    "An onEmitted rule may not dispatch 'self' (UTOS-S011). "
+                                    + "Give the handler its own document with AddDependentWorkflow.");
+
+                            rule.Handle.Workflow = Resolve(rule.Handle.Workflow);
+                        }
+
+                    break;
+
+                case WorkflowActivity.ConfigOneofCase.Promise:
+                    foreach (var branch in activity.Promise.Branches)
+                        branch.Workflow = Resolve(branch.Workflow);
+
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// What a test writes to dispatch the document under construction. Resolved away in
+    /// <see cref="Build"/>, exactly as the CLI resolves it before a bundle exists.
+    /// </summary>
+    public const string SelfReference = "self";
+
+    public TestWorkflowRequest BuildSequential(string? startActivity = null)
     {
         for (var i = 0; i < _activities.Count - 1; i++)
             _activities[i].Activity.OnSuccess.Add(new TransitionRule
@@ -160,11 +295,46 @@ public class TestWorkflowBuilder
         return new ActivityBuilder(this, activity);
     }
 
+    /// <summary>A durable delay. Its input passes through unchanged as its output.</summary>
+    public ActivityBuilder Timer(string name, TimeSpan duration)
+    {
+        var activity = new WorkflowActivity
+        {
+            Timer = new TimerActivityConfig { Duration = Duration.FromTimeSpan(duration) }
+        };
+
+        _activities.Add((name, activity));
+        return new ActivityBuilder(this, activity);
+    }
+
+    /// <summary>Builds a timer whose duration is set directly, for validation tests.</summary>
+    public ActivityBuilder RawTimer(string name, Duration? duration)
+    {
+        var config = new TimerActivityConfig();
+        if (duration != null)
+            config.Duration = duration;
+
+        var activity = new WorkflowActivity { Timer = config };
+        _activities.Add((name, activity));
+        return new ActivityBuilder(this, activity);
+    }
+
+    /// <summary>
+    /// Fan-out. <paramref name="mode"/> stays a string so the suites keep reading the way a
+    /// workflow is authored; it selects the completion oneof rather than being carried as one.
+    /// </summary>
     public PromiseBranchListBuilder Promise(string activityName, string mode, int requiredCount = 0)
     {
-        var config = new PromiseActivityConfig { Mode = mode };
-        if (requiredCount > 0)
-            config.RequiredCount = requiredCount;
+        var config = new PromiseActivityConfig();
+
+        switch (mode)
+        {
+            case "all": config.All = new PromiseAllConfig(); break;
+            case "any": config.Any = new PromiseAnyConfig(); break;
+            case "race": config.Race = new PromiseRaceConfig(); break;
+            case "count": config.Count = new PromiseCountConfig { RequiredCount = requiredCount }; break;
+            default: throw new ArgumentException($"Unknown promise mode '{mode}'.", nameof(mode));
+        }
 
         var activity = new WorkflowActivity { Promise = config };
         _activities.Add((activityName, activity));
@@ -220,9 +390,112 @@ public class ActivityBuilder
         return this;
     }
 
-    public ActivityBuilder OnReturn(Struct returnValue, string? when = null)
+    public ActivityBuilder OnResult(Struct resultValue, string? when = null)
     {
-        var rule = new TransitionRule { Return = returnValue };
+        var rule = new TransitionRule { Result = resultValue };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnSuccess.Add(rule);
+        return this;
+    }
+
+    /// <summary>
+    /// Ends the path with no value — an empty <c>result</c>, which is what a bare <c>return</c>
+    /// in the source format becomes. There is no <c>end</c> target since spec 0.0.16.
+    /// </summary>
+    public ActivityBuilder OnEnd(string? when = null)
+    {
+        var rule = new TransitionRule { Result = new Struct() };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnSuccess.Add(rule);
+        return this;
+    }
+
+    /// <summary>
+    /// Fails the run with what the author wrote: a literal <paramref name="code"/>, a
+    /// <paramref name="message"/> text template and <paramref name="details"/> struct template.
+    /// </summary>
+    public ActivityBuilder OnError(string code, string? message = null, Struct? details = null, string? when = null)
+    {
+        _activity.OnSuccess.Add(ErrorRule(code, message, details, when));
+        return this;
+    }
+
+    /// <summary>
+    /// Where the run goes when this activity fails. Note the asymmetry with
+    /// <see cref="OnSuccess"/>: if no rule here matches, the failure is unhandled and keeps
+    /// travelling, rather than the run completing.
+    /// </summary>
+    public ActivityBuilder OnFailure(string targetActivity, Struct? input = null, string? when = null)
+    {
+        var target = new TransitionTarget { Name = targetActivity };
+        if (input != null)
+            target.Input = input;
+
+        var rule = new TransitionRule { Transition = target };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnFailure.Add(rule);
+        return this;
+    }
+
+    /// <summary>Ends the run with <paramref name="resultValue"/> when this activity fails.</summary>
+    public ActivityBuilder OnFailureResult(Struct resultValue, string? when = null)
+    {
+        var rule = new TransitionRule { Result = resultValue };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnFailure.Add(rule);
+        return this;
+    }
+
+    /// <summary>
+    /// Fails the run with an authored error when this activity fails — replacing the cause with
+    /// what the author wrote, which may of course quote it: <c>{{ error.message }}</c>.
+    /// </summary>
+    public ActivityBuilder OnFailureError(string code, string? message = null, Struct? details = null, string? when = null)
+    {
+        _activity.OnFailure.Add(ErrorRule(code, message, details, when));
+        return this;
+    }
+
+    internal static TransitionRule ErrorRule(string code, string? message, Struct? details, string? when)
+    {
+        var error = new Utos.Workflows.V1.WorkflowError { Code = code };
+        if (message != null)
+            error.Message = message;
+        if (details != null)
+            error.Details = details;
+
+        var rule = new TransitionRule { Error = error };
+        if (when != null)
+            rule.Condition = when;
+
+        return rule;
+    }
+
+    /// <summary>
+    /// Appends <paramref name="value"/> to the run's output stream and carries on to
+    /// <paramref name="targetActivity"/>. Emit-and-continue, as against <see cref="OnResult"/>'s
+    /// emit-and-terminate.
+    /// </summary>
+    public ActivityBuilder OnEmit(Struct value, string targetActivity,
+        Struct? input = null, string? when = null)
+    {
+        var target = new TransitionTarget { Name = targetActivity };
+        if (input != null)
+            target.Input = input;
+
+        var rule = new TransitionRule { Emit = new EmitAction { Value = value, Transition = target } };
 
         if (when != null)
             rule.Condition = when;
@@ -263,9 +536,20 @@ public class ActivityBuilder
         return _parent.WorkflowCall(activityName, targetWorkflow, startActivity, input);
     }
 
+    public ActivityBuilder WorkflowSpawn(string activityName, string targetWorkflow,
+        string startActivity, Struct? input = null)
+    {
+        return _parent.WorkflowSpawn(activityName, targetWorkflow, startActivity, input);
+    }
+
     public PromiseBranchListBuilder Promise(string activityName, string mode, int requiredCount = 0)
     {
         return _parent.Promise(activityName, mode, requiredCount);
+    }
+
+    public ActivityBuilder Timer(string name, TimeSpan duration)
+    {
+        return _parent.Timer(name, duration);
     }
 
     public TestWorkflowBuilder AddDependentWorkflow(string workflowName, Action<TestWorkflowBuilder> configure)
@@ -283,12 +567,17 @@ public class ActivityBuilder
         return _parent.WithInput(payload);
     }
 
-    public ScheduleExecutionRequest Build(string? startActivity = null)
+    public TestWorkflowBuilder WithEnv(string key, string value)
+    {
+        return _parent.WithEnv(key, value);
+    }
+
+    public TestWorkflowRequest Build(string? startActivity = null)
     {
         return _parent.Build(startActivity);
     }
 
-    public ScheduleExecutionRequest BuildSequential(string? startActivity = null)
+    public TestWorkflowRequest BuildSequential(string? startActivity = null)
     {
         return _parent.BuildSequential(startActivity);
     }
@@ -305,17 +594,27 @@ public class PromiseBranchListBuilder
         _activity = activity;
     }
 
-    public PromiseBranchListBuilder Branch(string name, string targetActivity,
+    /// <summary>
+    /// A branch dispatching <paramref name="startActivity"/> of <paramref name="workflow"/>.
+    /// <para>
+    /// <paramref name="workflow"/> is a canonical identity, not an alias: these fixtures are
+    /// bundles, and the CLI has already resolved every alias — including <c>self</c> — by the time
+    /// one exists. Fanning out over the document under construction means passing its own key,
+    /// which <see cref="TestWorkflowBuilder.SelfKey"/> supplies.
+    /// </para>
+    /// </summary>
+    public PromiseBranchListBuilder Branch(string name, string workflow, string startActivity,
         Struct? input = null, string? condition = null)
     {
         var branch = new PromiseBranch
         {
             Name = name,
-            Target = new TransitionTarget { Name = targetActivity }
+            Workflow = workflow,
+            StartActivity = startActivity
         };
 
         if (input != null)
-            branch.Target.Input = input;
+            branch.Input = input;
 
         if (condition != null)
             branch.Condition = condition;
@@ -324,13 +623,14 @@ public class PromiseBranchListBuilder
         return this;
     }
 
-    public PromiseBranchListBuilder ForEachBranch(string name, string targetActivity,
-        string collection, string alias, Struct? input = null)
+    public PromiseBranchListBuilder ForEachBranch(string name, string workflow,
+        string startActivity, string collection, string alias, Struct? input = null)
     {
         var branch = new PromiseBranch
         {
             Name = name,
-            Target = new TransitionTarget { Name = targetActivity },
+            Workflow = workflow,
+            StartActivity = startActivity,
             ForEach = new ForEachConfig
             {
                 Collection = collection,
@@ -339,7 +639,7 @@ public class PromiseBranchListBuilder
         };
 
         if (input != null)
-            branch.Target.Input = input;
+            branch.Input = input;
 
         _activity.Promise.Branches.Add(branch);
         return this;
@@ -359,13 +659,39 @@ public class PromiseBranchListBuilder
         return this;
     }
 
-    public PromiseBranchListBuilder OnReturn(Struct returnValue, string? when = null)
+    public PromiseBranchListBuilder OnResult(Struct resultValue, string? when = null)
     {
-        var rule = new TransitionRule { Return = returnValue };
+        var rule = new TransitionRule { Result = resultValue };
         if (when != null)
             rule.Condition = when;
 
         _activity.OnSuccess.Add(rule);
+        return this;
+    }
+
+    /// <summary>Ends the path with no value once the promise resolves.</summary>
+    public PromiseBranchListBuilder OnEnd(string? when = null)
+    {
+        var rule = new TransitionRule { Result = new Struct() };
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnSuccess.Add(rule);
+        return this;
+    }
+
+    /// <summary>Where the run goes when the promise itself fails — a mode that cannot be satisfied.</summary>
+    public PromiseBranchListBuilder OnFailure(string targetActivity, Struct? input = null, string? when = null)
+    {
+        var target = new TransitionTarget { Name = targetActivity };
+        if (input != null)
+            target.Input = input;
+
+        var rule = new TransitionRule { Transition = target };
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnFailure.Add(rule);
         return this;
     }
 
@@ -379,12 +705,17 @@ public class PromiseBranchListBuilder
         return _parent.WithInput(key, value);
     }
 
-    public ScheduleExecutionRequest Build(string? startActivity = null)
+    public TestWorkflowBuilder WithEnv(string key, string value)
+    {
+        return _parent.WithEnv(key, value);
+    }
+
+    public TestWorkflowRequest Build(string? startActivity = null)
     {
         return _parent.Build(startActivity);
     }
 
-    public ScheduleExecutionRequest BuildSequential(string? startActivity = null)
+    public TestWorkflowRequest BuildSequential(string? startActivity = null)
     {
         return _parent.BuildSequential(startActivity);
     }

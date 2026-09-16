@@ -1,3 +1,4 @@
+using Common.Constants;
 using Common.Infrastructure.EventHandling;
 using Common.Infrastructure.EventStore;
 using Common.Infrastructure.Extensions;
@@ -17,7 +18,7 @@ public class WorkflowExecutionEventProcessor(
     ILogger<WorkflowExecutionEventProcessor> logger)
     : BackgroundService
 {
-    private const string GroupName = "workflow-event-processor";
+    private const string GroupName = SubscriptionName.WorkflowEventProcessor;
 
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
@@ -59,7 +60,10 @@ public class WorkflowExecutionEventProcessor(
         {
             await persistentSubscriptionsClient.CreateToAllAsync(
                 GroupName,
-                EventTypeFilter.Prefix("Execution.Domain.Events"),
+                // The stored names declared by [EventType], not a namespace. The filter is fixed
+                // server-side when the group is created, which is why a change to either this
+                // prefix or the naming scheme has to come with a new GroupName.
+                EventTypeFilter.Prefix("utos.execution."),
                 new PersistentSubscriptionSettings(),
                 cancellationToken: cancellationToken);
 
@@ -77,13 +81,10 @@ public class WorkflowExecutionEventProcessor(
         var eventType = resolvedEvent.GetEventType();
         var metadata = resolvedEvent.GetMetadata();
 
+        // Deliberately unguarded. An event that cannot be read throws, and the caller parks it —
+        // where it can be inspected and replayed — rather than acking it away, which is what
+        // returning early did: the projection never ran and the read model diverged in silence.
         var domainEvent = eventSerializer.DeserializeEvent(eventType, eventData, metadata);
-
-        if (domainEvent == null)
-        {
-            logger.LogWarning("Failed to deserialize event {EventType}", eventType);
-            return;
-        }
 
         var position = resolvedEvent.GetEventNumber();
 

@@ -1,3 +1,4 @@
+using Grpc.Core;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
@@ -17,14 +18,14 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         var execution = await WaitForExecutionInList(scheduleResponse.Id, TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.NotNull(execution);
         Assert.Equal(scheduleResponse.Id, execution.Id);
-        Assert.Equal("list-basic-test", execution.WorkflowName);
-        Assert.Equal("1.0.0", execution.WorkflowVersion);
+        Assert.Equal("list-basic-test", execution.Workflow.Name);
+        Assert.Equal("1.0.0", execution.Workflow.Version);
     }
 
     [Fact]
@@ -36,7 +37,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         var execution = await WaitForExecutionInList(scheduleResponse.Id, TimeSpan.FromSeconds(5));
 
         // Assert
@@ -60,7 +61,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         var execution = await WaitForExecutionInList(scheduleResponse.Id, TimeSpan.FromSeconds(5));
 
         // Assert
@@ -80,14 +81,14 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
         var request1 = new TestWorkflowBuilder($"order-test-{testId}-1", fixture.MockBaseUrl)
             .HttpGet("valid-activity", "/success")
             .Build();
-        var execution1 = await fixture.DaemonClient.ScheduleExecutionAsync(request1);
+        var execution1 = await fixture.ScheduleAsync(request1);
 
         await Task.Delay(200); // Ensure different timestamps
 
         var request2 = new TestWorkflowBuilder($"order-test-{testId}-2", fixture.MockBaseUrl)
             .HttpGet("valid-activity", "/success")
             .Build();
-        var execution2 = await fixture.DaemonClient.ScheduleExecutionAsync(request2);
+        var execution2 = await fixture.ScheduleAsync(request2);
 
         // Wait for both projections
         await WaitForExecutionInList(execution1.Id, TimeSpan.FromSeconds(5));
@@ -98,7 +99,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
 
         // Assert - Find our test executions
         var ourExecutions = response.Executions
-            .Where(e => e.WorkflowName.StartsWith($"order-test-{testId}"))
+            .Where(e => e.Workflow.Name.StartsWith($"order-test-{testId}"))
             .ToList();
 
         Assert.Equal(2, ourExecutions.Count);
@@ -120,7 +121,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Wait for execution to reach at least Scheduled status
         var execution = await WaitForExecutionWithMinimumStatus(
@@ -142,7 +143,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Wait for execution to become active
         var execution = await WaitForExecutionWithMinimumStatus(
@@ -164,7 +165,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Wait for execution to complete
         var execution = await WaitForExecutionWithStatus(
@@ -193,7 +194,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
 
         // Wait for execution to fail
         var execution = await WaitForExecutionWithStatus(
@@ -204,8 +205,8 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
         // Assert
         Assert.NotNull(execution);
         Assert.Equal(ExecutionStatus.Failed, execution.Status);
-        Assert.NotNull(execution.ErrorMessage);
-        Assert.NotEmpty(execution.ErrorMessage);
+        Assert.NotNull(execution.Error);
+        Assert.NotEmpty(execution.Error.Message);
         Assert.NotNull(execution.FinishedAt);
     }
 
@@ -226,7 +227,7 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var scheduleResponse = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var scheduleResponse = await fixture.ScheduleAsync(request);
         var execution = await WaitForExecutionWithStatus(
             scheduleResponse.Id,
             ExecutionStatus.Failed,
@@ -234,9 +235,99 @@ public class ListExecutionsTests(DaemonTestFixture fixture)
 
         // Assert
         Assert.NotNull(execution);
-        if (execution.ErrorMessage != null)
-            Assert.True(execution.ErrorMessage.Length <= 200,
-                $"Error message should be truncated to 200 chars. Actual length: {execution.ErrorMessage.Length}");
+        if (execution.Error is { } error)
+            Assert.True(error.Message.Length <= 200,
+                $"Error message should be truncated to 200 chars. Actual length: {error.Message.Length}");
+    }
+
+    [Fact]
+    public async Task ListExecutions_FiltersByWorkflowName()
+    {
+        // Arrange - two distinct workflows
+        var testId = Guid.NewGuid().ToString("N")[..8];
+        var wantedName = $"filter-name-{testId}-wanted";
+        var otherName = $"filter-name-{testId}-other";
+
+        var wanted = await fixture.ScheduleAsync(new TestWorkflowBuilder(wantedName, fixture.MockBaseUrl)
+            .HttpGet("valid-activity", "/success").Build());
+        var other = await fixture.ScheduleAsync(new TestWorkflowBuilder(otherName, fixture.MockBaseUrl)
+            .HttpGet("valid-activity", "/success").Build());
+
+        await WaitForExecutionInList(wanted.Id, TimeSpan.FromSeconds(5));
+        await WaitForExecutionInList(other.Id, TimeSpan.FromSeconds(5));
+
+        // Act - filter to the wanted workflow
+        var response = await fixture.DaemonClient.ListExecutionsAsync(
+            new ListExecutionsRequest { Workflow = new WorkflowReference { Name = wantedName } });
+
+        // Assert - every returned row is the wanted workflow; the other is excluded
+        Assert.All(response.Executions, e => Assert.Equal(wantedName, e.Workflow.Name));
+        Assert.Contains(response.Executions, e => e.Id == wanted.Id);
+        Assert.DoesNotContain(response.Executions, e => e.Id == other.Id);
+    }
+
+    [Fact]
+    public async Task ListExecutions_FiltersByVersion_AndOmittedVersionMatchesAll()
+    {
+        // Arrange - same name, two versions
+        var testId = Guid.NewGuid().ToString("N")[..8];
+        var name = $"filter-version-{testId}";
+
+        var v1 = await fixture.ScheduleAsync(new TestWorkflowBuilder(name, fixture.MockBaseUrl, "1.0.0")
+            .HttpGet("valid-activity", "/success").Build());
+        var v2 = await fixture.ScheduleAsync(new TestWorkflowBuilder(name, fixture.MockBaseUrl, "2.0.0")
+            .HttpGet("valid-activity", "/success").Build());
+
+        await WaitForExecutionInList(v1.Id, TimeSpan.FromSeconds(5));
+        await WaitForExecutionInList(v2.Id, TimeSpan.FromSeconds(5));
+
+        // Act + Assert - version pins to a single version
+        var v1Only = await fixture.DaemonClient.ListExecutionsAsync(
+            new ListExecutionsRequest { Workflow = new WorkflowReference { Name = name, Version = "1.0.0" } });
+        Assert.Contains(v1Only.Executions, e => e.Id == v1.Id);
+        Assert.DoesNotContain(v1Only.Executions, e => e.Id == v2.Id);
+        Assert.All(v1Only.Executions, e => Assert.Equal("1.0.0", e.Workflow.Version));
+
+        // Act + Assert - omitting version matches all loaded versions
+        var allVersions = await fixture.DaemonClient.ListExecutionsAsync(
+            new ListExecutionsRequest { Workflow = new WorkflowReference { Name = name } });
+        Assert.Contains(allVersions.Executions, e => e.Id == v1.Id);
+        Assert.Contains(allVersions.Executions, e => e.Id == v2.Id);
+    }
+
+    [Fact]
+    public async Task ListExecutions_FiltersByDigest_AndResponseEchoesDigest()
+    {
+        // Arrange
+        var testId = Guid.NewGuid().ToString("N")[..8];
+        var name = $"filter-digest-{testId}";
+
+        var scheduled = await fixture.ScheduleAsync(new TestWorkflowBuilder(name, fixture.MockBaseUrl)
+            .HttpGet("valid-activity", "/success").Build());
+        var summary = await WaitForExecutionInList(scheduled.Id, TimeSpan.FromSeconds(5));
+
+        // The response now echoes the resolved bundle digest.
+        Assert.NotNull(summary);
+        Assert.False(string.IsNullOrEmpty(summary!.Workflow.Digest));
+        var digest = summary.Workflow.Digest;
+
+        // Act - filter by that exact digest
+        var response = await fixture.DaemonClient.ListExecutionsAsync(
+            new ListExecutionsRequest { Workflow = new WorkflowReference { Name = name, Digest = digest } });
+
+        // Assert
+        Assert.Contains(response.Executions, e => e.Id == scheduled.Id);
+        Assert.All(response.Executions, e => Assert.Equal(digest, e.Workflow.Digest));
+    }
+
+    [Fact]
+    public async Task ListExecutions_WithFilterButEmptyName_ReturnsInvalidArgument()
+    {
+        var call = fixture.DaemonClient.ListExecutionsAsync(
+            new ListExecutionsRequest { Workflow = new WorkflowReference { Name = "" } });
+
+        var ex = await Assert.ThrowsAsync<RpcException>(async () => await call.ResponseAsync);
+        Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
     }
 
     /// <summary>

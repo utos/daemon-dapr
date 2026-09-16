@@ -26,7 +26,7 @@ public class ExecutionFailureTests(DaemonTestFixture fixture)
             .Build();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Watch execution
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -35,13 +35,20 @@ public class ExecutionFailureTests(DaemonTestFixture fixture)
         });
 
         // Assert - Stream should close after workflow fails (store.Complete() called on terminal event)
-        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(300));
+        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
         // Should have received log events including a failure log
         var failureLog = events.FirstOrDefault(e =>
             e.Source == "system" &&
             e.Message.Contains("Workflow execution failed"));
         Assert.NotNull(failureLog);
+
+        // Should have received a structured terminal frame carrying the failed status and error
+        var terminal = events.FirstOrDefault(e => e.Status == ExecutionStatus.Failed);
+        Assert.NotNull(terminal);
+        Assert.NotNull(terminal.Error);
+        Assert.Equal("EXECUTION_FAILED", terminal.Error.Code);
+        Assert.False(string.IsNullOrEmpty(terminal.Error.Message));
 
         // Verify the failing activity was actually called
         var logEntries = fixture.WireMockServer.LogEntries;
@@ -97,7 +104,7 @@ public class ExecutionFailureTests(DaemonTestFixture fixture)
             .BuildSequential();
 
         // Act
-        var response = await fixture.DaemonClient.ScheduleExecutionAsync(request);
+        var response = await fixture.ScheduleAsync(request);
 
         // Watch execution
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest

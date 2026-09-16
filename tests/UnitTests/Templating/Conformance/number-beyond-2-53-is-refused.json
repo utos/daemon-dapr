@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "input.id",
+  "scope": { "input": { "id": 9007199254740993 } },
+  "expect": { "error": "UTOS-E104" }
+}

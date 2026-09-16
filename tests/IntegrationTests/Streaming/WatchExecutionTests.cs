@@ -24,7 +24,7 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("stream-test-workflow", fixture.MockBaseUrl)
             .HttpGet("stream-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // Act
         var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
@@ -32,11 +32,58 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
             ExecutionId = executionId
         });
 
-        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(1000));
+        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
 
         // Assert - Should receive log events
         Assert.NotEmpty(events);
         Assert.All(events, e => Assert.False(string.IsNullOrEmpty(e.Message)));
+    }
+
+    [Fact]
+    public async Task WhenExecutionSucceeds_ShouldEmitCompletedTerminalFrame()
+    {
+        // Arrange
+        var request = new TestWorkflowBuilder("terminal-success-workflow", fixture.MockBaseUrl)
+            .HttpGet("stream-activity", "/success")
+            .Build();
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
+
+        // Act
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = executionId
+        });
+
+        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        // Assert - a structured terminal frame with COMPLETED status and no error
+        var terminal = events.FirstOrDefault(e => e.Status == ExecutionStatus.Completed);
+        Assert.NotNull(terminal);
+        Assert.Null(terminal.Error);
+    }
+
+    [Fact]
+    public async Task WhenExecutionSucceeds_ShouldEmitExactlyOneTerminalFrame()
+    {
+        // The log store appends a terminal item and completes the buffer unconditionally, so a
+        // duplicate terminal event would put a second frame into the replayed history. Nothing
+        // downstream deduplicates; the guarantee is that the aggregate refuses to write a
+        // second terminal event in the first place.
+        var request = new TestWorkflowBuilder("terminal-once-workflow", fixture.MockBaseUrl)
+            .HttpGet("stream-activity", "/success")
+            .Build();
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
+
+        var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
+        {
+            ExecutionId = executionId
+        });
+
+        var events = await call.CollectUntilCompletion(TimeSpan.FromSeconds(30));
+
+        var terminals = events.Where(e => e.Status != ExecutionStatus.Unspecified).ToList();
+        Assert.Single(terminals);
+        Assert.Equal(ExecutionStatus.Completed, terminals[0].Status);
     }
 
     [Fact]
@@ -93,7 +140,7 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("concurrent-stream-workflow", fixture.MockBaseUrl)
             .HttpGet("stream-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // Act - Create multiple concurrent watch streams
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -136,7 +183,7 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("cancellation-test-workflow", fixture.MockBaseUrl)
             .HttpGet("stream-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // Act
         using var cts = new CancellationTokenSource();
@@ -172,29 +219,40 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
     // ============================================================================
 
     [Fact]
-    public async Task WithBothTailAndAfter_ShouldValidateParameters()
+    public async Task WithBothTailAndAfter_LastAssignedWins()
     {
         // Arrange
         var request = new TestWorkflowBuilder("param-validation-workflow", fixture.MockBaseUrl)
             .HttpGet("stream-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
-        // Act & Assert - Should handle mutually exclusive parameters
-        var exception = await Assert.ThrowsAsync<RpcException>(async () =>
+        // Act - since v0.0.10 tail/after are a `oneof position`, so they can no longer both
+        // be set: assigning After clears Tail rather than producing an invalid request.
+        var watchRequest = new WatchExecutionRequest
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            var call = fixture.ObservabilityClient.WatchExecution(new WatchExecutionRequest
-            {
-                ExecutionId = executionId,
-                Tail = 5,
-                After = 1 // Both tail and after specified
-            }, cancellationToken: cts.Token);
+            ExecutionId = executionId,
+            Tail = 5,
+            After = 1
+        };
 
+        // Assert - the wire format enforces exclusivity, so the call is valid
+        Assert.Equal(WatchExecutionRequest.PositionOneofCase.After, watchRequest.PositionCase);
+        Assert.False(watchRequest.HasTail);
+        Assert.Equal(1, watchRequest.After);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var call = fixture.ObservabilityClient.WatchExecution(watchRequest, cancellationToken: cts.Token);
+
+        // Streams normally rather than faulting; cancellation is the only expected stop.
+        try
+        {
             await call.ResponseStream.MoveNext(cts.Token);
-        });
-
-        Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled)
+        {
+            // Stream stayed open until the timeout — acceptable.
+        }
     }
 
     [Fact]
@@ -204,7 +262,7 @@ public class WatchExecutionStreamingTests(DaemonTestFixture fixture)
         var request = new TestWorkflowBuilder("negative-position-workflow", fixture.MockBaseUrl)
             .HttpGet("stream-activity", "/success")
             .Build();
-        var executionId = (await fixture.DaemonClient.ScheduleExecutionAsync(request)).Id;
+        var executionId = (await fixture.ScheduleAsync(request)).Id;
 
         // Act
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
