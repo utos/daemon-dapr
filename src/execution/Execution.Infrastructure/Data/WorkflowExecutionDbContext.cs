@@ -21,12 +21,20 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
     public DbSet<WorkflowExecutionReadModel> WorkflowExecutions => Set<WorkflowExecutionReadModel>();
     public DbSet<ExecutionContext> ExecutionContexts => Set<ExecutionContext>();
 
+    // The event store's tables. Mapped here for the schema and its migration only: the stores
+    // read and write them with Npgsql directly (see EventTables).
+    public DbSet<StoredEvent> Events => Set<StoredEvent>();
+    public DbSet<SubscriptionCheckpoint> SubscriptionCheckpoints => Set<SubscriptionCheckpoint>();
+    public DbSet<ParkedEvent> ParkedEvents => Set<ParkedEvent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
         // Apply all entity configurations from this assembly
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WorkflowExecutionDbContext).Assembly);
+
+        ConfigureEventStore(modelBuilder);
 
         // ExecutionContext entity configuration
         modelBuilder.Entity<ExecutionContext>(b =>
@@ -46,7 +54,7 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
 
             b.Property(e => e.Bundle)
                 .HasColumnName("BundleJson")
-                .HasColumnType("nvarchar(max)")
+                .HasColumnType("text")
                 .IsRequired()
                 .HasConversion(new ValueConverter<WorkflowBundle, string>(
                     v => JsonSerializer.Serialize(v, JsonOptions),
@@ -54,7 +62,7 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
 
             b.Property(e => e.Env)
                 .HasColumnName("EnvJson")
-                .HasColumnType("nvarchar(max)")
+                .HasColumnType("text")
                 .IsRequired()
                 .HasConversion(
                     new ValueConverter<Dictionary<string, string>, string>(
@@ -71,7 +79,7 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
 
             b.Property(e => e.Input)
                 .HasColumnName("InputJson")
-                .HasColumnType("nvarchar(max)")
+                .HasColumnType("text")
                 .IsRequired()
                 .HasConversion(
                     new ValueConverter<Dictionary<string, object>, string>(
@@ -82,6 +90,55 @@ public class WorkflowExecutionDbContext(DbContextOptions<WorkflowExecutionDbCont
                         v => JsonSerializer.Serialize(v, JsonOptions).GetHashCode(),
                         v => JsonSerializer.Deserialize<Dictionary<string, object>>(
                             JsonSerializer.Serialize(v, JsonOptions), JsonOptions)!));
+        });
+    }
+
+    /// <summary>
+    /// The event store's schema (see EventTables for why the stores bypass EF to use it). Snake
+    /// case, unlike the read models, because these tables are addressed by hand-written SQL and
+    /// quoted PascalCase in SQL text is a paper cut on every line.
+    /// </summary>
+    private static void ConfigureEventStore(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<StoredEvent>(b =>
+        {
+            b.ToTable("events");
+            b.HasKey(e => e.Position);
+            b.Property(e => e.Position).HasColumnName("position").UseIdentityAlwaysColumn();
+            b.Property(e => e.Stream).HasColumnName("stream").IsRequired();
+            b.Property(e => e.Revision).HasColumnName("revision");
+            b.Property(e => e.EventType).HasColumnName("event_type").IsRequired();
+            b.Property(e => e.Version).HasColumnName("version");
+            // `json`, not `jsonb`: jsonb normalises the document and reorders its keys, and
+            // System.Text.Json's polymorphism needs the `type` discriminator first. The body is
+            // stored as the serializer produced it, which is also what EventJsonShapeTests pins.
+            b.Property(e => e.Data).HasColumnName("data").HasColumnType("json").IsRequired();
+            b.Property(e => e.Metadata).HasColumnName("metadata").HasColumnType("json").IsRequired();
+            b.Property(e => e.OccurredAt).HasColumnName("occurred_at").HasDefaultValueSql("now()");
+            b.HasIndex(e => new { e.Stream, e.Revision }).IsUnique();
+            // The subscription's prefix filter: `event_type like 'utos.execution.%'` uses this.
+            b.HasIndex(e => e.EventType).HasOperators("text_pattern_ops");
+        });
+
+        modelBuilder.Entity<SubscriptionCheckpoint>(b =>
+        {
+            b.ToTable("subscription_checkpoints");
+            b.HasKey(e => e.Name);
+            b.Property(e => e.Name).HasColumnName("name");
+            b.Property(e => e.Position).HasColumnName("position");
+            b.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+        });
+
+        modelBuilder.Entity<ParkedEvent>(b =>
+        {
+            b.ToTable("parked_events");
+            b.HasKey(e => new { e.Position, e.Subscription });
+            b.Property(e => e.Position).HasColumnName("position");
+            b.Property(e => e.Subscription).HasColumnName("subscription");
+            b.Property(e => e.Stream).HasColumnName("stream").IsRequired();
+            b.Property(e => e.EventType).HasColumnName("event_type").IsRequired();
+            b.Property(e => e.Error).HasColumnName("error").IsRequired();
+            b.Property(e => e.ParkedAt).HasColumnName("parked_at");
         });
     }
 

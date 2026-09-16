@@ -32,6 +32,7 @@ using Execution.Infrastructure.EventHandling;
 using Execution.Infrastructure.Projections;
 using Execution.Infrastructure.Repositories;
 using Execution.Infrastructure.Templating;
+using Npgsql;
 
 namespace Execution.Infrastructure.Extensions;
 
@@ -43,8 +44,7 @@ namespace Execution.Infrastructure.Extensions;
 public static class ExecutionInfrastructureExtensions
 {
     public static IHostApplicationBuilder AddExecutionInfrastructure(this IHostApplicationBuilder builder,
-        string databaseName,
-        string eventStoreName)
+        string databaseName)
     {
         // Configure System.Text.Json globally for Dapr and other serialization
         builder.Services.ConfigureHttpJsonOptions(options =>
@@ -52,26 +52,20 @@ public static class ExecutionInfrastructureExtensions
             options.SerializerOptions.Converters.Add(new ObjectDictionaryJsonConverter());
         });
 
-        var database = builder.Configuration.GetConnectionString(databaseName);
+        // One database. The data source is shared by EF (the read models), the event store and the
+        // notification listener; Aspire's registration adds its health check and telemetry.
+        builder.AddNpgsqlDataSource(databaseName);
 
-        // Add Db Context & Auditable Entity Interceptor
-        builder.Services.AddDbContext<WorkflowExecutionDbContext>(options =>
+        builder.Services.AddDbContext<WorkflowExecutionDbContext>((provider, options) =>
         {
-            options.UseSqlServer(database);
+            options.UseNpgsql(provider.GetRequiredService<NpgsqlDataSource>());
             options.AddInterceptors(new AuditableEntityInterceptor());
         });
 
-        // Add KurrentDBClient
-        builder.AddKurrentDBClient(eventStoreName);
-
-        // Add KurrentDB Persistent Subscriptions Client
-        builder.Services.AddSingleton(sp =>
-        {
-            var config = sp.GetRequiredService<IConfiguration>();
-            var connectionString = config.GetConnectionString(eventStoreName);
-            return new KurrentDB.Client.KurrentDBPersistentSubscriptionsClient(
-                KurrentDB.Client.KurrentDBClientSettings.Create(connectionString!));
-        });
+        // The event store, and the LISTEN connection every wait on it is woken by.
+        builder.Services.AddSingleton<EventNotifications>();
+        builder.Services.AddHostedService(provider => provider.GetRequiredService<EventNotifications>());
+        builder.Services.AddSingleton<PostgresEventStore>();
 
         // Add EventStore Serializer, over the events this module declares. Any IDomainEvent in
         // that assembly without an [EventType] fails here rather than being written under a name
@@ -79,7 +73,7 @@ public static class ExecutionInfrastructureExtensions
         builder.Services.AddEventStoreSerialization(typeof(WorkflowExecutionCreatedEvent).Assembly);
 
         // Add repositories
-        builder.Services.AddScoped<IEventStoreRepository, EventStoreRepository>();
+        builder.Services.AddSingleton<IEventStoreRepository>(provider => provider.GetRequiredService<PostgresEventStore>());
         builder.Services.AddScoped<IWorkflowExecutionRepository, WorkflowExecutionRepository>();
 
         // The single path by which anything writes an execution's lifecycle
@@ -106,7 +100,7 @@ public static class ExecutionInfrastructureExtensions
         builder.Services.AddScoped<IExecutionRuntime, DaprExecutionRuntime>();
 
         // Add the execution output stream — the durable log of what a workflow produced.
-        builder.Services.AddScoped<IExecutionOutputStore, KurrentExecutionOutputStore>();
+        builder.Services.AddSingleton<IExecutionOutputStore, PostgresExecutionOutputStore>();
 
         builder.AddWorkflowHttpClient();
 

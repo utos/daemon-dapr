@@ -73,19 +73,19 @@ public class WorkflowExecutionReadModelConfiguration : BaseConfiguration<Workflo
 
         // Error information
         builder.Property(e => e.ErrorMessage)
-            .HasMaxLength(4000); // SQL Server max for nvarchar without max
+            .HasMaxLength(4000); // the read model shows the first 200 characters; the rest is for the record
 
         builder.Property(e => e.ErrorCode)
             .HasMaxLength(200);
 
         // JSON columns - store as text
         builder.Property(e => e.WorkflowDefinitionJson)
-            .HasColumnType("nvarchar(max)"); // SQL Server: nvarchar(max), PostgreSQL will use text
+            .HasColumnType("text"); 
 
         builder.Property(e => e.InputJson)
-            .HasColumnType("nvarchar(max)");
+            .HasColumnType("text");
 
         builder.Property(e => e.EnvJson)
-            .HasColumnType("nvarchar(max)");
+            .HasColumnType("text");
     }
 }

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **One database.** KurrentDB, SQL Server and Redis are gone; the daemon persists to one Postgres
+  database that serves four roles — Dapr's actor state store (`state.postgresql` v2, tables
+  prefixed `dapr_`), the EF read models (now on Npgsql, migrations regenerated as one `Initial`),
+  the event streams and the output streams. The last two are one table, `events`: a global
+  position (an identity, and commit order — every append holds a global advisory lock for its
+  transaction, so a subscriber tailing by position never skips an event whose transaction committed
+  late), a per-stream revision (the cursor a client already holds for output streams, so the wire
+  contract is unchanged), the `[EventType]` name and version, and the serializer's JSON as it
+  produced it. `IEventStoreRepository` and `IExecutionOutputStore` are `PostgresEventStore` and
+  `PostgresExecutionOutputStore`; the aggregate, the events, their names, versions and pinned JSON
+  shapes, and the upcaster registry are untouched. The `$all` persistent subscription that fed the
+  projection and the lifecycle notifier is a tail on the table from a durable checkpoint
+  (`subscription_checkpoints`), woken by `LISTEN/NOTIFY` (`EventNotifications`, one connection,
+  every append notifies) and polling once a second regardless; an event that fails to process is
+  recorded in `parked_events` and moved past, as the persistent subscription parked it — in a table
+  rather than behind a UI. Stream deletes are physical, which reclaims the space KurrentDB's soft
+  delete only promised. The compose topology is five containers, not seven, and runs on Apple
+  Silicon, which SQL Server's image never did. **The connection string is now `utos`**
+  (`ConnectionStrings__utos`); `WorkflowExecution` and `eventstore` are gone. **Drop the database
+  and start again** — there is no path from the three stores to the one, and the daemon is pre-1.0
+- The read models' SQL Server row version is gone (`Entity.Version` is no longer mapped): Postgres
+  has no `byte[]` row version, and the read models have one writer, so it guarded nothing
+
 ## [0.1.0] - 2026-09-16
 
 ### Requirements

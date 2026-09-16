@@ -5,11 +5,11 @@
 #   daemon-dapr   its Dapr sidecar, sharing the daemon's network namespace so both see localhost
 #   placement     Dapr's actor placement service, which Dapr Workflow is built on
 #   scheduler     Dapr's scheduler service, which workflow timers and reminders are built on
-#   redis         the actor state store (deploy/compose/dapr/components/statestore.yaml)
-#   sqlserver     the execution read models; the daemon migrates the database on start
-#   kurrentdb     the event store: execution streams and output streams
+#   postgres      the one database: Dapr's actor state (the `dapr-statestore` config below is
+#                 the Dapr component), the read models, the event streams and the output streams;
+#                 the daemon migrates its own tables on start
 #
-# Set DAEMON_IMAGE to run a locally built image, and SQL_SA_PASSWORD to change the default.
+# Set DAEMON_IMAGE to run a locally built image, and POSTGRES_PASSWORD to change the default.
 
 name: utos
 
@@ -21,19 +21,14 @@ services:
       - "5164:5164"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__WorkflowExecution: "Server=sqlserver,1433;Database=WorkflowExecution;User Id=sa;Password=${SQL_SA_PASSWORD:-Utos_Dev_Passw0rd!};TrustServerCertificate=true"
-      ConnectionStrings__eventstore: "esdb://kurrentdb:2113?tls=false"
+      ConnectionStrings__utos: "Host=postgres;Port=5432;Username=utos;Password=${POSTGRES_PASSWORD:-utos};Database=utos"
     depends_on:
-      sqlserver:
-        condition: service_healthy
-      kurrentdb:
+      postgres:
         condition: service_healthy
       placement:
         condition: service_started
       scheduler:
         condition: service_started
-      redis:
-        condition: service_healthy
 
   daemon-dapr:
     image: daprio/daprd:${DAPR_VERSION:-1.18.4}
@@ -47,15 +42,17 @@ services:
       - --placement-host-address=placement:50006
       - --scheduler-host-address=scheduler:50007
       - --resources-path=/components
-    volumes:
-      - ./dapr/components:/components:ro
+    # The component is inline below (`configs`), because daprd does not expand variables in a
+    # component file and compose does expand them in a config's content.
+    configs:
+      - source: dapr-statestore
+        target: /components/statestore.yaml
     network_mode: "service:daemon"
     restart: unless-stopped
     depends_on:
       - daemon
       - placement
       - scheduler
-      - redis
 
   placement:
     image: daprio/placement:${DAPR_VERSION:-1.18.4}
@@ -72,49 +69,41 @@ services:
       - scheduler-data:/data
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
+  postgres:
+    image: postgres:17-alpine
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: utos
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-utos}"
+      POSTGRES_DB: utos
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U utos -d utos"]
       interval: 5s
       timeout: 3s
-      retries: 10
-
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    restart: unless-stopped
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "${SQL_SA_PASSWORD:-Utos_Dev_Passw0rd!}"
-      MSSQL_PID: Developer
-    volumes:
-      - sqlserver-data:/var/opt/mssql
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' -b"]
-      interval: 10s
-      timeout: 5s
       retries: 20
-      start_period: 20s
-
-  kurrentdb:
-    image: docker.kurrent.io/kurrent-latest/kurrentdb:latest
-    restart: unless-stopped
-    environment:
-      KURRENTDB_INSECURE: "true"
-      KURRENTDB_ENABLE_ATOM_PUB_OVER_HTTP: "true"
-      KURRENTDB_RUN_PROJECTIONS: All
-      KURRENTDB_START_STANDARD_PROJECTIONS: "true"
-    volumes:
-      - kurrentdb-data:/var/lib/kurrentdb
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:2113/health/live || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 10s
 
 volumes:
   scheduler-data:
-  sqlserver-data:
-  kurrentdb-data:
+  postgres-data:
+
+configs:
+  # The actor state store Dapr Workflow keeps orchestration state in: the daemon's own database,
+  # under a `dapr_` table prefix so Dapr's tables sit beside the daemon's without touching them.
+  dapr-statestore:
+    content: |
+      apiVersion: dapr.io/v1alpha1
+      kind: Component
+      metadata:
+        name: statestore
+      spec:
+        type: state.postgresql
+        version: v2
+        metadata:
+          - name: connectionString
+            value: "host=postgres port=5432 user=utos password=${POSTGRES_PASSWORD:-utos} dbname=utos sslmode=disable"
+          - name: tablePrefix
+            value: "dapr_"
+          - name: actorStateStore
+            value: "true"
