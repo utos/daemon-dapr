@@ -119,6 +119,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The daemon ships as a container image with the topology that runs it** (`deploy/`). A
+  multi-stage `Dockerfile` publishes `API.Main` onto the ASP.NET 10 runtime, and
+  `deploy/compose/docker-compose.yml` is the seven-container deployment the image is one part
+  of: the daemon, its Dapr sidecar in the daemon's network namespace, Dapr's placement and
+  scheduler services, Redis as the actor state store, SQL Server, and KurrentDB — with
+  healthchecks and start ordering, so `docker compose up -d` yields a daemon on `localhost:5164`
+  that a released CLI can load and run a workflow on. Verified end to end: a timer loop through
+  the scheduler, a `return` carrying `new Date()` and `crypto.randomUUID()`. A `release.yml`,
+  modelled on the CLI's, reads the first dated CHANGELOG heading on push to `main`, pushes the
+  image to GHCR as `ghcr.io/utos/dapr-daemon:<version>` and `:latest`, tags `v<version>`, and
+  publishes a GitHub release whose compose bundle pins that image. `deploy/README.md` describes
+  the topology and its settings
 - **The evaluation conformance corpus runs in the unit tests** (`UnitTests/Templating/Conformance`,
   vendored from `utos/api` v0.0.16 with the tag recorded in its README): every case of
   `api/conformance/evaluation/` against `JintTemplateEngine`, including the deterministic
