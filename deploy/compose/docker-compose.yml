@@ -1,0 +1,109 @@
+# The utos daemon and everything it runs on. `docker compose up -d` from this directory brings
+# up a daemon reachable at http://localhost:5164 — the address `utos context create` takes.
+#
+#   daemon        the utos daemon (ghcr.io/utos/dapr-daemon)
+#   daemon-dapr   its Dapr sidecar, sharing the daemon's network namespace so both see localhost
+#   placement     Dapr's actor placement service, which Dapr Workflow is built on
+#   scheduler     Dapr's scheduler service, which workflow timers and reminders are built on
+#   postgres      the one database: Dapr's actor state (the `dapr-statestore` config below is
+#                 the Dapr component), the read models, the event streams and the output streams;
+#                 the daemon migrates its own tables on start
+#
+# Set DAEMON_IMAGE to run a locally built image, and POSTGRES_PASSWORD to change the default.
+
+name: utos
+
+services:
+  daemon:
+    image: ${DAEMON_IMAGE:-ghcr.io/utos/dapr-daemon:latest}
+    restart: unless-stopped
+    ports:
+      - "5164:5164"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__utos: "Host=postgres;Port=5432;Username=utos;Password=${POSTGRES_PASSWORD:-utos};Database=utos"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      placement:
+        condition: service_started
+      scheduler:
+        condition: service_started
+
+  daemon-dapr:
+    image: daprio/daprd:${DAPR_VERSION:-1.18.4}
+    command:
+      - ./daprd
+      - --app-id=main-api
+      - --app-port=5164
+      - --app-protocol=grpc
+      - --dapr-http-port=3500
+      - --dapr-grpc-port=50001
+      - --placement-host-address=placement:50006
+      - --scheduler-host-address=scheduler:50007
+      - --resources-path=/components
+    # The component is inline below (`configs`), because daprd does not expand variables in a
+    # component file and compose does expand them in a config's content.
+    configs:
+      - source: dapr-statestore
+        target: /components/statestore.yaml
+    network_mode: "service:daemon"
+    restart: unless-stopped
+    depends_on:
+      - daemon
+      - placement
+      - scheduler
+
+  placement:
+    image: daprio/placement:${DAPR_VERSION:-1.18.4}
+    command: ["./placement", "--port", "50006"]
+    restart: unless-stopped
+
+  scheduler:
+    image: daprio/scheduler:${DAPR_VERSION:-1.18.4}
+    command: ["./scheduler", "--port", "50007", "--etcd-data-dir", "/data"]
+    # The image runs as a non-root user and the named volume is created root-owned, so its
+    # embedded etcd cannot create its data directory without this — as Dapr's own compose sample.
+    user: root
+    volumes:
+      - scheduler-data:/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: utos
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-utos}"
+      POSTGRES_DB: utos
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U utos -d utos"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  scheduler-data:
+  postgres-data:
+
+configs:
+  # The actor state store Dapr Workflow keeps orchestration state in: the daemon's own database,
+  # under a `dapr_` table prefix so Dapr's tables sit beside the daemon's without touching them.
+  dapr-statestore:
+    content: |
+      apiVersion: dapr.io/v1alpha1
+      kind: Component
+      metadata:
+        name: statestore
+      spec:
+        type: state.postgresql
+        version: v2
+        metadata:
+          - name: connectionString
+            value: "host=postgres port=5432 user=utos password=${POSTGRES_PASSWORD:-utos} dbname=utos sslmode=disable"
+          - name: tablePrefix
+            value: "dapr_"
+          - name: actorStateStore
+            value: "true"

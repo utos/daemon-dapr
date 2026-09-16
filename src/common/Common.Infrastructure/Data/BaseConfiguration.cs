@@ -13,7 +13,7 @@ public abstract class BaseConfiguration<TEntity, TId> : IEntityTypeConfiguration
         builder.HasKey(e => e.Id);
 
         builder.Property(e => e.Id)
-            .HasDefaultValueSql("NEWSEQUENTIALID()")
+            .HasDefaultValueSql("gen_random_uuid()")
             .ValueGeneratedOnAdd();
 
         builder.Property(e => e.CreatedAt)
@@ -21,9 +21,9 @@ public abstract class BaseConfiguration<TEntity, TId> : IEntityTypeConfiguration
 
         builder.Property(e => e.LastModifiedAt);
 
-        builder.Property(e => e.Version)
-            .IsRowVersion()
-            .IsConcurrencyToken()
-            .ValueGeneratedOnAddOrUpdate();
+        // Not a row version any more: that was SQL Server's `rowversion`, which Postgres has no
+        // byte[] equivalent of. The read models have one writer, the projection, so an optimistic
+        // token guarded nothing; the property stays on the entity and out of the table.
+        builder.Ignore(e => e.Version);
     }
 }

@@ -12,10 +12,9 @@ namespace Execution.Api.Extensions;
 public static class ExecutionExtensions
 {
     public static IHostApplicationBuilder AddExecutionModule(this IHostApplicationBuilder builder,
-        string databaseName,
-        string eventStoreName)
+        string databaseName)
     {
-        builder.AddExecutionInfrastructure(databaseName, eventStoreName);
+        builder.AddExecutionInfrastructure(databaseName);
 
         // Only what scheduling means beyond the bundle. The bundle's own shape was validated
         // against the spec when it was loaded, and it has not changed since — it comes from the
