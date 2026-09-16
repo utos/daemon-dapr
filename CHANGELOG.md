@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-16
+
 ### Requirements
 
 - **Dapr runtime 1.18.4 or later is now required**, up from 1.18.3. An `on_emitted` handler is a
