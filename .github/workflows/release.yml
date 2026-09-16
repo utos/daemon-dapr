@@ -4,9 +4,9 @@ name: Release
 # utos/cli: a dated `## [x.y.z] - <date>` heading means "this is released", so the dev -> main
 # merge that dates the heading *is* the release.
 #
-# A release is a container image on GHCR plus the compose bundle that runs it beside Dapr,
-# SQL Server and KurrentDB — the daemon is one container of seven, and the image alone runs
-# nothing. deploy/README.md describes the topology.
+# A release is a container image on GHCR plus the compose bundle that runs it beside Dapr
+# and Postgres — the daemon is one container of five, and the image alone runs nothing.
+# deploy/README.md describes the topology.
 
 on:
   push:

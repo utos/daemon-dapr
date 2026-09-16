@@ -2,8 +2,8 @@
 # Built from the repository root: docker build -f deploy/Dockerfile -t utos-daemon .
 #
 # One container is the daemon; it is not the deployment. The daemon needs a Dapr sidecar (and
-# Dapr's placement and scheduler services, and an actor state store), SQL Server and KurrentDB
-# beside it — deploy/compose/docker-compose.yml is that topology.
+# Dapr's placement and scheduler services) and one Postgres database beside it —
+# deploy/compose/docker-compose.yml is that topology.
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG VERSION=0.0.0-local
