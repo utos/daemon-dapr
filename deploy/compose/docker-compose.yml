@@ -1,0 +1,120 @@
+# The utos daemon and everything it runs on. `docker compose up -d` from this directory brings
+# up a daemon reachable at http://localhost:5164 — the address `utos context create` takes.
+#
+#   daemon        the utos daemon (ghcr.io/utos/dapr-daemon)
+#   daemon-dapr   its Dapr sidecar, sharing the daemon's network namespace so both see localhost
+#   placement     Dapr's actor placement service, which Dapr Workflow is built on
+#   scheduler     Dapr's scheduler service, which workflow timers and reminders are built on
+#   redis         the actor state store (deploy/compose/dapr/components/statestore.yaml)
+#   sqlserver     the execution read models; the daemon migrates the database on start
+#   kurrentdb     the event store: execution streams and output streams
+#
+# Set DAEMON_IMAGE to run a locally built image, and SQL_SA_PASSWORD to change the default.
+
+name: utos
+
+services:
+  daemon:
+    image: ${DAEMON_IMAGE:-ghcr.io/utos/dapr-daemon:latest}
+    restart: unless-stopped
+    ports:
+      - "5164:5164"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__WorkflowExecution: "Server=sqlserver,1433;Database=WorkflowExecution;User Id=sa;Password=${SQL_SA_PASSWORD:-Utos_Dev_Passw0rd!};TrustServerCertificate=true"
+      ConnectionStrings__eventstore: "esdb://kurrentdb:2113?tls=false"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      kurrentdb:
+        condition: service_healthy
+      placement:
+        condition: service_started
+      scheduler:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  daemon-dapr:
+    image: daprio/daprd:${DAPR_VERSION:-1.18.4}
+    command:
+      - ./daprd
+      - --app-id=main-api
+      - --app-port=5164
+      - --app-protocol=grpc
+      - --dapr-http-port=3500
+      - --dapr-grpc-port=50001
+      - --placement-host-address=placement:50006
+      - --scheduler-host-address=scheduler:50007
+      - --resources-path=/components
+    volumes:
+      - ./dapr/components:/components:ro
+    network_mode: "service:daemon"
+    restart: unless-stopped
+    depends_on:
+      - daemon
+      - placement
+      - scheduler
+      - redis
+
+  placement:
+    image: daprio/placement:${DAPR_VERSION:-1.18.4}
+    command: ["./placement", "--port", "50006"]
+    restart: unless-stopped
+
+  scheduler:
+    image: daprio/scheduler:${DAPR_VERSION:-1.18.4}
+    command: ["./scheduler", "--port", "50007", "--etcd-data-dir", "/data"]
+    # The image runs as a non-root user and the named volume is created root-owned, so its
+    # embedded etcd cannot create its data directory without this — as Dapr's own compose sample.
+    user: root
+    volumes:
+      - scheduler-data:/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SQL_SA_PASSWORD:-Utos_Dev_Passw0rd!}"
+      MSSQL_PID: Developer
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' -b"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  kurrentdb:
+    image: docker.kurrent.io/kurrent-latest/kurrentdb:latest
+    restart: unless-stopped
+    environment:
+      KURRENTDB_INSECURE: "true"
+      KURRENTDB_ENABLE_ATOM_PUB_OVER_HTTP: "true"
+      KURRENTDB_RUN_PROJECTIONS: All
+      KURRENTDB_START_STANDARD_PROJECTIONS: "true"
+    volumes:
+      - kurrentdb-data:/var/lib/kurrentdb
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:2113/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  scheduler-data:
+  sqlserver-data:
+  kurrentdb-data:

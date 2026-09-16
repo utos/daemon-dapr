@@ -1,0 +1,151 @@
+name: Release
+
+# Publishes the daemon. CHANGELOG.md drives the version, matching utos/api, utos/sdk-dotnet and
+# utos/cli: a dated `## [x.y.z] - <date>` heading means "this is released", so the dev -> main
+# merge that dates the heading *is* the release.
+#
+# A release is a container image on GHCR plus the compose bundle that runs it beside Dapr,
+# SQL Server and KurrentDB — the daemon is one container of seven, and the image alone runs
+# nothing. deploy/README.md describes the topology.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the tag and the GitHub release
+  packages: write   # push the image to GHCR
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  # --- Decide whether this push is a release, and at what version ---------------
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      should_release: ${{ steps.v.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # need tags to tell a release from an ordinary push
+
+      - name: Resolve version from CHANGELOG.md
+        id: v
+        run: |
+          set -euo pipefail
+
+          # First heading carrying a date. An undated heading is the next cycle, not a release.
+          VERSION_LINE=$(grep -m1 '^\#\# \[.*\] - [0-9]' CHANGELOG.md || true)
+          if [ -z "$VERSION_LINE" ]; then
+            echo "::error::No released version in CHANGELOG.md (the heading needs a date)"
+            exit 1
+          fi
+
+          VERSION=$(echo "$VERSION_LINE" | sed 's/.*\[\(.*\)\].*/\1/')
+
+          # main also receives pushes that are not releases — a docs fix, a back-merge. An
+          # existing tag means this version already shipped, so skip rather than fail.
+          SHOULD_RELEASE=true
+          if git rev-parse "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            SHOULD_RELEASE=false
+          fi
+
+          echo "version=$VERSION"               >> "$GITHUB_OUTPUT"
+          echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "::notice::version=$VERSION release=$SHOULD_RELEASE"
+
+  # --- Image, tag, compose bundle, release --------------------------------------
+  release:
+    needs: resolve
+    if: needs.resolve.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          build-args: |
+            VERSION=${{ needs.resolve.outputs.version }}
+          tags: |
+            ${{ env.IMAGE }}:${{ needs.resolve.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The compose bundle pins the image this release built: someone who downloads it gets the
+      # daemon of that version, not whatever `latest` has become since.
+      - name: Package the compose bundle
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.resolve.outputs.version }}"
+          STAGE=$(mktemp -d)/utos-daemon-${VERSION}
+          mkdir -p "$STAGE"
+          cp -r deploy/compose/. "$STAGE/"
+          cp deploy/README.md CHANGELOG.md "$STAGE/"
+          sed -i "s#ghcr.io/utos/dapr-daemon:latest#${IMAGE}:${VERSION}#" "$STAGE/docker-compose.yml"
+          mkdir -p dist
+          tar -czf "dist/utos-daemon-${VERSION}-compose.tar.gz" -C "$(dirname "$STAGE")" "utos-daemon-${VERSION}"
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          ls -la dist
+
+      - name: Tag
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.resolve.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "utos daemon ${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.resolve.outputs.version }}"
+
+          # The release notes are this version's CHANGELOG section, verbatim.
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+
+          {
+            echo
+            echo "## Run it"
+            echo
+            echo '```'
+            echo "docker pull ${IMAGE}:${VERSION}"
+            echo "tar -xzf utos-daemon-${VERSION}-compose.tar.gz && cd utos-daemon-${VERSION} && docker compose up -d"
+            echo '```'
+          } >> notes.md
+
+          gh release create "v${VERSION}" dist/* \
+            --title "utos daemon ${VERSION}" \
+            --notes-file notes.md
