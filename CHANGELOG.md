@@ -7,31 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking
-
-- **One database.** KurrentDB, SQL Server and Redis are gone; the daemon persists to one Postgres
-  database that serves four roles — Dapr's actor state store (`state.postgresql` v2, tables
-  prefixed `dapr_`), the EF read models (now on Npgsql, migrations regenerated as one `Initial`),
-  the event streams and the output streams. The last two are one table, `events`: a global
-  position (an identity, and commit order — every append holds a global advisory lock for its
-  transaction, so a subscriber tailing by position never skips an event whose transaction committed
-  late), a per-stream revision (the cursor a client already holds for output streams, so the wire
-  contract is unchanged), the `[EventType]` name and version, and the serializer's JSON as it
-  produced it. `IEventStoreRepository` and `IExecutionOutputStore` are `PostgresEventStore` and
-  `PostgresExecutionOutputStore`; the aggregate, the events, their names, versions and pinned JSON
-  shapes, and the upcaster registry are untouched. The `$all` persistent subscription that fed the
-  projection and the lifecycle notifier is a tail on the table from a durable checkpoint
-  (`subscription_checkpoints`), woken by `LISTEN/NOTIFY` (`EventNotifications`, one connection,
-  every append notifies) and polling once a second regardless; an event that fails to process is
-  recorded in `parked_events` and moved past, as the persistent subscription parked it — in a table
-  rather than behind a UI. Stream deletes are physical, which reclaims the space KurrentDB's soft
-  delete only promised. The compose topology is five containers, not seven, and runs on Apple
-  Silicon, which SQL Server's image never did. **The connection string is now `utos`**
-  (`ConnectionStrings__utos`); `WorkflowExecution` and `eventstore` are gone. **Drop the database
-  and start again** — there is no path from the three stores to the one, and the daemon is pre-1.0
-- The read models' SQL Server row version is gone (`Entity.Version` is no longer mapped): Postgres
-  has no `byte[]` row version, and the read models have one writer, so it guarded nothing
-
 ## [0.1.0] - 2026-09-16
 
 ### Requirements
@@ -56,6 +31,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- **One database.** KurrentDB, SQL Server and Redis are gone; the daemon persists to one Postgres
+  database that serves four roles — Dapr's actor state store (`state.postgresql` v2, tables
+  prefixed `dapr_`), the EF read models (now on Npgsql, migrations regenerated as one `Initial`),
+  the event streams and the output streams. The last two are one table, `events`: a global
+  position (an identity, and commit order — every append holds a global advisory lock for its
+  transaction, so a subscriber tailing by position never skips an event whose transaction committed
+  late), a per-stream revision (the cursor a client already holds for output streams, so the wire
+  contract is unchanged), the `[EventType]` name and version, and the serializer's JSON as it
+  produced it. `IEventStoreRepository` and `IExecutionOutputStore` are `PostgresEventStore` and
+  `PostgresExecutionOutputStore`; the aggregate, the events, their names, versions and pinned JSON
+  shapes, and the upcaster registry are untouched. The `$all` persistent subscription that fed the
+  projection and the lifecycle notifier is a tail on the table from a durable checkpoint
+  (`subscription_checkpoints`), woken by `LISTEN/NOTIFY` (`EventNotifications`, one connection,
+  every append notifies) and polling once a second regardless; an event that fails to process is
+  recorded in `parked_events` and moved past, as the persistent subscription parked it — in a table
+  rather than behind a UI. Stream deletes are physical, which reclaims the space KurrentDB's soft
+  delete only promised. The compose topology below is five containers and runs on Apple Silicon,
+  which SQL Server's image never did. **The connection string is now `utos`**
+  (`ConnectionStrings__utos`); `WorkflowExecution` and `eventstore` are gone. **Drop the database
+  and start again** — there is no path from the three stores to the one, and the daemon is pre-1.0
+- The read models' SQL Server row version is gone (`Entity.Version` is no longer mapped): Postgres
+  has no `byte[]` row version, and the read models have one writer, so it guarded nothing
 - **Ending a path is an action, not a destination** (spec `v0.0.16`; all four Utos SDK pins bumped
   `0.0.15` → `0.0.16.1`). The `end` and `error` transition targets are gone, and so is
   `ReservedKeywords` — nothing is reserved, and an activity may be named `end`. A path ends with a
@@ -117,7 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enforced at load by the 0.0.15 validator and not re-checked at evaluation.
   **Every Scriban document breaks, loudly** — a `{{ }}`-wrapped condition is `UTOS-E061` at load
   and Scriban's call syntax is a syntax error — and **existing streams cannot be replayed: drop the
-  KurrentDB volume and the SQL database.** Four behaviours change without an error, per the spec:
+  database.** Four behaviours change without an error, per the spec:
   a missing member is `undefined` rather than fatal, a condition must be boolean, whole-valued
   doubles divide exactly, division by zero is an error. Two more are this daemon's:
   `response.headers` keys are **lowercased** (`response.headers['retry-after']`), since a
@@ -132,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dispatching one. `PromiseBranch.Target` is gone, and `CallActivityConfig.OnEmitted` no longer
   holds `TransitionRule` — it holds `EmissionRule`, whose shape the `v0.0.14` entry below
   describes. Both steps change the persisted shape in all three places a bundle is stored, so
-  **existing streams cannot be replayed — drop the KurrentDB volume and the SQL database.** There is
+  **existing streams cannot be replayed — drop the database.** There is
   no upcaster; the daemon is pre-1.0. `ActivityConfigJsonShapeTests` pins the new text.
 - **A handler can no longer stop its consumer.** It used to: a handler transitioning to `end` ended
   the consuming run, which was how a consumer stopped early. A handler is a separate execution now,
@@ -146,10 +143,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The daemon ships as a container image with the topology that runs it** (`deploy/`). A
   multi-stage `Dockerfile` publishes `API.Main` onto the ASP.NET 10 runtime, and
-  `deploy/compose/docker-compose.yml` is the seven-container deployment the image is one part
+  `deploy/compose/docker-compose.yml` is the five-container deployment the image is one part
   of: the daemon, its Dapr sidecar in the daemon's network namespace, Dapr's placement and
-  scheduler services, Redis as the actor state store, SQL Server, and KurrentDB — with
-  healthchecks and start ordering, so `docker compose up -d` yields a daemon on `localhost:5164`
+  scheduler services, and Postgres as the one database above — with healthchecks and start
+  ordering, so `docker compose up -d` yields a daemon on `localhost:5164`
   that a released CLI can load and run a workflow on. Verified end to end: a timer loop through
   the scheduler, a `return` carrying `new Date()` and `crypto.randomUUID()`. A `release.yml`,
   modelled on the CLI's, reads the first dated CHANGELOG heading on push to `main`, pushes the
@@ -386,7 +383,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `WorkflowSession.InputFor` then replaced with the *run* input — silently rewinding a handler to
   the state the workflow started in.
 
-- **Every execution has a durable output stream.** Ordered, cursor-addressable, its own KurrentDB
+- **Every execution has a durable output stream.** Ordered, cursor-addressable, its own event
   stream (`executionoutput-{id}`), surviving daemon restart and orchestrator replay — see
   `api/docs/execution-output-stream.md`. A stream is zero or more `value` entries followed by
   exactly one terminal entry (`result` or `error`), which is what makes the ordering between what
@@ -565,8 +562,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lowercase string to an enum name, so existing `workflowexecution-{id}` streams cannot be
   replayed. `WorkflowExecutorInput` also changes shape — `LoopedTransitions` and
   `MaxLoopedTransitions` are replaced by a `LoopDetected` flag — so an orchestration in flight
-  across the upgrade cannot resume either. Drop the KurrentDB volume and the SQL database before
-  running this version. There is no upcaster; the daemon is pre-1.0.
+  across the upgrade cannot resume either. Drop the database before running this version. There is no upcaster; the daemon is pre-1.0.
 
   Events are also no longer stored under the CLR type's assembly-qualified name but under the name
   each one declares, so even an untouched stream would not resolve. Same instruction — drop the
@@ -631,7 +627,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both are recoverable, and neither is silent. The event processor's early return is simply
   deleted — the `Nack`/`Park` it needed was already there, one `catch` up.
 
-  Events also carry a schema version in their KurrentDB metadata (`{"v":n}`), which was previously
+  Events also carry a schema version in their metadata (`{"v":n}`), which was previously
   written as a literal `{}` and never read. Nothing needs an upcaster today, but a version cannot be
   added to events already written, and the seam is built and tested rather than left for the first
   migration to design under pressure: `IEventUpcaster` transforms one version to the next,
@@ -855,8 +851,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **This is a breaking change to persisted state.** Bundles were previously written as protobuf
   JSON and are now written as the domain model's own JSON, so existing `workflowexecution-{id}`
-  event streams cannot be replayed and existing execution rows cannot be read. Drop the KurrentDB
-  volume and the SQL database before running this version. There is no upcaster; the daemon is
+  event streams cannot be replayed and existing execution rows cannot be read. Drop the
+  database before running this version. There is no upcaster; the daemon is
   pre-1.0 and the read model was already rebuilt from scratch on startup.
 
 ### Fixed
