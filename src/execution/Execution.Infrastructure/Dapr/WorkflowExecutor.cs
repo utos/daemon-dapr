@@ -431,6 +431,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
     /// <summary>Where a matched rule sends the run, as a log reads it.</summary>
     private static string DescribeTarget(EvaluateTransitionOutput transition) =>
         transition.Dispatch != null ? $"handler {transition.Dispatch.Workflow}"
+        : transition.Unhandled ? "re-raise"
         : transition.Error != null ? $"error {transition.Error.Code}"
         : transition.ReturnValue != null ? "result"
         : transition.NextActivityName ?? "end of path";

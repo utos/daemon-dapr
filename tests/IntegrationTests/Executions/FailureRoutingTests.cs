@@ -246,6 +246,58 @@ public class FailureRoutingTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task A_bare_error_reraises_a_sub_workflow_s_failure_with_its_own_code_and_details()
+    {
+        // The re-raise (spec 0.0.17). The caller handles one failure class itself and forwards the
+        // rest unchanged — no new code, no message copied into one. What the run reports is the
+        // child's failure, whole.
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/reraise-lookup").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"found": false, "id": "o-42"}"""));
+
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/reraise-retry").UsingGet())
+            .RespondWith(Response.Create().WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json").WithBody("{}"));
+
+        var childDetails = new Struct();
+        childDetails.Fields.Add("id", Value.ForString("{{ output.id }}"));
+
+        var request = new TestWorkflowBuilder("reraise-child-error", fixture.MockBaseUrl)
+            .WorkflowCall("lookup", "reraise-lookup-workflow", "fetch")
+                .OnFailure("retry", when: "error.code === 'RATE_LIMITED'")
+                .OnFailureReraise()
+            .HttpGet("retry", "/reraise-retry")
+            .AddDependentWorkflow("reraise-lookup-workflow", child => child
+                .HttpGet("fetch", "/reraise-lookup")
+                .OnError("ORDER_NOT_FOUND", "order {{ output.id }} does not exist", childDetails, when: "!output.found")
+                .OnEnd())
+            .Build("lookup");
+
+        var response = await fixture.ScheduleAsync(request);
+
+        var events = await fixture.ObservabilityClient
+            .WatchExecution(new WatchExecutionRequest { ExecutionId = response.Id })
+            .CollectUntilCompletion(TimeSpan.FromSeconds(60));
+
+        Assert.Equal(ExecutionStatus.Failed, TerminalStatus(events));
+        Assert.Empty(fixture.WireMockServer.LogEntries.Where(e => e.RequestMessage.Path == "/reraise-retry"));
+
+        var terminal = events.Last(e => e.Status == ExecutionStatus.Failed);
+        Assert.Equal("ORDER_NOT_FOUND", terminal.Error.Code);
+
+        var execution = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = response.Id });
+
+        Assert.Equal("ORDER_NOT_FOUND", execution.Summary.Error.Code);
+        Assert.Equal("order o-42 does not exist", execution.Summary.Error.Message);
+        Assert.Equal("o-42", execution.Summary.Error.Details.Fields["id"].StringValue);
+    }
+
+    [Fact]
     public async Task Workflow_http_is_attempted_exactly_once()
     {
         // Guards the resilience split: the workflow client must not inherit the standard retry

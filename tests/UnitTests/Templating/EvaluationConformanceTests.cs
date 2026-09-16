@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Execution.Application.Models;
+using Execution.Domain.Interpreter;
 using Execution.Domain.Templating;
 using Execution.Infrastructure.Templating;
 
@@ -55,6 +56,7 @@ public class EvaluationConformanceTests
                 "condition" => engine.EvaluateCondition(expression, scope),
                 "value" => engine.RenderTyped("{{ " + expression + " }}", scope),
                 "text" => engine.RenderToString("{{ " + expression + " }}", scope),
+                "collection" => ForEachCollection.Evaluate(engine, "{{ " + expression + " }}", scope),
                 _ => throw new InvalidOperationException($"unknown form '{form}'")
             };
         }

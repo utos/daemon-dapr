@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A bare `error` re-raises the failure being handled** (spec `0.0.17`). An empty `error` action
+  in an `onFailure` rule continues the failure exactly as if no rule had matched it: the driver
+  rethrows the exception it caught, so the run reports the same code, message and details, and a
+  sub-workflow's authored failure stays that failure. The rule log names it `re-raise`. All four
+  Utos SDK pins are bumped `0.0.16.1` → `0.0.17.1`, the first validator that accepts it at load;
+  on `onSuccess` and `onEmitted` it is still `UTOS-T005`
+- **`UTOS-E105` is a conformance case.** The `forEach.collection` check moves from the
+  interpreter into `ForEachCollection`, which the interpreter and the evaluation corpus's new
+  `collection` form both call. The corpus is vendored at `v0.0.17`, including the `error.details`
+  cases; the daemon already put `details` in scope
+
 ## [0.1.0] - 2026-09-16
 
 ### Requirements

@@ -1,0 +1,6 @@
+{
+  "form": "collection",
+  "expression": "input.orders.filter(o => o.open).map(o => o.id)",
+  "scope": { "input": { "orders": [ { "id": "a", "open": true }, { "id": "b", "open": false }, { "id": "c", "open": true } ] } },
+  "expect": { "value": ["a", "c"] }
+}

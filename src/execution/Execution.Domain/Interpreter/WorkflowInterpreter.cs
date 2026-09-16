@@ -109,7 +109,8 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
 
                 { Emit: not null } => Emit(rule.Emit, scope, passThrough, activityName),
 
-                { Error: not null } => Fail(rule.Error, scope),
+                { Error: not null } => Fail(rule.Error, scope,
+                    failureInScope: outcome == ActivityOutcomeKind.Failed),
 
                 _ => throw new InvalidOperationException(
                     "Transition rule has no action set (none of transition, result, emit or error)")
@@ -166,7 +167,9 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
 
                 { Result: not null } => Return(rule.Result, scope),
 
-                { Error: not null } => Fail(rule.Error, scope),
+                // A value arrived, not a failure: an empty error has nothing to re-raise here, and
+                // UTOS-T005 refuses one at load.
+                { Error: not null } => Fail(rule.Error, scope, failureInScope: false),
 
                 _ => throw new InvalidOperationException(
                     "Emission rule has no action set (none of handle, transition, result or error)")
@@ -281,12 +284,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
                 // Dynamic expansion: evaluate collection, iterate with alias. The collection is a
                 // whole-field template that must yield an array; a string, an object or nothing
                 // is an authoring error, not an empty expansion.
-                var rendered = templateEngine.RenderTyped(branch.ForEach.Collection, scope);
-                if (rendered is not IEnumerable<object?> items || rendered is string)
-                    throw new TemplateException("UTOS-E105",
-                        $"forEach collection `{branch.ForEach.Collection}` must evaluate to an array.");
-
-                var collection = items.ToList();
+                var collection = ForEachCollection.Evaluate(templateEngine, branch.ForEach.Collection, scope);
 
                 var scopes = collection
                     .Select(item => scope.With(branch.ForEach.Alias, item))
@@ -357,9 +355,19 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     /// The reason is rendered here, in the rule's own scope, so that <c>{{ error.message }}</c>
     /// and <c>{{ response.status }}</c> mean what they mean on every other field of the rule. The
     /// code is never rendered: it is the literal a consumer switches on.
+    /// <para>
+    /// An error with no fields, where a failure is in scope, is the re-raise (spec 0.0.17): the
+    /// failure being handled continues exactly as if no rule had matched it — the same exception,
+    /// so the same code, message and details, and a sub-workflow's authored failure stays that
+    /// failure. That is <see cref="TransitionDecision.Propagate"/>, carrying the rule that matched
+    /// so the log still says which one re-raised it.
+    /// </para>
     /// </summary>
-    private TransitionDecision Fail(ErrorAction error, TemplateScope scope)
+    private TransitionDecision Fail(ErrorAction error, TemplateScope scope, bool failureInScope)
     {
+        if (failureInScope && IsReraise(error))
+            return new TransitionDecision.Propagate();
+
         // UTOS-T005 rejects an empty code at load; this is the backstop for a bundle that reached
         // the interpreter without it, so the run still reports *something* a client can match.
         var code = string.IsNullOrEmpty(error.Code) ? WorkflowErrorContext.UnspecifiedCode : error.Code;
@@ -373,6 +381,14 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             message,
             error.Details == null ? null : structRenderer.Render(error.Details, scope));
     }
+
+    /// <summary>
+    /// No code, no message template, no details — the wire's empty <c>WorkflowError</c>, which the
+    /// source format writes as a bare <c>error</c>. A partly written one is not a re-raise; it is
+    /// refused at load (<c>UTOS-T005</c>) and reaches <see cref="Fail"/>'s backstop otherwise.
+    /// </summary>
+    private static bool IsReraise(ErrorAction error) =>
+        string.IsNullOrEmpty(error.Code) && error.Message == null && error.Details == null;
 
     /// <summary>
     /// The value to append and where the run goes once it is durable. The target is required —
