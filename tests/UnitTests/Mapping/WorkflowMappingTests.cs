@@ -15,6 +15,36 @@ namespace UnitTests.Mapping;
 /// </summary>
 public class WorkflowMappingTests
 {
+    /// <summary>
+    /// A compiled object schema with one required property — the form a bundle carries, since
+    /// the source format's short form is compiled away before anything reaches the daemon.
+    /// </summary>
+    private static Struct ObjectSchema((string Name, string Type) property, bool closed)
+    {
+        var schema = new Struct
+        {
+            Fields =
+            {
+                ["type"] = Value.ForString("object"),
+                ["required"] = Value.ForList(Value.ForString(property.Name)),
+                ["properties"] = Value.ForStruct(new Struct
+                {
+                    Fields =
+                    {
+                        [property.Name] = Value.ForStruct(new Struct
+                        {
+                            Fields = { ["type"] = Value.ForString(property.Type) }
+                        })
+                    }
+                })
+            }
+        };
+
+        if (closed) schema.Fields["unevaluatedProperties"] = Value.ForBool(false);
+
+        return schema;
+    }
+
     private static Wire.WorkflowBundle FullyPopulatedBundle()
     {
         var httpActivity = new Wire.WorkflowActivity
@@ -25,6 +55,42 @@ public class WorkflowMappingTests
                 Url = "https://example.test/{{ input.id }}",
                 Body = "{\"n\": {{ input.n }}}",
                 Headers = { ["X-Trace"] = "{{ env.trace }}" }
+            },
+
+            // A declared input, in the compiled form a bundle carries — plain JSON Schema, not
+            // the source format's short form. Every leaf kind appears (string, number, bool,
+            // array, nested object) because this schema is arbitrary JSON to the mapping and a
+            // slot that dropped one of them would drop it silently.
+            Schema = new Wire.ActivitySchema
+            {
+                Input = new Struct
+                {
+                    Fields =
+                    {
+                        ["type"] = Value.ForString("object"),
+                        ["required"] = Value.ForList(Value.ForString("id")),
+                        ["properties"] = Value.ForStruct(new Struct
+                        {
+                            Fields =
+                            {
+                                ["id"] = Value.ForStruct(new Struct
+                                {
+                                    Fields = { ["type"] = Value.ForString("string") }
+                                }),
+                                ["n"] = Value.ForStruct(new Struct
+                                {
+                                    Fields =
+                                    {
+                                        ["type"] = Value.ForString("integer"),
+                                        ["minimum"] = Value.ForNumber(1),
+                                        ["default"] = Value.ForNumber(7)
+                                    }
+                                })
+                            }
+                        }),
+                        ["unevaluatedProperties"] = Value.ForBool(false)
+                    }
+                }
             }
         };
 
@@ -176,7 +242,14 @@ public class WorkflowMappingTests
                     ["call-sub"] = subWorkflowActivity,
                     ["await-sub"] = awaitedSubWorkflowActivity,
                     ["fan-out"] = promiseActivity
-                }
+                },
+
+                // The workflow's own contract. `env` is deliberately open — no
+                // unevaluatedProperties — because a run tree shares one environment and a
+                // sub-workflow inherits its parent's.
+                Output = ObjectSchema(("delivered", "boolean"), closed: true),
+                Emits = ObjectSchema(("messageId", "string"), closed: true),
+                Env = ObjectSchema(("API_BASE", "string"), closed: false)
             }
         };
 
