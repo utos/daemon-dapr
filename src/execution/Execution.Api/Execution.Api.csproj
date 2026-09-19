@@ -16,6 +16,15 @@
         <PackageReference Include="Utos.Daemon.Server" />
         <PackageReference Include="FluentValidation"/>
         <PackageReference Include="Grpc.AspNetCore" />
+        <!-- google.rpc.Status details on INVALID_ARGUMENT: the schema failure list a schedule
+             is refused with (UTOS-H101/H102), as api/docs/workflow-schemas.md specifies. -->
+        <PackageReference Include="Grpc.StatusProto" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Refuse() maps a schema failure onto google.rpc.BadRequest; the shape is asserted
+             below the gRPC surface so it needs no Docker. -->
+        <InternalsVisibleTo Include="UnitTests" />
         <PackageReference Include="Mediator.Abstractions" />
     </ItemGroup>
 

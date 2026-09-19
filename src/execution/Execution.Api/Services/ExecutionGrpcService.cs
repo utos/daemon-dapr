@@ -6,6 +6,8 @@ using Execution.Domain.Schemas;
 using Execution.Application.Exceptions;
 using Execution.Application.Queries;
 using FluentValidation;
+using Google.Protobuf.WellKnownTypes;
+using Rpc = Google.Rpc;
 using Grpc.Core;
 using Mediator;
 using Utos.Daemon.V1;
@@ -50,13 +52,44 @@ public class ExecutionGrpcService(IMediator mediator)
             // UTOS-H101 / UTOS-H102. No run exists, so this is INVALID_ARGUMENT rather than a
             // failed execution: there is nothing to inspect afterwards and no partial work to
             // undo.
-            //
-            // Every failing location is listed, not the first, because that is the point of the
-            // format — fixing one problem must not reveal the next. They go in the message
-            // rather than in google.rpc.Status details, which is where the spec puts them; that
-            // is a gap, and the difference is machine-readability, not completeness.
-            throw new RpcException(new Status(StatusCode.InvalidArgument, Describe(ex)));
+            throw Refuse(ex);
         }
+    }
+
+    /// <summary>
+    /// A refused schedule, carrying <strong>every</strong> failing location — not the first,
+    /// because fixing one problem must not reveal the next.
+    /// <para>
+    /// The list travels twice, deliberately. As <c>google.rpc.BadRequest</c> in the status
+    /// details, which is the standard type for field-level validation failures, so a generic
+    /// client renders it without knowing anything about Utos. And in the message, so a client
+    /// that reads nothing else still loses no information — only the ability to branch on it
+    /// without parsing prose. That second copy is what lets the NativeAOT CLI stay clear of
+    /// <c>Any</c>, whose type-URL resolution is not statically analysable.
+    /// </para>
+    /// </summary>
+    internal static RpcException Refuse(SchemaValidationFailedException ex)
+    {
+        var bad = new Rpc.BadRequest();
+
+        foreach (var failure in ex.Result.Failures)
+        {
+            bad.FieldViolations.Add(new Rpc.BadRequest.Types.FieldViolation
+            {
+                // An empty instance location is the value itself. Left empty rather than
+                // spelled "(root)": `field` is the contract, and the prose belongs below.
+                Field = failure.InstanceLocation,
+                Reason = failure.Keyword,
+                Description = $"at {failure.KeywordLocation}"
+            });
+        }
+
+        return new Rpc.Status
+        {
+            Code = (int)Rpc.Code.InvalidArgument,
+            Message = Describe(ex),
+            Details = { Any.Pack(bad) }
+        }.ToRpcException();
     }
 
     /// <summary>
