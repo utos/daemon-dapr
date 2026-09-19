@@ -36,20 +36,28 @@ public sealed class SchemaValidationFailedException(
     /// rather than on message text.
     /// </para>
     /// </summary>
-    public ValueMap ToDetails() =>
-        ValueMap.From([
-            new KeyValuePair<string, object?>("schema", ValueMap.From([
-                new KeyValuePair<string, object?>("boundary", BoundaryName(Boundary)),
-                new KeyValuePair<string, object?>("errors", Result.Failures
-                    .Select(object? (failure) => ValueMap.From([
-                        new KeyValuePair<string, object?>("instanceLocation", failure.InstanceLocation),
-                        new KeyValuePair<string, object?>("keyword", failure.Keyword),
-                        new KeyValuePair<string, object?>("keywordLocation", failure.KeywordLocation)
-                    ]))
-                    .ToList()),
-                new KeyValuePair<string, object?>("truncated", Result.Truncated)
-            ]))
-        ]);
+    /// <remarks>
+    /// Plain dictionaries and lists all the way down, not <see cref="ValueMap"/>s: this becomes
+    /// <c>error.details</c> in a rule's scope, and the expression engine navigates the same shape
+    /// a rendered value has. A wrapper type here would read as an opaque object to
+    /// <c>error.details.schema.errors[0].keyword</c>.
+    /// </remarks>
+    public Dictionary<string, object> ToDetails() => new()
+    {
+        ["schema"] = new Dictionary<string, object>
+        {
+            ["boundary"] = BoundaryName(Boundary),
+            ["errors"] = Result.Failures
+                .Select(object (failure) => new Dictionary<string, object>
+                {
+                    ["instanceLocation"] = failure.InstanceLocation,
+                    ["keyword"] = failure.Keyword,
+                    ["keywordLocation"] = failure.KeywordLocation
+                })
+                .ToList(),
+            ["truncated"] = Result.Truncated
+        }
+    };
 
     /// <summary>
     /// Lowercase, matching the spec's <c>boundary</c> values and the corpus's case field. It

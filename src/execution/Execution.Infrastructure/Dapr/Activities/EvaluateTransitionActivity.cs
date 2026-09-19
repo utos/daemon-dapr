@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Common.Workflow.Serialization;
 using Dapr.Workflow;
 using Execution.Domain.Interpreter;
+using Execution.Domain.Schemas;
 using Execution.Domain.Services;
 using Execution.Domain.Templating;
 
@@ -29,9 +30,27 @@ public class EvaluateTransitionActivity(
         var executionContext = await contextStore.LoadContextAsync(input.ExecutionId);
         var session = WorkflowSession.From(executionContext, input.WorkflowKey);
 
-        var decision = interpreter.Advance(
-            session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Outcome,
-            input.Response, input.Error, EvaluationMoment.Capture());
+        TransitionDecision decision;
+        try
+        {
+            decision = interpreter.Advance(
+                session, input.ActivityName, input.ActivityInput, input.ActivityOutput, input.Outcome,
+                input.Response, input.Error, EvaluationMoment.Capture());
+        }
+        catch (SchemaValidationFailedException schema)
+        {
+            // UTOS-H103, H105, H106. Reported the same way an authored `error` action is, so the
+            // run fails with the code the spec gives it and `error.details.schema` carries every
+            // failing location — rather than as an unrecognised exception, which the driver would
+            // report as the generic EXECUTION_FAILED and strip of its details.
+            //
+            // Deliberately NOT routed through on_failure. A transition is the act of leaving, and
+            // a result that violates spec.output is not something an author opts out of: the
+            // caller that trusted the contract is the one that would otherwise carry the damage.
+            return new EvaluateTransitionOutput(
+                null, null, null,
+                Error: new RaisedError(schema.Code, schema.Message, schema.ToDetails()));
+        }
 
         // Leaving is only meaningful on the emitted path — everywhere else there is no
         // subscription to leave — so the driver is told the conclusion rather than the two facts

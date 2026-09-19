@@ -18,6 +18,7 @@
         <PackageReference Include="Grpc.AspNetCore" />
         <!-- google.rpc.Status details on INVALID_ARGUMENT: the schema failure list a schedule
              is refused with (UTOS-H101/H102), as api/docs/workflow-schemas.md specifies. -->
+        <PackageReference Include="Google.Api.CommonProtos" />
         <PackageReference Include="Grpc.StatusProto" />
     </ItemGroup>
 

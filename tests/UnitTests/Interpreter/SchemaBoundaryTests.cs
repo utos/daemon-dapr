@@ -136,14 +136,14 @@ public class SchemaBoundaryTests
         var error = Assert.Throws<SchemaValidationFailedException>(() =>
             Wf.Interpreter().ResolveInput(session, "call", null));
 
-        var schema = Assert.IsType<ValueMap>(error.ToDetails()["schema"]);
+        var schema = Assert.IsType<Dictionary<string, object>>(error.ToDetails()["schema"]);
 
         Assert.Equal("input", schema["boundary"]);
         Assert.Equal(0, schema["truncated"]);
 
-        var errors = Assert.IsType<List<object?>>(schema["errors"]);
-        var reported = errors.Cast<ValueMap>()
-            .Select(e => ((string?)e["instanceLocation"], (string?)e["keyword"]))
+        var errors = Assert.IsType<List<object>>(schema["errors"]);
+        var reported = errors.Cast<Dictionary<string, object>>()
+            .Select(e => ((string)e["instanceLocation"], (string)e["keyword"]))
             .ToList();
 
         // Both halves: the required property that is missing, and the one that is not declared.
