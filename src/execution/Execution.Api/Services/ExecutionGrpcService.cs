@@ -2,6 +2,7 @@ using Common.SeedWork;
 using Common.Workflow.Proto;
 using Execution.Api.Extensions;
 using Execution.Application.Commands;
+using Execution.Domain.Schemas;
 using Execution.Application.Exceptions;
 using Execution.Application.Queries;
 using FluentValidation;
@@ -44,6 +45,38 @@ public class ExecutionGrpcService(IMediator mediator)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
         }
+        catch (SchemaValidationFailedException ex)
+        {
+            // UTOS-H101 / UTOS-H102. No run exists, so this is INVALID_ARGUMENT rather than a
+            // failed execution: there is nothing to inspect afterwards and no partial work to
+            // undo.
+            //
+            // Every failing location is listed, not the first, because that is the point of the
+            // format — fixing one problem must not reveal the next. They go in the message
+            // rather than in google.rpc.Status details, which is where the spec puts them; that
+            // is a gap, and the difference is machine-readability, not completeness.
+            throw new RpcException(new Status(StatusCode.InvalidArgument, Describe(ex)));
+        }
+    }
+
+    /// <summary>
+    /// The complete failure list, one location per line, as the code and the locations are what a
+    /// caller acts on. The code prefix is the contract; the prose around it deliberately is not.
+    /// </summary>
+    private static string Describe(SchemaValidationFailedException ex)
+    {
+        var lines = ex.Result.Failures.Select(f =>
+            $"  {(f.InstanceLocation.Length == 0 ? "(root)" : f.InstanceLocation)}: {f.Keyword}");
+
+        var body = string.Join(Environment.NewLine, lines);
+
+        if (ex.Result.Truncated > 0)
+            body += Environment.NewLine + $"  … and {ex.Result.Truncated} more";
+
+        var subject = ex.Boundary == SchemaBoundary.Env ? "environment" : "input";
+
+        return $"{ex.Code}: the run's {subject} does not satisfy the declared schema."
+               + Environment.NewLine + body;
     }
 
     public override async Task<GetExecutionResponse> GetExecution(
