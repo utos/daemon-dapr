@@ -4,6 +4,7 @@ using Common.Workflow;
 using WorkflowDocument = Utos.Workflows.V1.WorkflowDocument;
 using Execution.Application.Models;
 using Execution.Domain.Interpreter;
+using Execution.Infrastructure.Schemas;
 using Execution.Infrastructure.Templating;
 
 namespace UnitTests.Support;
@@ -43,10 +44,15 @@ internal static class Wf
             env ?? new Dictionary<string, string>());
     }
 
+    /// <summary>
+    /// The real validator, not a stub: schema checking is part of what the interpreter decides,
+    /// so a test double here would let a boundary regress without a single test noticing. Every
+    /// workflow that declares nothing takes the empty-schema path and is unaffected.
+    /// </summary>
     public static WorkflowInterpreter Interpreter()
     {
         var engine = Engine();
-        return new WorkflowInterpreter(engine, new StructRenderer(engine));
+        return new WorkflowInterpreter(engine, new StructRenderer(engine), new JsonSchemaValidator());
     }
 
     public static JintTemplateEngine Engine()
