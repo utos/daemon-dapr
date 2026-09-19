@@ -1,0 +1,12 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "delivered": { "type": "boolean" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "delivered": "true" },
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "/delivered", "keyword": "type" } ]
+  }
+}

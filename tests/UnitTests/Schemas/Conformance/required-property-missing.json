@@ -1,0 +1,13 @@
+{
+  "schema": {
+    "type": "object",
+    "required": ["orderId"],
+    "properties": { "orderId": { "type": "string" } },
+    "unevaluatedProperties": false
+  },
+  "value": {},
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "", "keyword": "required" } ]
+  }
+}

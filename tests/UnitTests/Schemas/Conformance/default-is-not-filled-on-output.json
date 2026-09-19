@@ -1,0 +1,10 @@
+{
+  "boundary": "output",
+  "schema": {
+    "type": "object",
+    "properties": { "bytes": { "type": "integer", "default": 0 } },
+    "unevaluatedProperties": false
+  },
+  "value": {},
+  "expect": { "valid": true }
+}

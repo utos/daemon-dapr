@@ -1,0 +1,16 @@
+{
+  "boundary": "env",
+  "schema": {
+    "type": "object",
+    "required": ["API_BASE"],
+    "properties": {
+      "API_BASE": { "type": "string" },
+      "REGION": { "type": "string", "default": "us-east-1" }
+    }
+  },
+  "value": { "API_BASE": "https://api.example.com" },
+  "expect": {
+    "valid": true,
+    "filled": { "API_BASE": "https://api.example.com", "REGION": "us-east-1" }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "boundary": "emits",
+  "schema": {
+    "type": "object",
+    "required": ["messageId"],
+    "properties": { "messageId": { "type": "string" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "messageId": "m-1" },
+  "expect": { "valid": true }
+}

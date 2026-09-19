@@ -1,0 +1,10 @@
+{
+  "schema": {
+    "type": "object",
+    "required": ["orderId"],
+    "properties": { "orderId": { "type": "string" }, "note": { "type": "string" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "orderId": "A-1" },
+  "expect": { "valid": true }
+}

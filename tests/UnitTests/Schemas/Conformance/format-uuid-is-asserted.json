@@ -1,0 +1,12 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "id": { "type": "string", "format": "uuid" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "id": "not-a-uuid" },
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "/id", "keyword": "format" } ]
+  }
+}

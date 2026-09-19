@@ -1,0 +1,8 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "orderId": { "type": "string" } }
+  },
+  "value": { "orderId": "A-1", "trackingId": "T-9" },
+  "expect": { "valid": true }
+}

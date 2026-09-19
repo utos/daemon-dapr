@@ -1,0 +1,12 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "orderId": { "type": "string" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "orderId": "A-1", "oderId": "A-1" },
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "/oderId", "keyword": "unevaluatedProperties" } ]
+  }
+}

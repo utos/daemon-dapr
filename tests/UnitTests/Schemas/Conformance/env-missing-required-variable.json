@@ -1,0 +1,13 @@
+{
+  "boundary": "env",
+  "schema": {
+    "type": "object",
+    "required": ["API_BASE"],
+    "properties": { "API_BASE": { "type": "string" } }
+  },
+  "value": {},
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "", "keyword": "required" } ]
+  }
+}

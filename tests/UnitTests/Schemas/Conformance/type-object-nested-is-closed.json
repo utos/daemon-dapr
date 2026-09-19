@@ -1,0 +1,19 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": {
+      "customer": {
+        "type": "object",
+        "required": ["email"],
+        "properties": { "email": { "type": "string" } },
+        "unevaluatedProperties": false
+      }
+    },
+    "unevaluatedProperties": false
+  },
+  "value": { "customer": { "email": "a@example.com", "emial": "a@example.com" } },
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "/customer/emial", "keyword": "unevaluatedProperties" } ]
+  }
+}

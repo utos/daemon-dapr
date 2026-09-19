@@ -1,0 +1,17 @@
+{
+  "boundary": "input",
+  "schema": {
+    "type": "object",
+    "required": ["photo"],
+    "properties": {
+      "photo": { "type": "string" },
+      "quality": { "type": "integer", "minimum": 1, "maximum": 100, "default": 80 }
+    },
+    "unevaluatedProperties": false
+  },
+  "value": { "photo": "https://example.com/cat.png" },
+  "expect": {
+    "valid": true,
+    "filled": { "photo": "https://example.com/cat.png", "quality": 80 }
+  }
+}
