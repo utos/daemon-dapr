@@ -17,10 +17,16 @@ public enum ActivityKind
 /// <param name="OnSuccess">
 /// Empty means the run completes after this activity, rather than that it has no successor.
 /// </param>
+/// <param name="Schema">
+/// What this activity declares about the data crossing into it, or null where it declares
+/// nothing — which is the empty schema, satisfied by anything the wire can carry. Optional, so a
+/// bundle written before schemas existed reads back unchanged.
+/// </param>
 public sealed record WorkflowActivity(
     ActivityConfig Config,
     IReadOnlyList<TransitionRule>? OnSuccess = null,
-    IReadOnlyList<TransitionRule>? OnFailure = null)
+    IReadOnlyList<TransitionRule>? OnFailure = null,
+    ActivitySchema? Schema = null)
 {
     public IReadOnlyList<TransitionRule> OnSuccess { get; init; } = OnSuccess ?? [];
 
@@ -28,7 +34,34 @@ public sealed record WorkflowActivity(
 
     [JsonIgnore]
     public ActivityKind Kind => Config.Kind;
+
+    /// <summary>The declared input schema, or null where this activity declares none.</summary>
+    [JsonIgnore]
+    public ValueMap? InputSchema => Schema?.Input;
 }
+
+/// <summary>
+/// What an activity declares about the data crossing into it.
+/// <para>
+/// A record of its own rather than a bare <c>Input</c> on the activity, mirroring the wire
+/// format's <c>ActivitySchema</c> message, so that anything else declarative has somewhere to go
+/// without another field on <see cref="WorkflowActivity"/>.
+/// </para>
+/// <para>
+/// Only <c>Input</c> is declarable. An activity's <em>output</em> shape follows from its kind —
+/// an http activity's is the parsed JSON body or null, a timer's is its input, a
+/// <c>workflow.call</c>'s is the callee's declared <c>spec.output</c> — so it is derived, and
+/// authoring it would be a second place to disagree.
+/// </para>
+/// </summary>
+/// <param name="Input">
+/// A JSON Schema 2020-12 document, held as the domain's own structured value rather than as
+/// proto. It is the only input schema in the system: everything that supplies this activity with
+/// data is checked against it — the run input when it is the start activity, a transition's
+/// rendered input when it is the target, an invoked document's input when it is that document's
+/// start activity.
+/// </param>
+public sealed record ActivitySchema(ValueMap? Input = null);
 
 /// <summary>
 /// What an activity actually does. A closed hierarchy standing in for the wire format's oneof —

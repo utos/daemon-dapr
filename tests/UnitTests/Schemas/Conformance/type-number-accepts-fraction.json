@@ -1,0 +1,9 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "ratio": { "type": "number" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "ratio": 2.5 },
+  "expect": { "valid": true }
+}

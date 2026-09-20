@@ -1,0 +1,9 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "when": { "type": "string", "format": "date-time" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "when": "2026-09-19T12:00:00Z" },
+  "expect": { "valid": true }
+}

@@ -1,0 +1,10 @@
+{
+  "boundary": "input",
+  "schema": {
+    "type": "object",
+    "properties": { "quality": { "type": ["integer", "null"], "default": 80 } },
+    "unevaluatedProperties": false
+  },
+  "value": { "quality": null },
+  "expect": { "valid": true, "filled": { "quality": null } }
+}

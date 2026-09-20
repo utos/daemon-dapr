@@ -1,0 +1,14 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": {
+      "orderId": { "type": "string", "minLength": 3, "pattern": "^A-[0-9]+$" }
+    },
+    "unevaluatedProperties": false
+  },
+  "value": { "orderId": "B-12" },
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "/orderId", "keyword": "pattern" } ]
+  }
+}

@@ -2,9 +2,12 @@ using Common.SeedWork;
 using Common.Workflow.Proto;
 using Execution.Api.Extensions;
 using Execution.Application.Commands;
+using Execution.Domain.Schemas;
 using Execution.Application.Exceptions;
 using Execution.Application.Queries;
 using FluentValidation;
+using Google.Protobuf.WellKnownTypes;
+using Rpc = Google.Rpc;
 using Grpc.Core;
 using Mediator;
 using Utos.Daemon.V1;
@@ -44,6 +47,69 @@ public class ExecutionGrpcService(IMediator mediator)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
         }
+        catch (SchemaValidationFailedException ex)
+        {
+            // UTOS-H101 / UTOS-H102. No run exists, so this is INVALID_ARGUMENT rather than a
+            // failed execution: there is nothing to inspect afterwards and no partial work to
+            // undo.
+            throw Refuse(ex);
+        }
+    }
+
+    /// <summary>
+    /// A refused schedule, carrying <strong>every</strong> failing location — not the first,
+    /// because fixing one problem must not reveal the next.
+    /// <para>
+    /// The list travels twice, deliberately. As <c>google.rpc.BadRequest</c> in the status
+    /// details, which is the standard type for field-level validation failures, so a generic
+    /// client renders it without knowing anything about Utos. And in the message, so a client
+    /// that reads nothing else still loses no information — only the ability to branch on it
+    /// without parsing prose. That second copy is what lets the NativeAOT CLI stay clear of
+    /// <c>Any</c>, whose type-URL resolution is not statically analysable.
+    /// </para>
+    /// </summary>
+    internal static RpcException Refuse(SchemaValidationFailedException ex)
+    {
+        var bad = new Rpc.BadRequest();
+
+        foreach (var failure in ex.Result.Failures)
+        {
+            bad.FieldViolations.Add(new Rpc.BadRequest.Types.FieldViolation
+            {
+                // An empty instance location is the value itself. Left empty rather than
+                // spelled "(root)": `field` is the contract, and the prose belongs below.
+                Field = failure.InstanceLocation,
+                Reason = failure.Keyword,
+                Description = $"at {failure.KeywordLocation}"
+            });
+        }
+
+        return new Rpc.Status
+        {
+            Code = (int)Rpc.Code.InvalidArgument,
+            Message = Describe(ex),
+            Details = { Any.Pack(bad) }
+        }.ToRpcException();
+    }
+
+    /// <summary>
+    /// The complete failure list, one location per line, as the code and the locations are what a
+    /// caller acts on. The code prefix is the contract; the prose around it deliberately is not.
+    /// </summary>
+    private static string Describe(SchemaValidationFailedException ex)
+    {
+        var lines = ex.Result.Failures.Select(f =>
+            $"  {(f.InstanceLocation.Length == 0 ? "(root)" : f.InstanceLocation)}: {f.Keyword}");
+
+        var body = string.Join(Environment.NewLine, lines);
+
+        if (ex.Result.Truncated > 0)
+            body += Environment.NewLine + $"  … and {ex.Result.Truncated} more";
+
+        var subject = ex.Boundary == SchemaBoundary.Env ? "environment" : "input";
+
+        return $"{ex.Code}: the run's {subject} does not satisfy the declared schema."
+               + Environment.NewLine + body;
     }
 
     public override async Task<GetExecutionResponse> GetExecution(

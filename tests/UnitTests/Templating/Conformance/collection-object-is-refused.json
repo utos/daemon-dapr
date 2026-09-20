@@ -1,0 +1,6 @@
+{
+  "form": "collection",
+  "expression": "input.orders",
+  "scope": { "input": { "orders": { "a": 1, "b": 2 } } },
+  "expect": { "error": "UTOS-E105" }
+}

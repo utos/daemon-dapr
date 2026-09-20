@@ -5,7 +5,86 @@ All notable changes to the Utos daemon are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+**Version parity across the Utos repos: the minor is the contract, the patch is
+this daemon's own.** `0.19.x` here means *implements spec 0.19*, the same way it
+does in `utos/cli` and `utos/sdk-dotnet`. If the spec reaches `0.20` and this
+daemon has not implemented it, it stays at `0.19.x` — which is then a true
+statement about what it supports rather than a number a pipeline invented.
+
 ## [Unreleased]
+
+## [0.19.0] - 2026-09-20
+
+### Changed
+
+- **Version parity: `0.1.0` → `0.19.0`** (spec `0.19.0`). The daemon was at `0.1.0` while the spec
+  was at `0.0.18` and `utos/cli` at `0.3.0`, so no version number said which spec this daemon
+  spoke. From here the minor is the contract and the patch is this repo's own, so `0.19.1` is a
+  daemon fix against the same spec and `0.20.0` follows a spec that moved. The jump skips no work
+  — it adopts the spec's line, which had eighteen releases behind it
+- **Utos SDK pins `0.0.18.1` → `0.19.0`.** A `0.19.0` daemon depending on `0.0.18.x` packages would
+  claim a spec line its own dependencies contradict, which is the dishonesty parity exists to
+  remove. Functionally equivalent — spec `0.19.0` is documentation only, so the packages are the
+  same code — but a reader checking should not have to know that
+
+### Added
+
+- **The daemon validates data against a workflow's declared schemas** (spec `0.0.18`,
+  `UTOS-H101`–`UTOS-H107`). Six boundaries: the run input against the start activity's declared
+  input and the run's environment against `spec.env`, both at schedule; a transition's rendered
+  input against the target activity's; an invocation's input against the callee's start activity;
+  a result against `spec.output`; and each emitted value against `spec.emits`. Every slot is
+  optional and an absent one is the empty schema, so a workflow that declares nothing runs exactly
+  as it did. All four Utos SDK pins go `0.0.17.1` → `0.0.18.1`
+- **A conformant 2020-12 evaluator**, behind an `ISchemaValidator` port in the domain for the same
+  reason `ITemplateEngine` is there — whether a value satisfies its declaration is part of the
+  interpretation decision. All 29 cases of the spec's `conformance/schema/` corpus pass, vendored
+  at `v0.0.18`. Three things it does that an off-the-shelf evaluator does not: it reads the leaves
+  of the invalid subtree rather than a flat result list, because a flat one cannot tell an
+  aggregate from a leaf nor a failing branch of a *successful* `anyOf` from a real failure — and
+  `{ "type": ["string", "null"] }`, which is what `nullable` compiles to, always fails one arm; it
+  records an assertion wherever it appears, since an object whose `properties` reported a bad child
+  can also be missing a `required` one; and it enforces `integer` as a *safe* integer, which stock
+  2020-12 does not — it accepts `1e100`
+- **Declared defaults are filled into what is recorded**, not merely into what the first activity
+  reads. A replay reads the recorded input, so the two disagreeing would not be cosmetic. That is
+  why the schedule check lives in `StartExecutionHandler` rather than beside the FluentValidation
+  rules: a validator cannot mutate the command it inspects
+- **A schedule refused for a schema carries every failing location as `google.rpc.BadRequest`**
+  (spec `0.0.19`), the standard type for field-level validation failures, so a generic client
+  renders it knowing nothing about Utos: `field` is `instanceLocation`, `reason` is `keyword`,
+  `description` carries `keywordLocation`. The list also stays in the status message, so a client
+  that reads nothing else loses no information — and a NativeAOT client can skip `Any`, whose
+  type-URL resolution is not statically analysable
+- **`error.details.schema` is readable from an `onFailure` rule**, carrying the boundary and the
+  complete failure list, so a rule can branch on *which field* was wrong rather than on message
+  text. `UTOS-H104` is the one run-time schema boundary a rule may catch: it is the invoking
+  activity failing. A transition, a result and an emitted value fail the run, which for an output
+  is not something an author opts out of
+
+### Fixed
+
+- **A schema failure survives the Dapr boundary with its code and details.** An activity's
+  exception reaches the driver flattened to a message, so the first cut reported `UTOS-H105` as the
+  generic `EXECUTION_FAILED` and stripped its details, and `UTOS-H104` was not catchable at all.
+  Both now travel back as data — the same route an authored `error` action already took — and the
+  driver re-raises them. Found by the integration tests; the unit tests could not see it
+- **`WorkflowMapping` dropped every schema slot in both directions.** `spec.output`, `spec.emits`,
+  `spec.env` and an activity's `schema` were mapped neither in nor out, while the file's own header
+  claims the mapping is "lossless in both directions" — which `GetWorkflow` and
+  `GetExecutionDetails` rely on when they echo a bundle back. So loading a `0.0.18` bundle with
+  schemas and reading it back silently lost them, quite apart from the validation that needs them
+
+- **A bare `error` re-raises the failure being handled** (spec `0.0.17`). An empty `error` action
+  in an `onFailure` rule continues the failure exactly as if no rule had matched it: the driver
+  rethrows the exception it caught, so the run reports the same code, message and details, and a
+  sub-workflow's authored failure stays that failure. The rule log names it `re-raise`. All four
+  Utos SDK pins are bumped `0.0.16.1` → `0.0.17.1`, the first validator that accepts it at load;
+  on `onSuccess` and `onEmitted` it is still `UTOS-T005`
+- **`UTOS-E105` is a conformance case.** The `forEach.collection` check moves from the
+  interpreter into `ForEachCollection`, which the interpreter and the evaluation corpus's new
+  `collection` form both call. The corpus is vendored at `v0.0.17`, including the `error.details`
+  cases; the daemon already put `details` in scope
 
 ## [0.1.0] - 2026-09-16
 

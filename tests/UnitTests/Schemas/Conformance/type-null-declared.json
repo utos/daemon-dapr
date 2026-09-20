@@ -1,0 +1,10 @@
+{
+  "schema": {
+    "type": "object",
+    "required": ["cursor"],
+    "properties": { "cursor": { "type": "null" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "cursor": null },
+  "expect": { "valid": true }
+}

@@ -1,0 +1,13 @@
+{
+  "schema": {
+    "type": "object",
+    "required": ["watermark"],
+    "properties": { "watermark": { "type": ["string", "null"] } },
+    "unevaluatedProperties": false
+  },
+  "value": {},
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "", "keyword": "required" } ]
+  }
+}

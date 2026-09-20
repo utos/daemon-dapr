@@ -1,4 +1,5 @@
 using Common.Workflow;
+using Execution.Domain.Schemas;
 using Execution.Domain.Templating;
 
 namespace Execution.Domain.Interpreter;
@@ -12,8 +13,39 @@ namespace Execution.Domain.Interpreter;
 /// runtime. Given the same session and the same activity outcome it always decides the same
 /// thing, so it can be exercised directly in a unit test.
 /// </summary>
-public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRenderer structRenderer)
+public sealed class WorkflowInterpreter(
+    ITemplateEngine templateEngine,
+    StructRenderer structRenderer,
+    ISchemaValidator schemaValidator)
 {
+    /// <summary>
+    /// Applies a declaration to a value the interpreter has just rendered, and throws
+    /// <see cref="SchemaValidationFailedException"/> if it does not satisfy it.
+    /// <para>
+    /// Deliberately the same shape at every boundary: the check is the same one, and what differs
+    /// is only the code it carries and — outside this class — whether an <c>onFailure</c> rule
+    /// can catch it.
+    /// </para>
+    /// </summary>
+    private Dictionary<string, object>? Check(
+        ValueMap? schema, Dictionary<string, object>? value, SchemaBoundary boundary, string code)
+    {
+        if (schema is null || schema.Count == 0) return value;
+
+        var subject = ValueMap.From(
+            (value ?? []).Select(entry => new KeyValuePair<string, object?>(entry.Key, entry.Value)));
+
+        var result = schemaValidator.Validate(schema, subject, boundary);
+
+        if (!result.IsValid) throw new SchemaValidationFailedException(code, boundary, result);
+
+        // Defaults are filled at an inbound boundary, and the filled value is what travels on —
+        // so a replay sees exactly what the activity saw.
+        return result.Value.Fields
+            .Where(entry => entry.Value is not null)
+            .ToDictionary(entry => entry.Key, entry => entry.Value!);
+    }
+
     /// <summary>
     /// Where <paramref name="activityName"/> sends the execution, given what it produced.
     /// Rules are evaluated in order and the first whose condition matches wins.
@@ -80,6 +112,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         // folded into the loop below.
         if (outcome == ActivityOutcomeKind.Emitted)
             return DispatchEmitted(
+                session,
                 (activity.Config as CallActivityConfig)?.OnEmitted ?? [],
                 scope, activityName, passThrough);
 
@@ -103,13 +136,14 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             // Condition matched (or no condition) — execute the action
             TransitionDecision decision = rule switch
             {
-                { Transition: not null } => Goto(rule.Transition, scope, passThrough),
+                { Transition: not null } => Goto(session, rule.Transition, scope, passThrough),
 
-                { Result: not null } => Return(rule.Result, scope),
+                { Result: not null } => Return(session, rule.Result, scope),
 
-                { Emit: not null } => Emit(rule.Emit, scope, passThrough, activityName),
+                { Emit: not null } => Emit(session, rule.Emit, scope, passThrough, activityName),
 
-                { Error: not null } => Fail(rule.Error, scope),
+                { Error: not null } => Fail(rule.Error, scope,
+                    failureInScope: outcome == ActivityOutcomeKind.Failed),
 
                 _ => throw new InvalidOperationException(
                     "Transition rule has no action set (none of transition, result, emit or error)")
@@ -139,6 +173,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     /// </para>
     /// </summary>
     private TransitionDecision DispatchEmitted(
+        WorkflowSession session,
         IReadOnlyList<EmissionRule> rules,
         TemplateScope scope,
         string callActivityName,
@@ -155,18 +190,26 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
 
             TransitionDecision decision = rule switch
             {
+                // UTOS-H104 again: a handler dispatch starts a document, so its input answers to
+                // that document's start activity like any other invocation.
                 { Handle: not null } => new TransitionDecision.Dispatch(
                     rule.Handle.Workflow,
                     rule.Handle.StartActivity,
-                    rule.Handle.Input != null
-                        ? structRenderer.Render(rule.Handle.Input, scope)
-                        : passThrough as Dictionary<string, object>),
+                    Check(
+                        session.DeclaredInputOf(rule.Handle.Workflow, rule.Handle.StartActivity),
+                        rule.Handle.Input != null
+                            ? structRenderer.Render(rule.Handle.Input, scope)
+                            : passThrough as Dictionary<string, object>,
+                        SchemaBoundary.Input,
+                        SchemaValidation.InvocationInput)),
 
-                { Transition: not null } => Goto(rule.Transition, scope, passThrough),
+                { Transition: not null } => Goto(session, rule.Transition, scope, passThrough),
 
-                { Result: not null } => Return(rule.Result, scope),
+                { Result: not null } => Return(session, rule.Result, scope),
 
-                { Error: not null } => Fail(rule.Error, scope),
+                // A value arrived, not a failure: an empty error has nothing to re-raise here, and
+                // UTOS-T005 refuses one at load.
+                { Error: not null } => Fail(rule.Error, scope, failureInScope: false),
 
                 _ => throw new InvalidOperationException(
                     "Emission rule has no action set (none of handle, transition, result or error)")
@@ -237,7 +280,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             HttpActivityConfig http => ResolveHttp(http, scope, activityName),
 
             SubWorkflowActivityConfig subWorkflow =>
-                ResolveSubWorkflow(subWorkflow, scope, activityInput),
+                ResolveSubWorkflow(session, subWorkflow, scope, activityInput),
 
             _ => throw new NotSupportedException(
                 $"Unsupported activity config type '{activity.Kind}' for activity '{activityName}'")
@@ -281,12 +324,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
                 // Dynamic expansion: evaluate collection, iterate with alias. The collection is a
                 // whole-field template that must yield an array; a string, an object or nothing
                 // is an authoring error, not an empty expansion.
-                var rendered = templateEngine.RenderTyped(branch.ForEach.Collection, scope);
-                if (rendered is not IEnumerable<object?> items || rendered is string)
-                    throw new TemplateException("UTOS-E105",
-                        $"forEach collection `{branch.ForEach.Collection}` must evaluate to an array.");
-
-                var collection = items.ToList();
+                var collection = ForEachCollection.Evaluate(templateEngine, branch.ForEach.Collection, scope);
 
                 var scopes = collection
                     .Select(item => scope.With(branch.ForEach.Alias, item))
@@ -304,7 +342,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
                 var distinct = names.Distinct(StringComparer.Ordinal).Count() == names.Count;
 
                 for (var index = 0; index < scopes.Count; index++)
-                    branches.Add(PlanBranch(branch,
+                    branches.Add(PlanBranch(session, branch,
                         distinct ? names[index] : $"{names[index]}_{index}",
                         scopes[index], activityInput));
             }
@@ -312,7 +350,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
             {
                 // Static branch: single resolution. Its name is rendered too — a template with
                 // nothing to bind renders to itself, so this costs nothing and means one rule.
-                branches.Add(PlanBranch(branch, RenderBranchName(branch, scope), scope, activityInput));
+                branches.Add(PlanBranch(session, branch, RenderBranchName(branch, scope), scope, activityInput));
             }
         }
 
@@ -336,9 +374,11 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         return new PromiseExpansion(promise.Mode, promise.RequiredCount, branches);
     }
 
-    private TransitionDecision Goto(TransitionTarget target, TemplateScope scope, object? activityOutput)
+    private TransitionDecision Goto(
+        WorkflowSession session, TransitionTarget target, TemplateScope scope, object? activityOutput)
     {
-        return new TransitionDecision.Goto(target.Name, ResolveTransitionInput(target, scope, activityOutput));
+        return new TransitionDecision.Goto(
+            target.Name, ResolveTransitionInput(session, target, scope, activityOutput));
     }
 
     /// <summary>
@@ -347,19 +387,37 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     /// else is rendered, and a map whose templates all render to nothing is still a value — the
     /// author wrote fields.
     /// </summary>
-    private TransitionDecision Return(ValueMap result, TemplateScope scope)
+    private TransitionDecision Return(WorkflowSession session, ValueMap result, TemplateScope scope)
     {
-        return new TransitionDecision.Return(
-            result.Fields.Count == 0 ? null : structRenderer.Render(result, scope));
+        // UTOS-H105. Checked even when the path ends with no value: a workflow that declares an
+        // output and returns nothing has not satisfied its contract, and the empty map is what
+        // `required` is there to catch.
+        var value = Check(
+            session.Graph.Workflow.Spec.Output,
+            result.Fields.Count == 0 ? null : structRenderer.Render(result, scope),
+            SchemaBoundary.Output,
+            SchemaValidation.Result);
+
+        return new TransitionDecision.Return(result.Fields.Count == 0 ? null : value);
     }
 
     /// <summary>
     /// The reason is rendered here, in the rule's own scope, so that <c>{{ error.message }}</c>
     /// and <c>{{ response.status }}</c> mean what they mean on every other field of the rule. The
     /// code is never rendered: it is the literal a consumer switches on.
+    /// <para>
+    /// An error with no fields, where a failure is in scope, is the re-raise (spec 0.0.17): the
+    /// failure being handled continues exactly as if no rule had matched it — the same exception,
+    /// so the same code, message and details, and a sub-workflow's authored failure stays that
+    /// failure. That is <see cref="TransitionDecision.Propagate"/>, carrying the rule that matched
+    /// so the log still says which one re-raised it.
+    /// </para>
     /// </summary>
-    private TransitionDecision Fail(ErrorAction error, TemplateScope scope)
+    private TransitionDecision Fail(ErrorAction error, TemplateScope scope, bool failureInScope)
     {
+        if (failureInScope && IsReraise(error))
+            return new TransitionDecision.Propagate();
+
         // UTOS-T005 rejects an empty code at load; this is the backstop for a bundle that reached
         // the interpreter without it, so the run still reports *something* a client can match.
         var code = string.IsNullOrEmpty(error.Code) ? WorkflowErrorContext.UnspecifiedCode : error.Code;
@@ -375,39 +433,73 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     }
 
     /// <summary>
+    /// No code, no message template, no details — the wire's empty <c>WorkflowError</c>, which the
+    /// source format writes as a bare <c>error</c>. A partly written one is not a re-raise; it is
+    /// refused at load (<c>UTOS-T005</c>) and reaches <see cref="Fail"/>'s backstop otherwise.
+    /// </summary>
+    private static bool IsReraise(ErrorAction error) =>
+        string.IsNullOrEmpty(error.Code) && error.Message == null && error.Details == null;
+
+    /// <summary>
     /// The value to append and where the run goes once it is durable. The target is required —
     /// an emit is not a terminal action, so a rule that emits and goes nowhere is a dead end
     /// rather than a return. <c>UTOS-T004</c> rejects that at load; this is the backstop for a
     /// bundle that reached the interpreter without it.
     /// </summary>
     private TransitionDecision Emit(
-        EmitAction emit, TemplateScope scope, object? activityOutput, string activityName)
+        WorkflowSession session, EmitAction emit, TemplateScope scope, object? activityOutput,
+        string activityName)
     {
         var target = emit.Transition
                      ?? throw new InvalidOperationException(
                          $"Emit rule on activity '{activityName}' has no transition target.");
 
+        // UTOS-H106. `spec.emits` describes one emitted value, and an emit that violates it fails
+        // the run for the same reason a bad result does: a consumer's onEmitted rules depend on
+        // that declaration exactly as a caller depends on a result.
+        var rendered = structRenderer.Render(emit.Value ?? ValueMap.Empty, scope);
+
+        // Check returns null only for a null input, and a rendered value never is — an emit with
+        // no value renders the empty map. The coalesce says so to the compiler rather than
+        // asserting it away.
+        var value = Check(
+            session.Graph.Workflow.Spec.Emits,
+            rendered,
+            SchemaBoundary.Emits,
+            SchemaValidation.EmittedValue) ?? rendered;
+
         return new TransitionDecision.Emit(
-            structRenderer.Render(emit.Value ?? ValueMap.Empty, scope),
+            value,
             target.Name,
-            ResolveTransitionInput(target, scope, activityOutput));
+            ResolveTransitionInput(session, target, scope, activityOutput));
     }
 
     /// <summary>
     /// Resolves the mapped input for the target activity.
     /// If the transition target has an explicit input transform, renders it.
     /// Otherwise, passes the raw activity output through as-is.
+    /// <para>
+    /// The result is then checked against what the target declares (<c>UTOS-H103</c>), including
+    /// the pass-through case: an activity's declaration is about the data it receives, not about
+    /// how the previous one chose to hand it over.
+    /// </para>
     /// </summary>
     private Dictionary<string, object>? ResolveTransitionInput(
+        WorkflowSession session,
         TransitionTarget target,
         TemplateScope scope,
         object? activityOutput)
     {
-        if (target.Input != null)
-            return structRenderer.Render(target.Input, scope);
+        var resolved = target.Input != null
+            ? structRenderer.Render(target.Input, scope)
+            // Pass-through: raw output becomes the next activity's input
+            : activityOutput as Dictionary<string, object>;
 
-        // Pass-through: raw output becomes the next activity's input
-        return activityOutput as Dictionary<string, object>;
+        var declared = session.Graph.TryGetActivity(target.Name, out var destination)
+            ? destination.InputSchema
+            : null;
+
+        return Check(declared, resolved, SchemaBoundary.Input, SchemaValidation.TransitionInput);
     }
 
     private ResolvedActivityInput ResolveHttp(
@@ -437,13 +529,23 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     }
 
     private ResolvedActivityInput ResolveSubWorkflow(
+        WorkflowSession session,
         SubWorkflowActivityConfig config,
         TemplateScope scope,
         IReadOnlyDictionary<string, object>? rawActivityInput)
     {
-        var subInput = config.Input != null
+        var rendered = config.Input != null
             ? structRenderer.Render(config.Input, scope)
             : AsMutable(rawActivityInput);
+
+        // UTOS-H104, against the callee's start activity. Unlike the other three this failure is
+        // catchable: it is the calling activity failing, so its own onFailure rules apply as they
+        // would to any other failure of that activity.
+        var subInput = Check(
+            session.DeclaredInputOf(config.Workflow, config.StartActivity),
+            rendered,
+            SchemaBoundary.Input,
+            SchemaValidation.InvocationInput);
 
         // The orchestrator still asks a yes/no question here — await the child or not — so the
         // mode collapses to a flag at this boundary rather than the shape being threaded further.
@@ -461,6 +563,7 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
         templateEngine.RenderToString(branch.Name, scope);
 
     private PromiseBranchPlan PlanBranch(
+        WorkflowSession session,
         PromiseBranch branch,
         string branchName,
         TemplateScope scope,
@@ -468,10 +571,17 @@ public sealed class WorkflowInterpreter(ITemplateEngine templateEngine, StructRe
     {
         // A branch names a document, so there is nothing to look up in this workflow and no
         // activity kind to reason about. The bundle is self-contained and UTOS-C501-C503 already
-        // checked that the document and its entry activity exist, so this only renders input.
-        var branchInput = branch.Input != null
+        // checked that the document and its entry activity exist, so this renders input and
+        // checks it against what that entry activity declares (UTOS-H104).
+        var rendered = branch.Input != null
             ? structRenderer.Render(branch.Input, scope)
             : AsMutable(activityInput);
+
+        var branchInput = Check(
+            session.DeclaredInputOf(branch.Workflow, branch.StartActivity),
+            rendered,
+            SchemaBoundary.Input,
+            SchemaValidation.InvocationInput);
 
         return new PromiseBranchPlan(branchName, branch.Workflow, branch.StartActivity, branchInput);
     }

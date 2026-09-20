@@ -26,6 +26,33 @@ public class TestWorkflowBuilder
     private readonly ExecutionPayload _input = new();
     private readonly Dictionary<string, string> _env = new();
     private readonly Dictionary<string, Workflow> _dependentWorkflows = new();
+    private Struct? _output;
+    private Struct? _emits;
+    private Struct? _envSchema;
+
+    /// <summary>What this workflow returns — <c>spec.output</c>. A violating result fails the run.</summary>
+    public TestWorkflowBuilder Returning(Struct schema)
+    {
+        _output = schema;
+        return this;
+    }
+
+    /// <summary>One value this workflow emits — <c>spec.emits</c>, not the stream.</summary>
+    public TestWorkflowBuilder Emitting(Struct schema)
+    {
+        _emits = schema;
+        return this;
+    }
+
+    /// <summary>
+    /// The ambient environment this workflow requires — <c>spec.env</c>. Never a closed object:
+    /// a run tree shares one environment and a sub-workflow inherits its parent's.
+    /// </summary>
+    public TestWorkflowBuilder Requiring(Struct schema)
+    {
+        _envSchema = schema;
+        return this;
+    }
 
     public TestWorkflowBuilder(string workflowName, string mockBaseUrl,
         string? version = null, string? description = null)
@@ -152,6 +179,12 @@ public class TestWorkflowBuilder
         var spec = new WorkflowSpec();
         foreach (var (name, activity) in _activities)
             spec.Activities.Add(name, activity);
+
+        // The workflow's own contract, where the test declared one. Absent means "declares
+        // nothing", which anything satisfies — so every existing fixture is unaffected.
+        if (_output is not null) spec.Output = _output;
+        if (_emits is not null) spec.Emits = _emits;
+        if (_envSchema is not null) spec.Env = _envSchema;
 
         var workflow = new Workflow
         {
@@ -375,6 +408,17 @@ public class ActivityBuilder
         _activity = activity;
     }
 
+    /// <summary>
+    /// What this activity accepts — <c>ActivitySchema.input</c>, in the compiled form a bundle
+    /// carries. The source format's short form is compiled away by the CLI, so a daemon-side
+    /// fixture writes plain JSON Schema, as a loaded bundle does.
+    /// </summary>
+    public ActivityBuilder Accepting(Struct schema)
+    {
+        _activity.Schema = new ActivitySchema { Input = schema };
+        return this;
+    }
+
     public ActivityBuilder OnSuccess(string targetActivity, Struct? input = null, string? when = null)
     {
         var target = new TransitionTarget { Name = targetActivity };
@@ -465,6 +509,21 @@ public class ActivityBuilder
     public ActivityBuilder OnFailureError(string code, string? message = null, Struct? details = null, string? when = null)
     {
         _activity.OnFailure.Add(ErrorRule(code, message, details, when));
+        return this;
+    }
+
+    /// <summary>
+    /// Re-raises the failure being handled, as it is: an empty <c>WorkflowError</c>, which is what a
+    /// bare <c>error</c> in the source format becomes (spec 0.0.17).
+    /// </summary>
+    public ActivityBuilder OnFailureReraise(string? when = null)
+    {
+        var rule = new TransitionRule { Error = new Utos.Workflows.V1.WorkflowError() };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnFailure.Add(rule);
         return this;
     }
 

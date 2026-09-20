@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Common.Workflow.Serialization;
 using Dapr.Workflow;
 using Execution.Domain.Interpreter;
+using Execution.Domain.Schemas;
 using Execution.Domain.Services;
 using Execution.Domain.Templating;
 using Common.Workflow;
@@ -30,7 +31,11 @@ public sealed record ResolveActivityInputOutput(
     Dictionary<string, object>? WorkflowInput,
     // True when the sub-workflow is fire-and-forget: the executor starts it as an independent
     // execution and does not await it. False for HTTP and awaited sub-workflows.
-    bool Detached = false);
+    bool Detached = false,
+    // UTOS-H104: the invocation input did not satisfy the callee's declared input. Carried as
+    // data rather than thrown, because an exception crossing the Dapr boundary arrives flattened
+    // to a message — the driver re-raises it so the code and the details survive.
+    RaisedError? Error = null);
 
 /// <summary>
 /// Durable boundary around <see cref="WorkflowInterpreter.ResolveInput"/>, flattening its
@@ -49,8 +54,23 @@ public class ResolveActivityInputActivity(
 
         // Drawn here, inside the activity, so a replay reads this result rather than drawing
         // again — see EvaluateTransitionActivity.
-        var resolved = interpreter.ResolveInput(
-            session, input.ActivityName, input.ActivityInput, EvaluationMoment.Capture());
+        ResolvedActivityInput resolved;
+        try
+        {
+            resolved = interpreter.ResolveInput(
+                session, input.ActivityName, input.ActivityInput, EvaluationMoment.Capture());
+        }
+        catch (SchemaValidationFailedException schema)
+        {
+            // UTOS-H104, returned rather than thrown: a Dapr activity's exception reaches the
+            // driver flattened to a message, so a thrown one would lose its code and its failing
+            // locations and be reported as the generic EXECUTION_FAILED. The driver re-raises
+            // this as a coded failure of *this activity*, which is what makes H104 the one
+            // run-time schema boundary an on_failure rule may catch.
+            return new ResolveActivityInputOutput(
+                ActivityKind.Workflow, null, null, null, null, null, null, null,
+                Error: new RaisedError(schema.Code, schema.Message, schema.ToDetails()));
+        }
 
         return resolved switch
         {

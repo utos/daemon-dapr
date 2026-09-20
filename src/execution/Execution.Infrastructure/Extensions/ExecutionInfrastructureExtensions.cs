@@ -18,6 +18,8 @@ using Execution.Application.Repositories;
 using Execution.Application.Services;
 using Execution.Domain.Events;
 using Execution.Domain.Interpreter;
+using Execution.Domain.Schemas;
+using Execution.Infrastructure.Schemas;
 using Execution.Domain.Services;
 using Execution.Domain.Templating;
 using Execution.Infrastructure.Context;
@@ -87,6 +89,11 @@ public static class ExecutionInfrastructureExtensions
         builder.Services.Configure<TemplateEngineOptions>(
             builder.Configuration.GetSection(TemplateEngineOptions.SectionName));
         builder.Services.AddSingleton<ITemplateEngine, JintTemplateEngine>();
+
+        // Applies a workflow's declared schemas to the data crossing a boundary. A singleton
+        // because it caches compiled schemas, and safe as one because it holds no per-run state
+        // and is pure given the schema and the value.
+        builder.Services.AddSingleton<ISchemaValidator, JsonSchemaValidator>();
 
         // Add the workflow interpreter (pure decision logic, no Dapr/EF)
         builder.Services.AddSingleton<StructRenderer>();

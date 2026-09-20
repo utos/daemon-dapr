@@ -1,0 +1,15 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": {
+      "kind": { "const": "order" },
+      "level": { "type": "string", "enum": ["debug", "info", "warn"] }
+    },
+    "unevaluatedProperties": false
+  },
+  "value": { "kind": "order", "level": "trace" },
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "/level", "keyword": "enum" } ]
+  }
+}

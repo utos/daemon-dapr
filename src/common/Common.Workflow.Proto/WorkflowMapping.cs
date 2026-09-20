@@ -73,7 +73,10 @@ public static class WorkflowMapping
         new(source.Activities.ToDictionary(entry => entry.Key, entry => entry.Value.ToDomain()),
             source.Dependencies.Count == 0
                 ? null
-                : source.Dependencies.ToDictionary(entry => entry.Key, entry => entry.Value));
+                : source.Dependencies.ToDictionary(entry => entry.Key, entry => entry.Value),
+            source.Output?.ToDomain(),
+            source.Emits?.ToDomain(),
+            source.Env?.ToDomain());
 
     public static Wire.WorkflowSpec ToProto(this Domain.WorkflowSpec source)
     {
@@ -85,6 +88,14 @@ public static class WorkflowMapping
         foreach (var (alias, reference) in source.DependencyMap)
             result.Dependencies[alias] = reference;
 
+        // Absent and present-but-empty are different declarations: no schema is "declares
+        // nothing", which anything satisfies, while an empty one is a closed object with no
+        // properties, which only {} satisfies. Mapping null to an empty Struct would turn the
+        // first into the second and change what the workflow accepts.
+        if (source.Output is not null) result.Output = source.Output.ToProto();
+        if (source.Emits is not null) result.Emits = source.Emits.ToProto();
+        if (source.Env is not null) result.Env = source.Env.ToProto();
+
         return result;
     }
 
@@ -93,7 +104,8 @@ public static class WorkflowMapping
     public static Domain.WorkflowActivity ToDomain(this Wire.WorkflowActivity source) =>
         new(source.ToDomainConfig(),
             source.OnSuccess.Select(ToDomain).ToList(),
-            source.OnFailure.Select(ToDomain).ToList());
+            source.OnFailure.Select(ToDomain).ToList(),
+            source.Schema is null ? null : new Domain.ActivitySchema(source.Schema.Input?.ToDomain()));
 
     public static Wire.WorkflowActivity ToProto(this Domain.WorkflowActivity source)
     {
@@ -124,6 +136,12 @@ public static class WorkflowMapping
 
         result.OnSuccess.AddRange(source.OnSuccess.Select(ToProto));
         result.OnFailure.AddRange(source.OnFailure.Select(ToProto));
+
+        if (source.Schema is not null)
+        {
+            result.Schema = new Wire.ActivitySchema();
+            if (source.Schema.Input is not null) result.Schema.Input = source.Schema.Input.ToProto();
+        }
 
         return result;
     }

@@ -1,0 +1,9 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "bytes": { "type": "integer" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "bytes": 10.0 },
+  "expect": { "valid": true }
+}

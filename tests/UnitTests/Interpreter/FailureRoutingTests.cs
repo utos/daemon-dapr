@@ -158,4 +158,59 @@ public class FailureRoutingTests
         var returned = Assert.IsType<TransitionDecision.Return>(decision);
         Assert.Equal(true, Assert.IsAssignableFrom<Dictionary<string, object>>(returned.Value)["handled"]);
     }
+
+    // ---- the re-raise (spec 0.0.17): a bare `error` on onFailure -------------------------------
+
+    private static TransitionRule BareError(string? condition = null) =>
+        new(Error: new ErrorAction(string.Empty), Condition: condition);
+
+    [Fact]
+    public void A_bare_error_on_the_failure_path_reraises_the_failure_as_it_is()
+    {
+        // Propagate, not Fail: the driver rethrows the exception it caught, so the failure keeps
+        // its own code, message and details — a sub-workflow's authored failure stays that failure.
+        var decision = Advance(Failing(
+            onFailure:
+            [
+                Wf.Goto("backoff", condition: "response.status === 429"),
+                BareError()
+            ]),
+            response: new HttpResponseContext(500, [], null));
+
+        Assert.IsType<TransitionDecision.Propagate>(decision);
+        Assert.Equal(new RuleMatch("onFailure", 2, 2), decision.Match);
+    }
+
+    [Fact]
+    public void A_bare_error_reraises_only_when_its_condition_matches()
+    {
+        var decision = Advance(Failing(
+            onFailure: [BareError(condition: "error.code === 'CARD_DECLINED'"), Wf.Goto("giveup")]),
+            error: new WorkflowErrorContext("RATE_LIMITED", "slow down"));
+
+        Assert.Equal("giveup", Assert.IsType<TransitionDecision.Goto>(decision).ActivityName);
+    }
+
+    [Fact]
+    public void A_partly_written_error_on_the_failure_path_is_not_a_reraise()
+    {
+        // UTOS-T005 refuses this at load. Should one reach the interpreter anyway, it fails with the
+        // backstop code rather than quietly re-raising — a message with no code is a mistake.
+        var decision = Advance(Failing(
+            onFailure: [new TransitionRule(Error: new ErrorAction(string.Empty, "wrapped: {{ error.message }}"))]));
+
+        var fail = Assert.IsType<TransitionDecision.Fail>(decision);
+        Assert.Equal(WorkflowErrorContext.UnspecifiedCode, fail.Code);
+        Assert.Equal("wrapped: boom", fail.Message);
+    }
+
+    [Fact]
+    public void A_bare_error_on_the_success_path_has_nothing_to_reraise()
+    {
+        var graph = Wf.Graph(("call", Failing(onFailure: null, BareError())));
+
+        var decision = _interpreter.Advance(Wf.Session(graph, null), "call", null, Wf.Fields(("ok", true)));
+
+        Assert.Equal(WorkflowErrorContext.UnspecifiedCode, Assert.IsType<TransitionDecision.Fail>(decision).Code);
+    }
 }

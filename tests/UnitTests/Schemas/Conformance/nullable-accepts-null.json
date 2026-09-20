@@ -1,0 +1,9 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "watermark": { "type": ["string", "null"] } },
+    "unevaluatedProperties": false
+  },
+  "value": { "watermark": null },
+  "expect": { "valid": true }
+}
