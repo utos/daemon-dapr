@@ -14,6 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # First, because it is the cheapest thing that can be wrong and the most expensive to
+      # discover late: at release time the mistake is a tag and a published artifact.
+      - name: Version parity
+        run: scripts/check-version-parity.sh
+
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
