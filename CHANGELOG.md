@@ -22,6 +22,10 @@ statement about what it supports rather than a number a pipeline invented.
   spoke. From here the minor is the contract and the patch is this repo's own, so `0.19.1` is a
   daemon fix against the same spec and `0.20.0` follows a spec that moved. The jump skips no work
   — it adopts the spec's line, which had eighteen releases behind it
+- **Utos SDK pins `0.0.18.1` → `0.19.0`.** A `0.19.0` daemon depending on `0.0.18.x` packages would
+  claim a spec line its own dependencies contradict, which is the dishonesty parity exists to
+  remove. Functionally equivalent — spec `0.19.0` is documentation only, so the packages are the
+  same code — but a reader checking should not have to know that
 
 ### Added
 
