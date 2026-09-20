@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Common.Workflow;
 using Execution.Domain.Schemas;
 using Json.Schema;
@@ -58,27 +59,35 @@ public sealed class JsonSchemaValidator(SchemaValidatorOptions? options = null) 
         var started = DateTimeOffset.UtcNow;
 
         EvaluationResults results;
-        using (var document = JsonDocument.Parse(valueJson))
+        try
         {
-            results = compiled.Evaluate(document.RootElement, new EvaluationOptions
-            {
-                // Hierarchical, never List: a flat result cannot distinguish an aggregate from a
-                // leaf, nor a failing branch of a *successful* anyOf from a real failure. See
-                // Leaves below.
-                OutputFormat = OutputFormat.Hierarchical,
-
-                // Formats are asserted here, not annotated. 2020-12 treats `format` as an
-                // annotation unless a validator opts in, which would make a declared `uuid`
-                // check nothing.
-                RequireFormatValidation = true
-            });
+            results = Evaluate(compiled, valueJson);
+        }
+        catch (RegexMatchTimeoutException e)
+        {
+            // UTOS-H107, and the case it exists for. A `pattern` that is a perfectly valid regular
+            // expression — so UTOS-H010 accepts it at load — can still take exponential time on an
+            // adversarial string: `^(a+)+$` against a run of 'a's ending in anything else is the
+            // textbook shape, and an author reaching for a hand-written email or URL pattern
+            // writes something like it by accident.
+            //
+            // The schema is not the attacker's: it is in a bundle, loaded by an operator, length-
+            // bounded by UTOS-H012. The *value* often is — a transition's input is derived from
+            // an HTTP activity's `output`, which is a third party's response body.
+            //
+            // The match is already bounded (the evaluator imposes its own timeout), so this
+            // reports rather than prevents. Converting it here is what makes it the spec's code
+            // with the spec's meaning, instead of a generic failure with a stack trace.
+            throw new SchemaBudgetExceededException(
+                "Evaluating a `pattern` in the declared schema exceeded its time budget: " + e.Message);
         }
 
         var elapsed = DateTimeOffset.UtcNow - started;
         if (elapsed > _options.Budget)
         {
-            // UTOS-H107. Detection after the fact rather than interruption — see
-            // SchemaValidatorOptions.Budget for what that does and does not buy.
+            // The secondary net, for slowness that is not one runaway match — a very large value
+            // against a very large schema. Checked after the fact rather than interrupting, which
+            // is what bounds what it is worth; see SchemaValidatorOptions.Budget.
             throw new SchemaBudgetExceededException(
                 $"Evaluating the declared schema took {elapsed.TotalMilliseconds:F0}ms, "
                 + $"over the budget of {_options.Budget.TotalMilliseconds:F0}ms.");
@@ -102,6 +111,25 @@ public sealed class JsonSchemaValidator(SchemaValidatorOptions? options = null) 
         }
 
         return new SchemaValidationResult(false, failures, truncated, effective);
+    }
+
+    private static EvaluationResults Evaluate(JsonSchema compiled, string valueJson)
+    {
+        using (var document = JsonDocument.Parse(valueJson))
+        {
+            return compiled.Evaluate(document.RootElement, new EvaluationOptions
+            {
+                // Hierarchical, never List: a flat result cannot distinguish an aggregate from a
+                // leaf, nor a failing branch of a *successful* anyOf from a real failure. See
+                // Leaves below.
+                OutputFormat = OutputFormat.Hierarchical,
+
+                // Formats are asserted here, not annotated. 2020-12 treats `format` as an
+                // annotation unless a validator opts in, which would make a declared `uuid`
+                // check nothing.
+                RequireFormatValidation = true
+            });
+        }
     }
 
     /// <summary>An inbound boundary fills declared defaults; an outbound one never does.</summary>
