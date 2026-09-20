@@ -457,11 +457,16 @@ public sealed class WorkflowInterpreter(
         // UTOS-H106. `spec.emits` describes one emitted value, and an emit that violates it fails
         // the run for the same reason a bad result does: a consumer's onEmitted rules depend on
         // that declaration exactly as a caller depends on a result.
+        var rendered = structRenderer.Render(emit.Value ?? ValueMap.Empty, scope);
+
+        // Check returns null only for a null input, and a rendered value never is — an emit with
+        // no value renders the empty map. The coalesce says so to the compiler rather than
+        // asserting it away.
         var value = Check(
             session.Graph.Workflow.Spec.Emits,
-            structRenderer.Render(emit.Value ?? ValueMap.Empty, scope),
+            rendered,
             SchemaBoundary.Emits,
-            SchemaValidation.EmittedValue);
+            SchemaValidation.EmittedValue) ?? rendered;
 
         return new TransitionDecision.Emit(
             value,
