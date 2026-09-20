@@ -5,7 +5,27 @@ All notable changes to the Utos daemon are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+**Version parity across the Utos repos: the minor is the contract, the patch is
+this daemon's own.** `0.19.x` here means *implements spec 0.19*, the same way it
+does in `utos/cli` and `utos/sdk-dotnet`. If the spec reaches `0.20` and this
+daemon has not implemented it, it stays at `0.19.x` — which is then a true
+statement about what it supports rather than a number a pipeline invented.
+
 ## [Unreleased]
+
+## [0.19.0]
+
+### Changed
+
+- **Version parity: `0.1.0` → `0.19.0`** (spec `0.19.0`). The daemon was at `0.1.0` while the spec
+  was at `0.0.18` and `utos/cli` at `0.3.0`, so no version number said which spec this daemon
+  spoke. From here the minor is the contract and the patch is this repo's own, so `0.19.1` is a
+  daemon fix against the same spec and `0.20.0` follows a spec that moved. The jump skips no work
+  — it adopts the spec's line, which had eighteen releases behind it
+- **Utos SDK pins `0.0.18.1` → `0.19.0`.** A `0.19.0` daemon depending on `0.0.18.x` packages would
+  claim a spec line its own dependencies contradict, which is the dishonesty parity exists to
+  remove. Functionally equivalent — spec `0.19.0` is documentation only, so the packages are the
+  same code — but a reader checking should not have to know that
 
 ### Added
 
