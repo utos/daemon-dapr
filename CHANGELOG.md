@@ -13,6 +13,15 @@ statement about what it supports rather than a number a pipeline invented.
 
 ## [Unreleased]
 
+### Added
+
+- **The minor-version parity is enforced in CI rather than documented and hoped for.**
+  `SPEC_VERSION` names the spec this daemon implements, and `scripts/check-version-parity.sh` runs
+  first in the build: the minor of the top `CHANGELOG.md` version must equal it, and every
+  `Utos.*` pin must be on that same minor. Until now the invariant was one typo away from being
+  silently false — a heading naming `0.20.0` against a spec still at `0.19` would have released
+  without a word
+
 ## [0.19.0] - 2026-09-20
 
 ### Changed
