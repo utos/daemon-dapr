@@ -513,6 +513,13 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             new ResolveActivityInputInput(input.ExecutionId, input.WorkflowKey,
                 run.ActivityName, activityInput));
 
+        // UTOS-H104 travelled back as data so its code and details would survive the activity
+        // boundary. Raised here, inside this run, so it is a failure of THIS activity — which
+        // is what lets an on_failure rule catch it and read error.details.schema.
+        if (resolved.Error is { } schemaFailure)
+            throw new WorkflowFailedException(
+                schemaFailure.Code, schemaFailure.Message, schemaFailure.Details);
+
         try
         {
             // TODO: Add retry policy wrapper here before executing activity
@@ -580,6 +587,13 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             nameof(ResolveActivityInputActivity),
             new ResolveActivityInputInput(input.ExecutionId, input.WorkflowKey,
                 run.ActivityName, activityInput));
+
+        // UTOS-H104 travelled back as data so its code and details would survive the activity
+        // boundary. Raised here, inside this run, so it is a failure of THIS activity — which
+        // is what lets an on_failure rule catch it and read error.details.schema.
+        if (resolved.Error is { } schemaFailure)
+            throw new WorkflowFailedException(
+                schemaFailure.Code, schemaFailure.Message, schemaFailure.Details);
 
         // NewGuid is the replay-safe source, so the same child id comes back on replay.
         var childExecutionId = new ExecutionId(context.NewGuid());

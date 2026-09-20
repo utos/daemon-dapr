@@ -1,0 +1,12 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "watermark": { "type": "string" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "watermark": null },
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "/watermark", "keyword": "type" } ]
+  }
+}

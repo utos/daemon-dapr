@@ -1,0 +1,12 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "bytes": { "type": "integer" } },
+    "unevaluatedProperties": false
+  },
+  "value": { "bytes": 1e100 },
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "/bytes", "keyword": "type" } ]
+  }
+}

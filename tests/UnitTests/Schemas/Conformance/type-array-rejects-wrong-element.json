@@ -1,0 +1,12 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": { "tags": { "type": "array", "items": { "type": "string" } } },
+    "unevaluatedProperties": false
+  },
+  "value": { "tags": ["a", 2] },
+  "expect": {
+    "valid": false,
+    "errors": [ { "instanceLocation": "/tags/1", "keyword": "type" } ]
+  }
+}

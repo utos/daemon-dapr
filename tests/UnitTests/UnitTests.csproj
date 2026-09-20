@@ -27,6 +27,7 @@
     <ItemGroup>
         <ProjectReference Include="../../src/execution/Execution.Domain/Execution.Domain.csproj"/>
         <ProjectReference Include="../../src/execution/Execution.Infrastructure/Execution.Infrastructure.csproj"/>
+        <ProjectReference Include="../../src/execution/Execution.Api/Execution.Api.csproj"/>
         <ProjectReference Include="../../src/observability/Observability.Application/Observability.Application.csproj"/>
         <ProjectReference Include="../../src/common/Common.Workflow.Proto/Common.Workflow.Proto.csproj"/>
         <ProjectReference Include="../../src/common/Common.Constants/Common.Constants.csproj"/>

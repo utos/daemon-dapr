@@ -26,9 +26,36 @@ public sealed record WorkflowMetadata(
 /// bundle names dependencies by canonical identity — but they are carried so a bundle read back
 /// through <c>GetWorkflow</c> or <c>GetExecutionDetails</c> is identical to the one loaded.
 /// </param>
+/// <param name="Output">
+/// A JSON Schema 2020-12 document describing what this workflow returns, or null where it
+/// declares nothing. A result that violates it fails the run, and that is not a policy an author
+/// opts into: a workflow returning the wrong shape is broken, and the caller that trusted its
+/// contract is the one that would otherwise carry the damage.
+/// </param>
+/// <param name="Emits">
+/// A JSON Schema 2020-12 document describing <em>one</em> value this workflow appends to its
+/// output stream — not the stream, which is a sequence of values each of which must satisfy it.
+/// A contract in its own right: a consumer's <c>onEmitted</c> rules depend on it exactly as a
+/// caller depends on a result.
+/// </param>
+/// <param name="Env">
+/// A JSON Schema 2020-12 document describing the ambient environment this workflow requires.
+/// Every property is a string, because a run's env is string-to-string. Deliberately <em>not</em>
+/// a closed object: env is shared across a run tree and a sub-workflow inherits its parent's, so
+/// a document names what it requires and ignores the rest.
+/// </param>
+/// <remarks>
+/// The three schema slots are optional and null means "declares nothing", which the empty schema
+/// satisfies. They are nullable for the same reason <c>AmbientEnv</c> and <c>Digest</c> are on the
+/// created event: a bundle persisted before schemas existed reads back unchanged, so no upcaster
+/// and no <c>[EventType(Version = n)]</c> bump is needed.
+/// </remarks>
 public sealed record WorkflowSpec(
     IReadOnlyDictionary<string, WorkflowActivity> Activities,
-    IReadOnlyDictionary<string, string>? Dependencies = null)
+    IReadOnlyDictionary<string, string>? Dependencies = null,
+    ValueMap? Output = null,
+    ValueMap? Emits = null,
+    ValueMap? Env = null)
 {
     public static WorkflowSpec Empty { get; } = new(new Dictionary<string, WorkflowActivity>());
 

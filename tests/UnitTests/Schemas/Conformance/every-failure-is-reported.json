@@ -1,0 +1,21 @@
+{
+  "schema": {
+    "type": "object",
+    "required": ["photo", "format"],
+    "properties": {
+      "photo": { "type": "string" },
+      "format": { "type": "string" },
+      "quality": { "type": "integer", "maximum": 100 }
+    },
+    "unevaluatedProperties": false
+  },
+  "value": { "quality": 500, "qualty": 80 },
+  "expect": {
+    "valid": false,
+    "errors": [
+      { "instanceLocation": "", "keyword": "required" },
+      { "instanceLocation": "/quality", "keyword": "maximum" },
+      { "instanceLocation": "/qualty", "keyword": "unevaluatedProperties" }
+    ]
+  }
+}
