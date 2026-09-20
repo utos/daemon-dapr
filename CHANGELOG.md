@@ -13,7 +13,7 @@ statement about what it supports rather than a number a pipeline invented.
 
 ## [Unreleased]
 
-## [0.19.0]
+## [0.19.0] - 2026-09-20
 
 ### Changed
 
