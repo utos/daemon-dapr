@@ -1,3 +1,4 @@
+using Blobs.Api.Extensions;
 using Common.Blobs.S3;
 using Common.Application.Behaviors;
 using Common.Constants;
@@ -27,12 +28,14 @@ builder.Services.AddGrpc();
 // still work, and anything that would have to be stored is refused by name rather than by crash.
 builder.AddBlobObjectStore();
 
+builder.AddBlobsModule(ServiceName.Database.Utos);
 builder.AddExecutionModule(ServiceName.Database.Utos);
 builder.AddDefinitionModule();
 builder.AddObservabilityModule();
 
 var app = builder.Build();
 
+app.UseBlobsModule();
 app.UseExecutionModule();
 app.UseDefinitionModule();
 app.UseObservabilityModule();

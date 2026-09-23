@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.EntityFrameworkCore" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+        <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Blobs.Domain/Blobs.Domain.csproj"/>
+    </ItemGroup>
+
+</Project>
