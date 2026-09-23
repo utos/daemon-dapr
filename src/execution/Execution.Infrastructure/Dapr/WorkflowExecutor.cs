@@ -274,14 +274,10 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 if (transition.Unhandled)
                     unhandledFailure!.Throw();
 
-                // A rule said fail, and said why: the run fails with exactly what the author
-                // wrote, on either path. On the failure path that replaces the cause being
-                // handled — which is the point of the action; an author who wants the cause
-                // reported writes `message: "{{ error.message }}"`, and one who wants it reported
-                // unchanged declares no rule at all. The subscription, if any, was already left.
-                if (transition.Error is { } raised)
-                    throw new WorkflowFailedException(raised.Code, raised.Message, raised.Details);
-
+                // The rule's effect happens before its exit — that is the order the two halves are
+                // written in, and the only order that lets a rule emit a final value and *then*
+                // return it, or run a document and then transition away.
+                //
                 // An emit is emit-and-continue: the value becomes durable before the run moves
                 // on, so a consumer reading the stream in order can never see the effect of a
                 // value it has not been given yet.
@@ -309,6 +305,27 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                     }
                 }
 
+                // The second effect: a document to run for the value just consumed. It runs as a
+                // child execution, to termination, and decides nothing about where this workflow
+                // goes — which is the whole point of it being a document. Where this run goes is
+                // the rule's own exit, below; a rule with no exit resumed, so the interpreter has
+                // already named the call activity as the next one.
+                if (transition.Dispatch != null)
+                    await RunHandlerAsync(context, logger, input, run.ActivityName,
+                        transition.Dispatch, logExecutionId);
+
+                // The effects are done; what follows is the exit.
+
+                // A rule said fail, and said why: the run fails with exactly what the author
+                // wrote, on either path. On the failure path that replaces the cause being
+                // handled — which is the point of the exit; an author who wants the cause
+                // reported writes `message: "{{ error.message }}"`, and one who wants it reported
+                // unchanged declares no rule at all. A subscription, if this run holds one, is
+                // abandoned by the failure path below rather than left here — the throw goes
+                // straight past the deliberate leave.
+                if (transition.Error is { } raised)
+                    throw new WorkflowFailedException(raised.Code, raised.Message, raised.Details);
+
                 // The consumer said it is done consuming. Ending the subscription and cancelling
                 // the producer are one event, and it happens here rather than in the sweep below,
                 // because a consumer that transitions away carries on running — possibly for a
@@ -323,20 +340,6 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 {
                     workflowOutput = transition.ReturnValue;
                     break;
-                }
-
-                // A handler for the value just consumed. It is a document, so this runs it as a
-                // child execution to termination and then comes straight back to the call
-                // activity for the next value — the handler decides nothing about where this
-                // workflow goes, which is the whole point of it being a document.
-                if (transition.Dispatch != null)
-                {
-                    await RunHandlerAsync(context, logger, input, run.ActivityName,
-                        transition.Dispatch, logExecutionId);
-
-                    currentActivityName = run.ActivityName;
-                    currentActivityInput = null;
-                    continue;
                 }
 
                 currentActivityName = transition.NextActivityName;
@@ -429,12 +432,26 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
     }
 
     /// <summary>Where a matched rule sends the run, as a log reads it.</summary>
-    private static string DescribeTarget(EvaluateTransitionOutput transition) =>
-        transition.Dispatch != null ? $"handler {transition.Dispatch.Workflow}"
-        : transition.Unhandled ? "re-raise"
-        : transition.Error != null ? $"error {transition.Error.Code}"
-        : transition.ReturnValue != null ? "result"
-        : transition.NextActivityName ?? "end of path";
+    /// <summary>
+    /// What the matched rule did and where it went, for the log line. Both halves, because since
+    /// spec 0.20 a rule can have both — printing only one would report "handler acme/ingester" for
+    /// a rule that also ended the run.
+    /// </summary>
+    private static string DescribeTarget(EvaluateTransitionOutput transition)
+    {
+        var effect =
+            transition.Dispatch != null ? $"call {transition.Dispatch.Workflow}"
+            : transition.EmittedValue != null ? "emit"
+            : null;
+
+        var exit =
+            transition.Unhandled ? "re-raise"
+            : transition.Error != null ? $"error {transition.Error.Code}"
+            : transition.ReturnValue != null ? "result"
+            : transition.NextActivityName ?? "end of path";
+
+        return effect == null ? exit : $"{effect} then {exit}";
+    }
 
     /// <summary>
     /// Performs the activity's work and returns its output, which the transition is then
@@ -463,10 +480,21 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 return ActivityOutcome.Completed(
                     await FanOutAsync(context, logger, input, run, activityInput, logExecutionId));
 
-            case TimerActivityConfig timer:
+            case TimerActivityConfig:
             {
-                // Non-null on anything that passed load-time validation.
-                var delay = timer.Duration
+                // Resolved in an activity, not here. The field is a string since spec 0.20 — a
+                // literal in the unit shorthand, or a whole-field template — and rendering one in
+                // the orchestrator would be non-deterministic: `{{ now() }}` would draw a new
+                // instant on every replay. Going through the activity records the answer in
+                // history, so a replay reads the same deadline (UTOS-E106).
+                var resolvedTimer = await context.CallActivityAsync<ResolveActivityInputOutput>(
+                    nameof(ResolveActivityInputActivity),
+                    new ResolveActivityInputInput(input.ExecutionId, input.WorkflowKey,
+                        run.ActivityName, activityInput));
+
+                // Non-null on anything that passed load-time validation, and on anything the
+                // resolver did not refuse.
+                var delay = resolvedTimer.Duration
                             ?? throw new InvalidOperationException(
                                 $"Timer activity '{run.ActivityName}' has no duration.");
 

@@ -6,21 +6,79 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 **Version parity across the Utos repos: the minor is the contract, the patch is
-this daemon's own.** `0.19.x` here means *implements spec 0.19*, the same way it
-does in `utos/cli` and `utos/sdk-dotnet`. If the spec reaches `0.20` and this
-daemon has not implemented it, it stays at `0.19.x` — which is then a true
+this daemon's own.** `0.20.x` here means *implements spec 0.20*, the same way it
+does in `utos/cli` and `utos/sdk-dotnet`. If the spec reaches `0.21` and this
+daemon has not implemented it, it stays at `0.20.x` — which is then a true
 statement about what it supports rather than a number a pipeline invented.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-23
+
+Implements spec `0.20` (pinned at `0.20.2` in `SPEC_VERSION`). The spec re-cut what a transition
+rule is, changed what a timer's duration is written as, and made run-time values a type of their
+own. All three reach the wire, the interpreter and the event stream, so this is a breaking release
+in every direction.
+
+### Changed
+
+- **A rule is a condition, an effect and an exit** (spec 0.20). `EmissionRule` is gone: `onEmitted`
+  carries the same `TransitionRule` every other list does, so one type and one loop serve all
+  three. The lists differ in one thing, and it is now the only thing — whether an exit is required.
+  What this buys an author is the pair of rules that were previously unwritable: `emit` then
+  `return` ("here is the last item, and here is the summary"), and `workflow.call` then
+  `transition` (handle this value, then stop consuming). Both used to need a second rule and a
+  dummy activity between them, and the second was not reachable in an `onEmitted` list at all
+- **A timer's duration is a string in the unit shorthand** — `90s`, `8h`, `1h30m` — where it was a
+  `google.protobuf.Duration` that proto3 JSON could only spell in seconds. A whole-field `{{ }}`
+  template may stand in for the literal, so the field is carried as the author wrote it and
+  resolved when the activity is entered: inside an activity, so the answer is recorded in history
+  and a replay reads the same deadline rather than re-rendering against a later clock
+  (`UTOS-E106`). The grammar itself is not implemented here — `WorkflowDuration` in `Utos.Workflow`
+  is the one parser, shared with the CLI and the shared validator, reached through an
+  `IDurationParser` port because the domain may not reference the wire library
+- **Run-time values on the daemon wire are `WorkflowValue`**, not `google.protobuf.Struct`. A
+  value's kind is structural, so no key inside the data — `$blob` or any other — decides what
+  something is: a response body, a client's input and a child's result may all contain the key
+  `$blob` and it stays an ordinary map. `ExecutionPayload.data`, `GetExecutionResponse.result` and
+  the `value` / `result` entries of the output stream all moved. `WorkflowError.details` did not:
+  it is a template an author wrote, not a value a run produced
+- `ScheduleExecution` now checks its input is a well-formed value before looking at what it says,
+  reporting `UTOS-V101` and `UTOS-V102` from the shared library — every failure, not the first
+
+- **`instanceof` and `async` arrows are in the expression language**, and `await` is permitted at
+  a program's top level — the grammar the shared validator enforces, so this daemon accepts them
+  because spec 0.20 admitted them. `UTOS-E051` and `UTOS-E031` are retired. Both came in with
+  binary data: a value's kind is a type now, so asking whether something *is* one is the natural
+  question, and the conversions a blob needs (`await response.body.text()`) are asynchronous
+
 ### Added
 
+- `WorkflowBlob`, the seventh kind a value can be, and its mapping at the wire edge
 - **The minor-version parity is enforced in CI rather than documented and hoped for.**
   `SPEC_VERSION` names the spec this daemon implements, and `scripts/check-version-parity.sh` runs
   first in the build: the minor of the top `CHANGELOG.md` version must equal it, and every
   `Utos.*` pin must be on that same minor. Until now the invariant was one typo away from being
   silently false — a heading naming `0.20.0` against a spec still at `0.19` would have released
-  without a word
+  without a word. This release is the first the check has governed, and it is why `SPEC_VERSION`
+  and the four `Utos.*` pins move in the same commit as the code
+
+### Breaking
+
+- **Persisted shape: a rule.** An execution created by a `0.19.x` daemon does not resume on this
+  one. There is deliberately no upcaster: one would have to decide what a 0.19 `emit` carrying its
+  own transition *means* under rules that changed around it, and would produce a bundle whose
+  behaviour is 0.19's while everything reading it implements 0.20. The break is not silent about
+  what it produces — a 0.19 rule reads back with neither an effect nor an exit, which `UTOS-T001`
+  forbids and the interpreter refuses by name, so such a run fails rather than taking a different
+  path. `tests/UnitTests/Persistence/ActivityConfigJsonShapeTests.cs` pins exactly that
+- **Persisted shape: a timer.** `Duration` is `"30s"` where it was `"00:00:30"`
+- **Wire:** clients on `0.19.x` cannot call this daemon, and vice versa. Use `utos/cli` `0.20.x`
+- **Not implemented yet:** spec 0.20's blob store. A run input containing a blob is refused with
+  `Unimplemented` rather than a spec code — this daemon can neither resolve a handle nor carry
+  inline bytes through a run, and reporting that as `UTOS-F104` would tell a client its handle was
+  wrong when what is missing is here. `BlobService`, spill-to-storage in the HTTP activity, run-tree
+  access checks and retention follow
 
 ## [0.19.0] - 2026-09-20
 

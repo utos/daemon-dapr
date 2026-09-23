@@ -116,19 +116,18 @@ public class WorkflowMappingTests
             }
         });
 
-        // The third action a rule can take. Its target carries an input transform too, since an
-        // emitting loop threads its cursor across the back-edge the same way any loop does.
+        // A rule with both halves set: an effect and an exit are independent since spec 0.20, so
+        // the round trip has to carry both rather than one oneof. The exit's target carries an
+        // input transform too, since an emitting loop threads its cursor across the back-edge the
+        // same way any loop does.
         httpActivity.OnSuccess.Add(new Wire.TransitionRule
         {
             Condition = "output.n > 0",
-            Emit = new Wire.EmitAction
+            Emit = new Struct { Fields = { ["batch"] = Value.ForString("{{ output.items }}") } },
+            Transition = new Wire.TransitionTarget
             {
-                Value = new Struct { Fields = { ["batch"] = Value.ForString("{{ output.items }}") } },
-                Transition = new Wire.TransitionTarget
-                {
-                    Name = "start",
-                    Input = new Struct { Fields = { ["cursor"] = Value.ForNumber(7) } }
-                }
+                Name = "start",
+                Input = new Struct { Fields = { ["cursor"] = Value.ForNumber(7) } }
             }
         });
 
@@ -139,7 +138,7 @@ public class WorkflowMappingTests
 
         var timerActivity = new Wire.WorkflowActivity
         {
-            Timer = new Wire.TimerActivityConfig { Duration = Duration.FromTimeSpan(TimeSpan.FromSeconds(90)) }
+            Timer = new Wire.TimerActivityConfig { Duration = "90s" }
         };
 
         var subWorkflowActivity = new Wire.WorkflowActivity
@@ -169,27 +168,32 @@ public class WorkflowMappingTests
                 {
                     OnEmitted =
                     {
-                        // All three actions, because the oneof is what the mapping reads and a
-                        // dropped arm would present as a consumer that quietly ignores a rule
-                        // rather than as a mapping failure. The empty `result` earns its place:
-                        // an empty Struct is a set oneof, and reading the action from field
-                        // presence instead of ActionCase would turn it into no action at all.
-                        new Wire.EmissionRule
+                        // Ordinary TransitionRules since spec 0.20 — the same type every other
+                        // list holds. Every arm of both oneofs appears, because the oneof case is
+                        // what the mapping reads and a dropped arm would present as a consumer
+                        // that quietly ignores a rule rather than as a mapping failure. The empty
+                        // `result` earns its place: an empty Struct is a set oneof, and reading
+                        // the exit from field presence instead of ExitCase would turn it into no
+                        // exit at all.
+                        new Wire.TransitionRule
                         {
                             Condition = "output.kind === 'receipt'",
-                            Handle = new Wire.HandlerDispatch
+                            Workflow = new Wire.DispatchEffect
                             {
-                                Workflow = "acme/handler:1.0.0",
-                                StartActivity = "ingest",
-                                Input = new Struct { Fields = { ["n"] = Value.ForString("{{ output.n }}") } }
+                                Call = new Wire.HandlerDispatch
+                                {
+                                    Workflow = "acme/handler:1.0.0",
+                                    StartActivity = "ingest",
+                                    Input = new Struct { Fields = { ["n"] = Value.ForString("{{ output.n }}") } }
+                                }
                             }
                         },
-                        new Wire.EmissionRule
+                        new Wire.TransitionRule
                         {
                             Condition = "output.done",
                             Transition = new Wire.TransitionTarget { Name = "wait" }
                         },
-                        new Wire.EmissionRule { Result = new Struct() }
+                        new Wire.TransitionRule { Result = new Struct() }
                     }
                 }
             }
@@ -503,7 +507,7 @@ public class WorkflowMappingTests
         var restored = JsonSerializer.Deserialize<WorkflowActivity>(json)!;
 
         Assert.Equal(ActivityKind.Timer, restored.Kind);
-        Assert.Equal(TimeSpan.FromSeconds(90), Assert.IsType<TimerActivityConfig>(restored.Config).Duration);
+        Assert.Equal("90s", Assert.IsType<TimerActivityConfig>(restored.Config).Duration);
     }
 
     [Fact]

@@ -81,7 +81,7 @@ public class ScheduleBoundaryTests
         _ = store;
 
         var start = new WorkflowActivity(
-            new TimerActivityConfig(TimeSpan.FromSeconds(1)),
+            new TimerActivityConfig("1s"),
             Schema: new ActivitySchema(Wf.Fields(
                 ("type", "object"),
                 ("required", new object[] { "orderId" }),

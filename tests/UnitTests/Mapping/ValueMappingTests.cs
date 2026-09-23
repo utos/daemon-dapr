@@ -1,3 +1,4 @@
+using Utos.Testing;
 using Common.Workflow;
 using Common.Workflow.Proto;
 using Google.Protobuf.WellKnownTypes;
@@ -31,7 +32,7 @@ public class ValueMappingTests
         foreach (var (key, value) in Numbers)
         {
             document.Fields[key] = value;
-            payload.Data[key] = value;
+            payload.Data[key] = value.ToWire();
         }
 
         var mappedDocument = document.ToDomain();
@@ -47,7 +48,7 @@ public class ValueMappingTests
         // Not tidiness: a double renders through .NET's shortest round-trip format, so an id of
         // 10^16 in a URL template came out as "1E+16" and the daemon called the wrong endpoint.
         var payload = new ExecutionPayload();
-        payload.Data["id"] = Value.ForNumber(10_000_000_000_000_000d);
+        payload.Data["id"] = Value.ForNumber(10_000_000_000_000_000d).ToWire();
 
         var id = payload.ToDictionary()["id"];
 
@@ -66,7 +67,7 @@ public class ValueMappingTests
         nested.Fields["name"] = Value.ForString("ada");
 
         var payload = new ExecutionPayload();
-        payload.Data["user"] = Value.ForStruct(nested);
+        payload.Data["user"] = Value.ForStruct(nested).ToWire();
 
         var document = new Struct();
         document.Fields["user"] = Value.ForStruct(nested);
@@ -79,8 +80,8 @@ public class ValueMappingTests
     public void A_null_top_level_field_is_dropped()
     {
         var payload = new ExecutionPayload();
-        payload.Data["present"] = Value.ForString("x");
-        payload.Data["absent"] = Value.ForNull();
+        payload.Data["present"] = Value.ForString("x").ToWire();
+        payload.Data["absent"] = Value.ForNull().ToWire();
 
         Assert.Equal(["present"], payload.ToDictionary().Keys);
     }
@@ -92,7 +93,7 @@ public class ValueMappingTests
         // read-model projection — which parks the event, leaving a run that was acknowledged to
         // the client but never scheduled and never listed. Fail the request instead.
         var payload = new ExecutionPayload();
-        payload.Data["bad"] = Value.ForNumber(double.NaN);
+        payload.Data["bad"] = Value.ForNumber(double.NaN).ToWire();
 
         Assert.Throws<ArgumentOutOfRangeException>(() => payload.ToDictionary());
     }
@@ -120,9 +121,9 @@ public class ValueMappingTests
     public void Run_input_round_trips_through_proto()
     {
         var payload = new ExecutionPayload();
-        payload.Data["n"] = Value.ForNumber(42);
-        payload.Data["s"] = Value.ForString("x");
-        payload.Data["b"] = Value.ForBool(true);
+        payload.Data["n"] = Value.ForNumber(42).ToWire();
+        payload.Data["s"] = Value.ForString("x").ToWire();
+        payload.Data["b"] = Value.ForBool(true).ToWire();
 
         var restored = payload.ToDictionary().ToProto()!;
 

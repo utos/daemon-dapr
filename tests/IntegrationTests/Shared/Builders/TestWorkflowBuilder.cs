@@ -1,3 +1,6 @@
+using System.Globalization;
+using Utos.Testing;
+using IntegrationTests.Shared;
 using Common.Constants;
 using Google.Protobuf.WellKnownTypes;
 using Utos.Daemon.V1;
@@ -90,7 +93,7 @@ public class TestWorkflowBuilder
     /// </summary>
     public ActivityBuilder WorkflowCall(string activityName, string targetWorkflow,
         string startActivity, Struct? input = null,
-        IEnumerable<EmissionRule>? onEmitted = null) =>
+        IEnumerable<TransitionRule>? onEmitted = null) =>
         SubWorkflow(activityName, targetWorkflow, startActivity, input,
             config =>
             {
@@ -156,7 +159,7 @@ public class TestWorkflowBuilder
 
     public TestWorkflowBuilder WithInput(string key, object? value)
     {
-        _input.Data.Add(key, ToProtobufValue(value));
+        _input.Data.Add(key, ToProtobufValue(value).ToWire());
         return this;
     }
 
@@ -263,11 +266,13 @@ public class TestWorkflowBuilder
                     if (activity.Workflow.ModeCase == WorkflowActivityConfig.ModeOneofCase.Call)
                         foreach (var rule in activity.Workflow.Call.OnEmitted)
                         {
-                            // Only a handler names a document. A transition names an activity in
+                            // Only a dispatch names a document. A transition names an activity in
                             // the consuming workflow and a result names nothing, so neither is
                             // resolved — the same distinction the CLI draws when it rewrites
-                            // aliases.
-                            if (rule.ActionCase != EmissionRule.ActionOneofCase.Handle) continue;
+                            // aliases. Since spec 0.20 it is the rule's *effect*, so a rule that
+                            // dispatches and then exits is resolved here too.
+                            if (rule.EffectCase != TransitionRule.EffectOneofCase.Workflow) continue;
+                            if (rule.Workflow.ModeCase != DispatchEffect.ModeOneofCase.Call) continue;
 
                             // The CLI rejects this (UTOS-S011), so a fixture that writes it is
                             // testing a document no author could build. Worth failing loudly here
@@ -275,12 +280,12 @@ public class TestWorkflowBuilder
                             // transition back to the call activity, which in the handler's own
                             // execution starts a second producer instead of resuming the first —
                             // once per value, which presents as the suite hanging.
-                            if (rule.Handle.Workflow == SelfReference)
+                            if (rule.Workflow.Call.Workflow == SelfReference)
                                 throw new InvalidOperationException(
                                     "An onEmitted rule may not dispatch 'self' (UTOS-S011). "
                                     + "Give the handler its own document with AddDependentWorkflow.");
 
-                            rule.Handle.Workflow = Resolve(rule.Handle.Workflow);
+                            rule.Workflow.Call.Workflow = Resolve(rule.Workflow.Call.Workflow);
                         }
 
                     break;
@@ -328,20 +333,23 @@ public class TestWorkflowBuilder
         return new ActivityBuilder(this, activity);
     }
 
-    /// <summary>A durable delay. Its input passes through unchanged as its output.</summary>
-    public ActivityBuilder Timer(string name, TimeSpan duration)
-    {
-        var activity = new WorkflowActivity
-        {
-            Timer = new TimerActivityConfig { Duration = Duration.FromTimeSpan(duration) }
-        };
+    /// <summary>
+    /// A durable delay. Its input passes through unchanged as its output.
+    /// <para>
+    /// Takes a <see cref="TimeSpan"/> and writes the spec's unit shorthand, so the suites keep
+    /// saying what they mean while the bundle carries what spec 0.20 defines. Seconds where the
+    /// delay is a whole number of them, milliseconds otherwise — several of these tests pace a
+    /// loop in a few hundred milliseconds, and truncating to seconds would write <c>0s</c>, which
+    /// is not a duration anything waits for (<c>UTOS-C202</c>).
+    /// </para>
+    /// </summary>
+    public ActivityBuilder Timer(string name, TimeSpan duration) =>
+        RawTimer(name, duration.Ticks % TimeSpan.TicksPerSecond == 0
+            ? ((long)duration.TotalSeconds).ToString(CultureInfo.InvariantCulture) + "s"
+            : ((long)duration.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + "ms");
 
-        _activities.Add((name, activity));
-        return new ActivityBuilder(this, activity);
-    }
-
-    /// <summary>Builds a timer whose duration is set directly, for validation tests.</summary>
-    public ActivityBuilder RawTimer(string name, Duration? duration)
+    /// <summary>Builds a timer whose duration string is set directly, for validation tests.</summary>
+    public ActivityBuilder RawTimer(string name, string? duration)
     {
         var config = new TimerActivityConfig();
         if (duration != null)
@@ -437,6 +445,23 @@ public class ActivityBuilder
     public ActivityBuilder OnResult(Struct resultValue, string? when = null)
     {
         var rule = new TransitionRule { Result = resultValue };
+
+        if (when != null)
+            rule.Condition = when;
+
+        _activity.OnSuccess.Add(rule);
+        return this;
+    }
+
+    /// <summary>
+    /// Appends <paramref name="value"/> and then ends the path — one rule, which spec 0.20 made
+    /// expressible by separating a rule's effect from its exit. Before it, an <c>emit</c> carried
+    /// its own transition and had to name an activity, so this needed a second activity whose only
+    /// job was to have no rules.
+    /// </summary>
+    public ActivityBuilder OnEmitAndEnd(Struct value, string? when = null)
+    {
+        var rule = new TransitionRule { Emit = value, Result = new Struct() };
 
         if (when != null)
             rule.Condition = when;
@@ -554,7 +579,7 @@ public class ActivityBuilder
         if (input != null)
             target.Input = input;
 
-        var rule = new TransitionRule { Emit = new EmitAction { Value = value, Transition = target } };
+        var rule = new TransitionRule { Emit = value, Transition = target };
 
         if (when != null)
             rule.Condition = when;

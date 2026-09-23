@@ -19,6 +19,7 @@ using GrpcTransitionTarget = Utos.Workflows.V1.TransitionTarget;
 using GrpcWorkflowReference = Utos.Daemon.V1.WorkflowReference;
 using GrpcWorkflowError = Utos.Workflows.V1.WorkflowError;
 using GrpcOutputEntry = Utos.Daemon.V1.WatchOutputResponse;
+using WorkflowMap = Utos.Workflows.V1.WorkflowMap;
 
 namespace Execution.Api.Extensions;
 
@@ -131,7 +132,7 @@ public static class DtoToGrpcExtensions
         // 0.0.16 — the status is what says it completed. Which runs have one is the handler's
         // call, not this mapping's.
         if (dto.Result != null)
-            grpc.Result = dto.Result.ToProto();
+            grpc.Result = dto.Result.Fields.ToWorkflowMap();
 
         foreach (var (key, value) in dto.Env)
             grpc.Env.Add(key, value);
@@ -161,11 +162,11 @@ public static class DtoToGrpcExtensions
         switch (source.Entry)
         {
             case ExecutionValueEmitted emitted:
-                entry.Value = ToStruct(emitted.Value);
+                entry.Value = ToWorkflowMap(emitted.Value);
                 break;
 
             case ExecutionResultProduced produced:
-                entry.Result = ToStruct(produced.Result);
+                entry.Result = ToWorkflowMap(produced.Result);
                 break;
 
             case ExecutionErrorProduced error:
@@ -183,9 +184,31 @@ public static class DtoToGrpcExtensions
     }
 
     /// <summary>
-    /// A path that ended without returning becomes an empty structure rather than an unset field:
-    /// the stream always terminates, and a client should not have to tell "returned nothing" from
-    /// "no entry at all".
+    /// A path that ended without returning becomes an empty map rather than an unset field: the
+    /// stream always terminates, and a client should not have to tell "returned nothing" from "no
+    /// entry at all".
+    /// <para>
+    /// A <c>WorkflowMap</c> since spec 0.20, not a <c>google.protobuf.Struct</c>: an emitted value
+    /// or a result may hold a blob, and a Struct has no kind that can carry one without reserving
+    /// a key inside the data.
+    /// </para>
+    /// </summary>
+    private static WorkflowMap ToWorkflowMap(object? value)
+    {
+        if (value is null)
+            return new WorkflowMap();
+
+        return ValueMapping.ToWorkflowValue(value).MapValue
+               ?? throw new InvalidOperationException(
+                   $"An output entry must carry a map, not {value.GetType().Name}.");
+    }
+
+    /// <summary>
+    /// An error's <c>details</c>, which stays a <c>google.protobuf.Struct</c> where a value and a
+    /// result became maps. It is the one field that is both authored and reported — the same
+    /// message carries the <c>error</c> exit an author wrote and the failure a run reports — so it
+    /// is a template, and a template is a document value, not a run value. Nothing a run produces
+    /// gets in, so there is no blob to carry.
     /// </summary>
     private static Struct ToStruct(object? value)
     {
@@ -194,6 +217,6 @@ public static class DtoToGrpcExtensions
 
         return ValueMapping.ToProtoValue(value).StructValue
                ?? throw new InvalidOperationException(
-                   $"An output entry must carry a structure, not {value.GetType().Name}.");
+                   $"An error's details must be a structure, not {value.GetType().Name}.");
     }
 }

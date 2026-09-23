@@ -1,6 +1,8 @@
 using Common.Constants;
 using Google.Protobuf.WellKnownTypes;
 using IntegrationTests.Shared.Builders;
+using Utos.Testing;
+using IntegrationTests.Shared;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
 using Utos.Workflows.V1;
@@ -210,22 +212,22 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
             .Build();
 
         // Primitive types
-        request.Input.Data.Add("stringKey", Google.Protobuf.WellKnownTypes.Value.ForString("test-value"));
-        request.Input.Data.Add("numberKey", Google.Protobuf.WellKnownTypes.Value.ForNumber(42));
-        request.Input.Data.Add("boolKey", Google.Protobuf.WellKnownTypes.Value.ForBool(true));
+        request.Input.Data.Add("stringKey", Google.Protobuf.WellKnownTypes.Value.ForString("test-value").ToWire());
+        request.Input.Data.Add("numberKey", Google.Protobuf.WellKnownTypes.Value.ForNumber(42).ToWire());
+        request.Input.Data.Add("boolKey", Google.Protobuf.WellKnownTypes.Value.ForBool(true).ToWire());
 
         // Nested object
         var nestedStruct = new Google.Protobuf.WellKnownTypes.Struct();
         nestedStruct.Fields.Add("nestedString", Google.Protobuf.WellKnownTypes.Value.ForString("nested-value"));
         nestedStruct.Fields.Add("nestedNumber", Google.Protobuf.WellKnownTypes.Value.ForNumber(123));
-        request.Input.Data.Add("objectKey", Google.Protobuf.WellKnownTypes.Value.ForStruct(nestedStruct));
+        request.Input.Data.Add("objectKey", Google.Protobuf.WellKnownTypes.Value.ForStruct(nestedStruct).ToWire());
 
         // Array
         var arrayValue = Google.Protobuf.WellKnownTypes.Value.ForList(
             Google.Protobuf.WellKnownTypes.Value.ForString("item1"),
             Google.Protobuf.WellKnownTypes.Value.ForNumber(10),
             Google.Protobuf.WellKnownTypes.Value.ForBool(false)
-        );
+        ).ToWire();
         request.Input.Data.Add("arrayKey", arrayValue);
 
         // Act
@@ -247,7 +249,7 @@ public class GetExecutionDetailsTests(DaemonTestFixture fixture)
 
         // Assert - Nested object
         Assert.True(details.Input.Data.ContainsKey("objectKey"));
-        var nestedObject = details.Input.Data["objectKey"].StructValue;
+        var nestedObject = details.Input.Data["objectKey"].MapValue;
         Assert.NotNull(nestedObject);
         Assert.Equal("nested-value", nestedObject.Fields["nestedString"].StringValue);
         Assert.Equal(123, nestedObject.Fields["nestedNumber"].NumberValue);

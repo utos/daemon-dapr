@@ -58,6 +58,8 @@ public class EvaluateTransitionActivity(
         var leaves = input.Outcome == ActivityOutcomeKind.Emitted
                      && decision is TransitionDecision.Goto or TransitionDecision.Return or TransitionDecision.Fail;
 
+        // Where the run goes. The exit alone: since spec 0.20 a rule's effect is a separate
+        // question, so it is carried separately rather than folded into one of these arms.
         var output = decision switch
         {
             TransitionDecision.Goto go => new EvaluateTransitionOutput(
@@ -72,20 +74,6 @@ public class EvaluateTransitionActivity(
             TransitionDecision.Return result => new EvaluateTransitionOutput(
                 null, null, result.Value, LeavesSubscription: leaves),
 
-            // The emitted value rides alongside the target rather than becoming a step of its
-            // own: the driver appends it and then continues, so one evaluation still yields one
-            // transition.
-            TransitionDecision.Emit emit => new EvaluateTransitionOutput(
-                emit.ActivityName, emit.Input, null, EmittedValue: emit.Value),
-
-            // A handler to run before the next value is taken. Carries no next activity: the
-            // driver goes back to the call activity once the dispatched execution ends, and
-            // deciding that here would mean naming the call activity twice.
-            TransitionDecision.Dispatch dispatch => new EvaluateTransitionOutput(
-                null, null, null,
-                Dispatch: new DispatchTarget(
-                    dispatch.Workflow, dispatch.StartActivity, dispatch.Input)),
-
             // Nothing handled the failure, so the driver must rethrow rather than continue.
             // Matched explicitly: folding it into the fallback below would turn an unhandled
             // failure into a normally completed run.
@@ -99,6 +87,23 @@ public class EvaluateTransitionActivity(
 
             // The rules ran out on an ordinary path: the run is done.
             _ => new EvaluateTransitionOutput(null, null, null)
+        };
+
+        // What the rule does on the way out, if anything. Both rides alongside the exit rather
+        // than replacing it: the driver performs the effect and then takes the exit, which is how
+        // `emit` then `return`, or `workflow.call` then `transition`, become one evaluation and
+        // one transition.
+        output = decision.Effect switch
+        {
+            DecisionEffect.Emit emit => output with { EmittedValue = emit.Value },
+
+            DecisionEffect.Dispatch dispatch => output with
+            {
+                Dispatch = new DispatchTarget(
+                    dispatch.Workflow, dispatch.StartActivity, dispatch.Input)
+            },
+
+            _ => output
         };
 
         return output with
@@ -135,9 +140,9 @@ public sealed record EvaluateTransitionInput(
 /// the absence of a next activity is the end.
 /// </param>
 /// <param name="EmittedValue">
-/// What an <c>emit</c> action produced, to be appended to the execution's output stream before
-/// the run continues to <paramref name="NextActivityName"/>. Null means the rule was not an emit:
-/// a rendered value is always a dictionary — empty at the least — so null is unambiguous.
+/// What an <c>emit</c> effect produced, to be appended to the execution's output stream before the
+/// run takes this rule's exit. Null means the rule did not emit: a rendered value is always a
+/// dictionary — empty at the least — so null is unambiguous.
 /// </param>
 /// <param name="Unhandled">
 /// No <c>on_failure</c> rule matched, so the driver must rethrow rather than continue. Carried as
@@ -145,9 +150,10 @@ public sealed record EvaluateTransitionInput(
 /// means the run finished normally, and the two outcomes must not be confusable.
 /// </param>
 /// <param name="Dispatch">
-/// The document to run for the emitted value just consumed. Set only on the emitted path, and
-/// mutually exclusive with <paramref name="NextActivityName"/> — a dispatch leaves this workflow,
-/// so there is no activity here to go to next.
+/// The document a <c>workflow.call</c> effect runs, to termination, before the run takes this
+/// rule's exit. Not exclusive with <paramref name="NextActivityName"/>: the dispatched document
+/// decides nothing about where this workflow goes — that is the whole point of it being a document
+/// — so the exit beside it is the consumer's own, and a rule with no exit resumes.
 /// </param>
 /// <param name="MatchedList">
 /// Which rule list decided — <c>onSuccess</c>, <c>onFailure</c> or <c>onEmitted</c> — with

@@ -38,10 +38,10 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.18.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.18.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.18.0" />
-    <PackageVersion Include="Utos.Daemon.Client" Version="0.19.0" />
-    <PackageVersion Include="Utos.Daemon.Server" Version="0.19.0" />
-    <PackageVersion Include="Utos.Workflow" Version="0.19.0" />
-    <PackageVersion Include="Utos.Workflow.Validation" Version="0.19.0" />
+    <PackageVersion Include="Utos.Daemon.Client" Version="0.20.0" />
+    <PackageVersion Include="Utos.Daemon.Server" Version="0.20.0" />
+    <PackageVersion Include="Utos.Workflow" Version="0.20.0" />
+    <PackageVersion Include="Utos.Workflow.Validation" Version="0.20.0" />
     <PackageVersion Include="WireMock.NET" Version="2.15.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />

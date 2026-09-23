@@ -1,6 +1,7 @@
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using IntegrationTests.Shared.Builders;
+using Utos.Testing;
 using IntegrationTests.Shared;
 using IntegrationTests.Shared.Fixtures;
 using Utos.Daemon.V1;
@@ -53,7 +54,7 @@ public class SchemaValidationTests(DaemonTestFixture fixture)
                 .Accepting(Requires("orderId"))
             .Build();
 
-        request.Input.Data["wrong"] = Value.ForString("x");
+        request.Input.Data["wrong"] = Value.ForString("x").ToWire();
 
         var error = await Assert.ThrowsAsync<RpcException>(() => fixture.ScheduleAsync(request));
 
@@ -72,7 +73,7 @@ public class SchemaValidationTests(DaemonTestFixture fixture)
                 .Accepting(Requires("orderId"))
             .Build();
 
-        request.Input.Data["wrong"] = Value.ForString("x");
+        request.Input.Data["wrong"] = Value.ForString("x").ToWire();
 
         var error = await Assert.ThrowsAsync<RpcException>(() => fixture.ScheduleAsync(request));
 
@@ -256,7 +257,7 @@ public class SchemaValidationTests(DaemonTestFixture fixture)
                 .OnResult(new Struct { Fields = { ["ok"] = Value.ForBool(true) } })
             .Build();
 
-        request.Input.Data["anything"] = Value.ForString("at all");
+        request.Input.Data["anything"] = Value.ForString("at all").ToWire();
 
         var response = await fixture.ScheduleAsync(request);
         await fixture.WatchToCompletionAsync(response.Id);

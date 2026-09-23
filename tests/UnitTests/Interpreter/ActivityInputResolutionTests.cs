@@ -1,3 +1,5 @@
+using Common.Workflow;
+using Execution.Domain.Templating;
 using Execution.Domain.Interpreter;
 using UnitTests.Support;
 
@@ -115,11 +117,60 @@ public class ActivityInputResolutionTests
     [Fact]
     public void An_activity_kind_with_nothing_to_resolve_is_rejected()
     {
-        var graph = Wf.Graph(("wait", Wf.Timer(TimeSpan.FromSeconds(1))));
+        // A promise resolves through ExpandPromise instead: its branches are conditioned and
+        // fanned out, which is a different question from rendering one configuration.
+        var graph = Wf.Graph(("fan", Wf.Promise(PromiseMode.All, 0, [Wf.Branch("one", "a")])));
 
         var ex = Assert.Throws<NotSupportedException>(
-            () => _interpreter.ResolveInput(Wf.Session(graph), "wait", null));
+            () => _interpreter.ResolveInput(Wf.Session(graph), "fan", null));
 
-        Assert.Equal("Unsupported activity config type 'Timer' for activity 'wait'", ex.Message);
+        Assert.Equal("Unsupported activity config type 'Promise' for activity 'fan'", ex.Message);
+    }
+
+    [Fact]
+    public void A_timer_resolves_its_duration_from_the_unit_shorthand()
+    {
+        // Spec 0.20: the field is a string, and what it means is the spec's grammar rather than
+        // this daemon's reading of it.
+        var graph = Wf.Graph(("wait", Wf.Timer("1h30m")));
+
+        var resolved = Assert.IsType<ResolvedActivityInput.Timer>(
+            _interpreter.ResolveInput(Wf.Session(graph), "wait", null));
+
+        Assert.Equal(TimeSpan.FromMinutes(90), resolved.Duration);
+    }
+
+    [Fact]
+    public void A_timers_duration_may_be_a_whole_field_template()
+    {
+        // Which is why it is resolved here at all, rather than parsed at the mapping boundary:
+        // there is no duration until the run renders one.
+        var graph = Wf.Graph(("wait", Wf.Timer("{{ input.backoff }}")));
+        var session = Wf.Session(graph);
+
+        var resolved = Assert.IsType<ResolvedActivityInput.Timer>(
+            _interpreter.ResolveInput(
+                session, "wait", new Dictionary<string, object> { ["backoff"] = "45s" }));
+
+        Assert.Equal(TimeSpan.FromSeconds(45), resolved.Duration);
+    }
+
+    [Theory]
+    [InlineData("soon")]                // not a duration at all
+    [InlineData("90")]                  // a number says neither seconds nor hours
+    [InlineData("0s")]                  // well formed, and nothing waits zero
+    public void A_duration_template_that_renders_to_something_else_fails_the_run(string rendered)
+    {
+        // UTOS-E106, and a run-time failure rather than a load-time one for the reason a templated
+        // URL is: the value did not exist until the run produced it.
+        var graph = Wf.Graph(("wait", Wf.Timer("{{ input.backoff }}")));
+
+        var ex = Assert.Throws<TemplateException>(
+            () => _interpreter.ResolveInput(
+                Wf.Session(graph), "wait",
+                new Dictionary<string, object> { ["backoff"] = rendered }));
+
+        Assert.Equal("UTOS-E106", ex.Code);
+        Assert.Contains("wait", ex.Message);
     }
 }

@@ -30,7 +30,7 @@ namespace UnitTests.Persistence;
 /// Which makes <c>Kind</c> and <c>HeaderMap</c> a poor precedent to reason from: neither is a
 /// decision, one is an ineffective attribute and the other an omission. They stay because
 /// removing them is its own persisted-shape change with nothing to gain. A *new* computed property
-/// should simply not be persisted — see <c>EmissionRule</c>, which has none.
+/// should simply not be persisted — see <c>TransitionRule</c>, which has none.
 /// </para>
 /// </summary>
 public class ActivityConfigJsonShapeTests
@@ -56,26 +56,27 @@ public class ActivityConfigJsonShapeTests
         // It decides whether the child gates on its caller, so losing it on the way to disk
         // would turn a streaming consumer into one that silently drops what it was sent.
         //
-        // A rule is an EmissionRule carrying one of three actions, where it was first a
-        // TransitionRule and then a flat DispatchRule. Each step changed this text, and each is a
-        // persisted-shape break called out as one in the changelog: an execution created before it
-        // rehydrates with a hole where its definition used to be, silently, because
-        // EventSerializer's deserialize path logs and returns null rather than throwing.
+        // A rule is a TransitionRule carrying a condition, an effect and an exit. It was a
+        // TransitionRule with one action first, then a flat DispatchRule, then an EmissionRule,
+        // and since spec 0.20 one type serves every list again. Each step changed this text, and
+        // each is a persisted-shape break called out as one in the changelog: an execution created
+        // before it rehydrates with a hole where its definition used to be.
         var config = new CallActivityConfig("acme/mailbox:1.0.0", "poll",
-            OnEmitted: [EmissionRule.Handles("acme/ingester:1.0.0", "ingest")]);
+            OnEmitted: [TransitionRule.Calls("acme/ingester:1.0.0", "ingest")]);
 
         var json = Serialize(config);
 
-        // `Error` trails `Condition`: it was added in spec 0.0.16 as the fourth action and
-        // declared last so a rule persisted before it reads back unchanged (a missing field is a
-        // null), which is the cheapest evolution a persisted shape has.
+        // Effect and exit are polymorphic, so each carries its own discriminator — `effect` and
+        // `exit`, lowercase, the way `type` discriminates an activity config. A dispatching rule
+        // with no exit is the body of a consuming loop, so `Exit` is null here rather than absent.
         Assert.Contains("""
-                        "OnEmitted":[{"Handle":{"Workflow":"acme/ingester:1.0.0","StartActivity":"ingest","Input":null},"Transition":null,"Result":null,"Condition":null,"Error":null}]
+                        "OnEmitted":[{"Condition":null,"Effect":{"effect":"workflow.call","Dispatch":{"Workflow":"acme/ingester:1.0.0","StartActivity":"ingest","Input":null}},"Exit":null}]
                         """, json);
 
         var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
 
-        Assert.Equal("acme/ingester:1.0.0", Assert.Single(restored.OnEmitted).Handle!.Workflow);
+        var effect = Assert.IsType<RuleEffect.Call>(Assert.Single(restored.OnEmitted).Effect);
+        Assert.Equal("acme/ingester:1.0.0", effect.Dispatch.Workflow);
         Assert.True(restored.ConsumesOutput);
     }
 
@@ -92,51 +93,63 @@ public class ActivityConfigJsonShapeTests
         var config = new CallActivityConfig("acme/mailbox:1.0.0", "poll",
             OnEmitted:
             [
-                EmissionRule.Goto("wrap-up", condition: "output.done"),
-                EmissionRule.Returns(new ValueMap(new Dictionary<string, object?> { ["seen"] = true })),
-                EmissionRule.Fails("BAD_VALUE", "value {{ output.id }} is malformed",
+                TransitionRule.Goto("wrap-up", condition: "output.done"),
+                TransitionRule.Returns(new ValueMap(new Dictionary<string, object?> { ["seen"] = true })),
+                TransitionRule.Fails("BAD_VALUE", "value {{ output.id }} is malformed",
                     new ValueMap(new Dictionary<string, object?> { ["id"] = "{{ output.id }}" }))
             ]);
 
         var json = Serialize(config);
 
         Assert.Contains("""
-                        {"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":"output.done","Error":null}
+                        {"Condition":"output.done","Effect":null,"Exit":{"exit":"transition","Target":{"Name":"wrap-up","Input":null}}}
                         """, json);
 
         Assert.Contains("""
-                        {"Handle":null,"Transition":null,"Result":{"seen":true},"Condition":null,"Error":null}
+                        {"Condition":null,"Effect":null,"Exit":{"exit":"result","Value":{"seen":true}}}
                         """, json);
 
-        // The third leaving action, and the only one with a shape of its own: the WorkflowError
-        // the run will report, templates unrendered.
+        // The third exit, and the only one with a shape of its own: the WorkflowError the run will
+        // report, templates unrendered.
         Assert.Contains("""
-                        {"Handle":null,"Transition":null,"Result":null,"Condition":null,"Error":{"Code":"BAD_VALUE","Message":"value {{ output.id }} is malformed","Details":{"id":"{{ output.id }}"}}}
+                        {"Condition":null,"Effect":null,"Exit":{"exit":"error","Error":{"Code":"BAD_VALUE","Message":"value {{ output.id }} is malformed","Details":{"id":"{{ output.id }}"}}}}
                         """, json);
 
         var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
 
-        Assert.Equal("wrap-up", restored.OnEmitted[0].Transition!.Name);
-        Assert.NotNull(restored.OnEmitted[1].Result);
-        Assert.True(restored.OnEmitted[1].Result!.TryGetValue("seen", out var seen) && (bool)seen!);
-        Assert.Equal("BAD_VALUE", restored.OnEmitted[2].Error!.Code);
+        Assert.Equal("wrap-up", Assert.IsType<RuleExit.Goto>(restored.OnEmitted[0].Exit).Target.Name);
+
+        var returns = Assert.IsType<RuleExit.Return>(restored.OnEmitted[1].Exit);
+        Assert.True(returns.Value.TryGetValue("seen", out var seen) && (bool)seen!);
+
+        Assert.Equal("BAD_VALUE", Assert.IsType<RuleExit.Fail>(restored.OnEmitted[2].Exit).Error.Code);
     }
 
     [Fact]
-    public void A_rule_persisted_before_the_error_action_still_reads()
+    public void A_rule_persisted_before_spec_0_20_reads_back_as_a_rule_with_neither_half()
     {
-        // The text a 0.0.15 daemon wrote, with no `Error` field at all. It must come back as a
-        // rule with no error, not fail to deserialize — the whole reason `Error` was appended
-        // rather than the shape re-cut.
+        // The text a 0.19 daemon wrote, where a rule carried one action. Spec 0.20 re-cut the
+        // shape — a condition, an effect and an exit — so this is a persisted-shape break, and
+        // deliberately one: no upcaster. An upcaster would have to decide what a 0.19 `emit` with
+        // its own transition *means* under rules that changed around it, and produce a bundle
+        // whose behaviour is 0.19's while everything reading it implements 0.20.
+        //
+        // What is pinned here is that the break is not silent about what it produces. Unknown
+        // properties are ignored, so the rule comes back with neither an effect nor an exit —
+        // which UTOS-T001 forbids and the interpreter refuses by name. A 0.19 execution resumed on
+        // a 0.20 daemon therefore fails; it does not quietly take a different path.
         const string json = """
-            {"type":"workflow.call","OnEmitted":[{"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":null}],"Workflow":"acme/mailbox:1.0.0","StartActivity":"poll","Input":null,"Kind":2}
+            {"type":"workflow.call","OnEmitted":[{"Handle":null,"Transition":{"Name":"wrap-up","Input":null},"Result":null,"Condition":"output.done","Error":null}],"Workflow":"acme/mailbox:1.0.0","StartActivity":"poll","Input":null,"Kind":2}
             """;
 
         var restored = (CallActivityConfig)JsonSerializer.Deserialize<ActivityConfig>(json)!;
 
         var rule = Assert.Single(restored.OnEmitted);
-        Assert.Equal("wrap-up", rule.Transition!.Name);
-        Assert.Null(rule.Error);
+        Assert.Null(rule.Effect);
+        Assert.Null(rule.Exit);
+
+        // The condition kept its name across the re-cut, so it is the one part that still reads.
+        Assert.Equal("output.done", rule.Condition);
     }
 
     [Fact]
@@ -199,8 +212,8 @@ public class ActivityConfigJsonShapeTests
             Serialize(new HttpActivityConfig("GET", "https://example.test")));
 
         Assert.Equal(
-            """{"type":"timer","Duration":"00:00:30","Kind":1}""",
-            Serialize(new TimerActivityConfig(TimeSpan.FromSeconds(30))));
+            """{"type":"timer","Duration":"30s","Kind":1}""",
+            Serialize(new TimerActivityConfig("30s")));
     }
 
     [Fact]
@@ -226,7 +239,7 @@ public class ActivityConfigJsonShapeTests
         ActivityConfig[] configs =
         [
             new HttpActivityConfig("GET", "https://example.test"),
-            new TimerActivityConfig(TimeSpan.FromSeconds(30)),
+            new TimerActivityConfig("30s"),
             new CallActivityConfig("acme/x:1.0.0", "start"),
             new SpawnActivityConfig("acme/x:1.0.0", "start"),
             new PromiseActivityConfig(PromiseMode.All, 0, [])

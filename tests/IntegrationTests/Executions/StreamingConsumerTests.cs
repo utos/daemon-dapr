@@ -48,11 +48,17 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
     /// always another document — `self` is rejected here (UTOS-S011) — which is what makes it
     /// structurally unable to transition back into the consumer's flow and open a second producer.
     /// </summary>
-    private static EmissionRule[] HandleThenResume(string startActivity) =>
+    private static TransitionRule[] HandleThenResume(string startActivity) =>
     [
-        new EmissionRule
+        new TransitionRule
         {
-            Handle = new HandlerDispatch { Workflow = HandlerWorkflow, StartActivity = startActivity }
+            Workflow = new DispatchEffect
+            {
+                Call = new HandlerDispatch
+                {
+                    Workflow = HandlerWorkflow, StartActivity = startActivity
+                }
+            }
         }
     ];
 
@@ -215,11 +221,9 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
         // addressed by their own id, and this is what says they did not inherit that shape.
         const string producePath = "/nested-produce";
         const string relayPath = "/nested-relay";
-        const string relayDonePath = "/nested-relay-done";
         const string handlePath = "/nested-handle";
         StubJson(producePath);
         StubJson(relayPath);
-        StubJson(relayDonePath);
         StubJson(handlePath);
 
         const int values = 3;
@@ -234,24 +238,27 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
             .AddDependentWorkflow("middle-workflow", middle => middle
                 .WorkflowCall("watch-child", "producer-workflow", "produce",
                     input: Fields(("n", Value.ForNumber(1))),
-                    onEmitted: [new EmissionRule
+                    onEmitted: [new TransitionRule
                     {
-                        Handle = new HandlerDispatch
+                        Workflow = new DispatchEffect
                         {
-                            Workflow = RelayWorkflow,
-                            StartActivity = "relay"
+                            Call = new HandlerDispatch
+                            {
+                                Workflow = RelayWorkflow,
+                                StartActivity = "relay"
+                            }
                         }
                     }])
                 .OnResult(Fields(("relayed", Value.ForString("{{ output.produced }}")))))
-            // The middle document's handler, which is where the relay happens. Emit, then finish:
-            // finishing is what acknowledges the producer and asks for the next value. `emit`
-            // needs a target (UTOS-T004) and there is no `end` keyword to name, so the target is
-            // an activity whose rules run out — a GET nobody counts.
+            // The middle document's handler, which is where the relay happens. Emit, then end:
+            // ending is what acknowledges the producer and asks for the next value. One rule since
+            // spec 0.20, where the effect and the exit are separate questions — this used to need
+            // a second activity whose only job was to have no rules, because an `emit` carried its
+            // own transition and had to name something.
             .AddDependentWorkflow(RelayWorkflow, relay => relay
                 .HttpGet("relay", relayPath)
                 .WithHeader("X-Value", "{{ input.n }}")
-                .OnEmit(Fields(("n", Value.ForString("{{ input.n }}"))), "finish")
-                .HttpGet("finish", relayDonePath))
+                .OnEmitAndEnd(Fields(("n", Value.ForString("{{ input.n }}")))))
             .AddDependentWorkflow("producer-workflow", child => Producer(child, producePath, values))
             .Build("watch-middle");
 
@@ -380,7 +387,7 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted:
                 [
-                    new EmissionRule
+                    new TransitionRule
                     {
                         Condition = "output.n >= 3",
                         Result = Fields(("found", Value.ForString("{{ output.n }}")))
@@ -432,7 +439,7 @@ public class StreamingConsumerTests(DaemonTestFixture fixture)
                 input: Fields(("n", Value.ForNumber(1))),
                 onEmitted:
                 [
-                    new EmissionRule
+                    new TransitionRule
                     {
                         Condition = "output.n >= 2",
                         Transition = new TransitionTarget { Name = "settle" }

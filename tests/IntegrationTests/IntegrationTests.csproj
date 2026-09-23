@@ -34,6 +34,15 @@
         <ProjectReference Include="../../src/tools/Tools.AppHost/Tools.AppHost.csproj"/>
     </ItemGroup>
 
+    <!--
+      Shared by both test projects: one conversion from the `google.protobuf.Value` the suites
+      still build with to the `WorkflowValue` the daemon wire carries since spec 0.20. Linked
+      rather than copied, so the two cannot drift.
+    -->
+    <ItemGroup>
+        <Compile Include="../Shared/RunValues.cs" Link="Shared/RunValues.cs"/>
+    </ItemGroup>
+
     <ItemGroup>
         <Using Include="System.Net"/>
         <Using Include="Microsoft.Extensions.DependencyInjection"/>

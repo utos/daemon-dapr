@@ -32,6 +32,15 @@
         <ProjectReference Include="../../src/common/Common.Workflow.Proto/Common.Workflow.Proto.csproj"/>
         <ProjectReference Include="../../src/common/Common.Constants/Common.Constants.csproj"/>
     </ItemGroup>
+    <!--
+      Shared by both test projects: one conversion from the `google.protobuf.Value` the suites
+      still build with to the `WorkflowValue` the daemon wire carries since spec 0.20. Linked
+      rather than copied, so the two cannot drift.
+    -->
+    <ItemGroup>
+        <Compile Include="../Shared/RunValues.cs" Link="Shared/RunValues.cs"/>
+    </ItemGroup>
+
 
     <ItemGroup>
         <Using Include="Xunit"/>
