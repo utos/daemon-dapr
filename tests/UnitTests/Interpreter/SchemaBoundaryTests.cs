@@ -28,7 +28,7 @@ public class SchemaBoundaryTests
             ("start", Wf.Http("https://example.test", onSuccess:
                 Wf.Goto("next", Wf.Fields(("wrong", "x"))))),
             ("next", new WorkflowActivity(
-                new TimerActivityConfig(TimeSpan.FromSeconds(1)),
+                new TimerActivityConfig("1s"),
                 Schema: new ActivitySchema(Requires("orderId")))));
 
         var error = Assert.Throws<SchemaValidationFailedException>(() =>
@@ -51,7 +51,7 @@ public class SchemaBoundaryTests
         var graph = Wf.Graph(
             ("start", Wf.Http("https://example.test", onSuccess: Wf.Goto("next", Wf.Fields()))),
             ("next", new WorkflowActivity(
-                new TimerActivityConfig(TimeSpan.FromSeconds(1)),
+                new TimerActivityConfig("1s"),
                 Schema: new ActivitySchema(schema))));
 
         var decision = Wf.Interpreter()
@@ -158,7 +158,7 @@ public class SchemaBoundaryTests
         // feature needed no migration.
         var graph = Wf.Graph(
             ("start", Wf.Http("https://example.test", onSuccess: Wf.Goto("next", Wf.Fields(("any", "thing"))))),
-            ("next", Wf.Timer(TimeSpan.FromSeconds(1))));
+            ("next", Wf.Timer("1s")));
 
         var decision = Wf.Interpreter()
             .Advance(Wf.Session(graph), "start", null, new Dictionary<string, object>());
@@ -185,7 +185,7 @@ public class SchemaBoundaryTests
             new WorkflowSpec(new Dictionary<string, WorkflowActivity>
             {
                 ["receive"] = new(
-                    new TimerActivityConfig(TimeSpan.FromSeconds(1)),
+                    new TimerActivityConfig("1s"),
                     Schema: new ActivitySchema(Requires("orderId")))
             }));
 

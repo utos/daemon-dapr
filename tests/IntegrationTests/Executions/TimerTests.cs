@@ -177,18 +177,76 @@ public class TimerTests(DaemonTestFixture fixture)
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
-    public async Task Timer_WithNonPositiveDuration_IsRejectedAtLoad(int seconds)
+    [InlineData("0s")]
+    [InlineData("0h0m0s")]
+    public async Task Timer_WithNonPositiveDuration_IsRejectedAtLoad(string duration)
     {
-        var request = new TestWorkflowBuilder($"timer-bad-duration-{Math.Abs(seconds)}-workflow", fixture.MockBaseUrl)
-            .RawTimer("wait", Duration.FromTimeSpan(TimeSpan.FromSeconds(seconds)))
+        var request = new TestWorkflowBuilder(
+                $"timer-zero-duration-{duration}-workflow", fixture.MockBaseUrl)
+            .RawTimer("wait", duration)
             .Build();
 
         var exception = await Assert.ThrowsAsync<RpcException>(() => fixture.ScheduleAsync(request));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
         Assert.Contains("UTOS-C202", exception.Status.Detail);
+    }
+
+    /// <summary>
+    /// Well formed and not a duration are different answers since spec 0.20, and the codes say so:
+    /// <c>0s</c> parses and is refused for being zero (<c>UTOS-C202</c>), while these do not parse
+    /// at all (<c>UTOS-C203</c>). A negative is in this group rather than the one above — there is
+    /// no sign in the grammar, so <c>-5s</c> is not a negative duration, it is not a duration.
+    /// </summary>
+    [Theory]
+    [InlineData("-5s")]                 // no sign in the grammar
+    [InlineData("90")]                  // a number says neither seconds nor hours
+    [InlineData("1.5h")]                // whole numbers only; this is 1h30m
+    [InlineData("30m1h")]               // units largest first
+    [InlineData("1h1h")]                // each unit at most once
+    [InlineData("PT90S")]               // ISO 8601 is not the spelling
+    [InlineData("1 h")]                 // no spaces
+    [InlineData("5w")]                  // no weeks: a week is fine, a month has no fixed length
+    public async Task Timer_WithMalformedDuration_IsRejectedAtLoad(string duration)
+    {
+        var request = new TestWorkflowBuilder("timer-malformed-duration-workflow", fixture.MockBaseUrl)
+            .RawTimer("wait", duration)
+            .Build();
+
+        var exception = await Assert.ThrowsAsync<RpcException>(() => fixture.ScheduleAsync(request));
+
+        Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
+        Assert.Contains("UTOS-C203", exception.Status.Detail);
+    }
+
+    /// <summary>
+    /// The other half of spec 0.20's durations: a whole-field template stands in for the literal
+    /// and is resolved when the activity is entered. Nothing checks it at load — it has no value
+    /// yet — which is the same division <c>UTOS-C102</c> already draws for a templated URL.
+    /// </summary>
+    [Fact]
+    public async Task Timer_WithATemplatedDuration_WaitsWhatItRendersTo()
+    {
+        const string path = "/timer-templated-duration";
+        StubJson(path);
+
+        var request = new TestWorkflowBuilder("timer-templated-duration-workflow", fixture.MockBaseUrl)
+            .RawTimer("wait", "{{ env.backoff }}")
+            .OnSuccess("after")
+            .HttpGet("after", path)
+            .WithEnv("backoff", "2s")
+            .Build("wait");
+
+        var started = DateTimeOffset.UtcNow;
+        var response = await fixture.ScheduleAsync(request);
+        await WatchToCompletion(response.Id);
+
+        await AssertCompleted(response.Id);
+        Assert.Equal(1, CallCount(path));
+
+        // It really waited, rather than treating an unparsed template as no delay at all.
+        Assert.True(DateTimeOffset.UtcNow - started >= TimeSpan.FromSeconds(2),
+            "a timer whose duration rendered to '2s' must wait two seconds");
     }
 
     // ============================================================================

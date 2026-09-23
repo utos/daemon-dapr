@@ -1,3 +1,4 @@
+using Utos.Testing;
 using IntegrationTests.Shared;
 using IntegrationTests.Shared.Builders;
 using IntegrationTests.Shared.Fixtures;
@@ -271,8 +272,8 @@ public class DataFlowTests(DaemonTestFixture fixture)
         userStruct.Fields.Add("address", Value.ForStruct(addressStruct));
 
         var input = new ExecutionPayload();
-        input.Data.Add("user", Value.ForStruct(userStruct));
-        input.Data.Add("timestamp", Value.ForString("2025-01-01T00:00:00Z"));
+        input.Data.Add("user", Value.ForStruct(userStruct).ToWire());
+        input.Data.Add("timestamp", Value.ForString("2025-01-01T00:00:00Z").ToWire());
 
         fixture.WireMockServer
             .Given(Request.Create()

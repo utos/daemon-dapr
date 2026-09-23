@@ -1,3 +1,4 @@
+using Utos.Workflows.V1;
 using Common.SeedWork;
 using Common.Workflow.Proto;
 using Execution.Api.Extensions;
@@ -22,6 +23,8 @@ public class ExecutionGrpcService(IMediator mediator)
     {
         if (string.IsNullOrEmpty(request.Workflow?.Name))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Workflow name is required"));
+
+        RequireWellFormedInput(request.Input);
 
         try
         {
@@ -55,6 +58,51 @@ public class ExecutionGrpcService(IMediator mediator)
             throw Refuse(ex);
         }
     }
+
+    /// <summary>
+    /// What a run's input must be before anything looks at what it <em>says</em>: a well-formed
+    /// <c>WorkflowValue</c> tree. Checked at the transport edge, because it is a property of the
+    /// wire form and because the mapping inward would otherwise meet a value with no kind and
+    /// throw — which reaches the client as an internal error rather than as the refusal it is.
+    /// <para>
+    /// <c>UTOS-V101</c> and <c>V102</c> come from <c>Utos.Workflow</c>, shared with the CLI, so a
+    /// payload one tool builds is not one the other refuses. Every failure is reported, not the
+    /// first, for the reason <see cref="Refuse"/> gives.
+    /// </para>
+    /// <para>
+    /// A blob is refused outright, and as <c>Unimplemented</c> rather than with a spec code. This
+    /// daemon implements spec 0.20's values but not yet its blob store, so it can neither resolve
+    /// a handle nor carry inline bytes through a run — and reporting that as <c>UTOS-F104</c>
+    /// "unknown" would tell a client its handle was wrong when what is missing is here.
+    /// </para>
+    /// </summary>
+    private static void RequireWellFormedInput(ExecutionPayload? input)
+    {
+        if (input is null || input.Data.Count == 0) return;
+
+        var issues = WorkflowValues.Validate(new WorkflowMap { Fields = { input.Data } });
+
+        if (issues.Count > 0)
+            throw new RpcException(new Status(
+                StatusCode.InvalidArgument,
+                "The run input is not a well-formed value: "
+                + string.Join("; ", issues.Select(issue => issue.ToString()))));
+
+        if (HoldsBlob(new WorkflowValue { MapValue = new WorkflowMap { Fields = { input.Data } } }))
+            throw new RpcException(new Status(
+                StatusCode.Unimplemented,
+                "This daemon does not yet implement binary data (spec 0.20 § Blobs), so a run "
+                + "input may not contain a blob."));
+    }
+
+    private static bool HoldsBlob(WorkflowValue value) =>
+        value.KindCase switch
+        {
+            WorkflowValue.KindOneofCase.BlobValue => true,
+            WorkflowValue.KindOneofCase.ListValue => value.ListValue.Values.Any(HoldsBlob),
+            WorkflowValue.KindOneofCase.MapValue => value.MapValue.Fields.Values.Any(HoldsBlob),
+            _ => false
+        };
 
     /// <summary>
     /// A refused schedule, carrying <strong>every</strong> failing location — not the first,

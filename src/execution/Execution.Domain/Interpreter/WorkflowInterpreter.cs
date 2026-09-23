@@ -16,7 +16,8 @@ namespace Execution.Domain.Interpreter;
 public sealed class WorkflowInterpreter(
     ITemplateEngine templateEngine,
     StructRenderer structRenderer,
-    ISchemaValidator schemaValidator)
+    ISchemaValidator schemaValidator,
+    IDurationParser durationParser)
 {
     /// <summary>
     /// Applies a declaration to a value the interpreter has just rendered, and throws
@@ -105,24 +106,21 @@ public sealed class WorkflowInterpreter(
             .WithResponse(response)
             .WithError(error);
 
-        // An emitted value is handled by the caller's on_emitted rules, which live on the call
+        // An emitted value is answered by the caller's on_emitted rules, which live on the call
         // configuration rather than on the activity — they only mean anything for an awaited
-        // sub-workflow, so they cannot be authored anywhere they would be ignored. They are
-        // dispatches, not transitions, so this path is answered separately rather than being
-        // folded into the loop below.
-        if (outcome == ActivityOutcomeKind.Emitted)
-            return DispatchEmitted(
-                session,
-                (activity.Config as CallActivityConfig)?.OnEmitted ?? [],
-                scope, activityName, passThrough);
+        // sub-workflow, so they cannot be authored anywhere they would be ignored. Since spec 0.20
+        // they are ordinary TransitionRules, so the same loop evaluates all three lists; what
+        // differs is what a rule without an exit means, and what an exhausted list means.
+        var emitted = outcome == ActivityOutcomeKind.Emitted;
 
-        var rules = outcome == ActivityOutcomeKind.Failed ? activity.OnFailure : activity.OnSuccess;
+        var rules = emitted
+            ? (activity.Config as CallActivityConfig)?.OnEmitted ?? []
+            : outcome == ActivityOutcomeKind.Failed
+                ? activity.OnFailure
+                : activity.OnSuccess;
 
-        // Exhausting the rules means something different on each path — see Exhausted.
-        if (rules.Count == 0)
-            return Exhausted(outcome, activityName, passThrough);
+        var list = emitted ? "onEmitted" : outcome == ActivityOutcomeKind.Failed ? "onFailure" : "onSuccess";
 
-        var list = outcome == ActivityOutcomeKind.Failed ? "onFailure" : "onSuccess";
         var number = 0;
         foreach (var rule in rules)
         {
@@ -133,92 +131,131 @@ public sealed class WorkflowInterpreter(
                 && !templateEngine.EvaluateCondition(rule.Condition, scope))
                 continue;
 
-            // Condition matched (or no condition) — execute the action
-            TransitionDecision decision = rule switch
+            // Condition matched (or no condition). The effect is what the rule does; the exit is
+            // where it leaves the run. Both are optional and independent, so they are resolved
+            // separately rather than by one switch over an action.
+            var effect = Perform(session, rule.Effect, scope, passThrough, activityName);
+
+            var decision = Leave(session, rule, scope, passThrough, activityName, emitted, outcome);
+
+            return decision with
             {
-                { Transition: not null } => Goto(session, rule.Transition, scope, passThrough),
-
-                { Result: not null } => Return(session, rule.Result, scope),
-
-                { Emit: not null } => Emit(session, rule.Emit, scope, passThrough, activityName),
-
-                { Error: not null } => Fail(rule.Error, scope,
-                    failureInScope: outcome == ActivityOutcomeKind.Failed),
-
-                _ => throw new InvalidOperationException(
-                    "Transition rule has no action set (none of transition, result, emit or error)")
+                Effect = effect,
+                Match = new RuleMatch(list, number, rules.Count)
             };
-
-            return decision with { Match = new RuleMatch(list, number, rules.Count) };
         }
 
         // Every rule was evaluated and none matched — same meaning as having none at all.
-        return Exhausted(outcome, activityName, passThrough);
+        //
+        // On the emitted path that is the case which made a *filtering* consumer unwritable: every
+        // condition missing on one uninteresting value used to end the run. It means "skip this
+        // value", so the answer is to go back to the call activity for the next one — the same
+        // answer an empty list gives, which is why they share a return rather than being
+        // separately special-cased.
+        return emitted
+            ? Resume(activityName, passThrough)
+            : Exhausted(outcome, activityName, passThrough);
     }
 
     /// <summary>
-    /// What this emitted value does to the run: hand it to a document and take the next one, or
-    /// stop consuming — by continuing somewhere in this workflow, or by ending with a result.
-    /// <para>
-    /// An unmatched list is the case that made a *filtering* consumer unwritable: every condition
-    /// missing on one uninteresting value used to end the run. It means "skip this value", so the
-    /// answer is to go back to the call activity for the next one — the same answer an empty list
-    /// gives, which is why they share a return rather than being separately special-cased.
-    /// </para>
-    /// <para>
-    /// The two leaving actions are the consumer's own, evaluated here, in the consuming execution.
-    /// That is what makes them safe where the same words inside a dispatched handler would not be:
-    /// a handler runs in an execution holding no subscription, so a transition there could only
-    /// re-enter the call activity and start a *second* producer.
-    /// </para>
+    /// Carries out the rule's effect, if it has one. Rendering happens here rather than in the
+    /// driver so that every template of one decision is evaluated in one scope, at one instant.
     /// </summary>
-    private TransitionDecision DispatchEmitted(
+    private DecisionEffect? Perform(
         WorkflowSession session,
-        IReadOnlyList<EmissionRule> rules,
+        RuleEffect? effect,
         TemplateScope scope,
-        string callActivityName,
-        object? passThrough)
+        object? passThrough,
+        string activityName)
     {
-        var number = 0;
-        foreach (var rule in rules)
+        switch (effect)
         {
-            number++;
+            case null:
+                return null;
 
-            if (!string.IsNullOrEmpty(rule.Condition)
-                && !templateEngine.EvaluateCondition(rule.Condition, scope))
-                continue;
-
-            TransitionDecision decision = rule switch
+            case RuleEffect.Emit emit:
             {
-                // UTOS-H104 again: a handler dispatch starts a document, so its input answers to
-                // that document's start activity like any other invocation.
-                { Handle: not null } => new TransitionDecision.Dispatch(
-                    rule.Handle.Workflow,
-                    rule.Handle.StartActivity,
+                // UTOS-H106. `spec.emits` describes one emitted value, and an emit that violates it
+                // fails the run for the same reason a bad result does: a consumer's onEmitted rules
+                // depend on that declaration exactly as a caller depends on a result.
+                var rendered = structRenderer.Render(emit.Value ?? ValueMap.Empty, scope);
+
+                // Check returns null only for a null input, and a rendered value never is — an
+                // emit with no value renders the empty map. The coalesce says so to the compiler
+                // rather than asserting it away.
+                var value = Check(
+                    session.Graph.Workflow.Spec.Emits,
+                    rendered,
+                    SchemaBoundary.Emits,
+                    SchemaValidation.EmittedValue) ?? rendered;
+
+                return new DecisionEffect.Emit(value);
+            }
+
+            // UTOS-H104 again: a dispatch starts a document, so its input answers to that
+            // document's start activity like any other invocation.
+            case RuleEffect.Call call:
+                return new DecisionEffect.Dispatch(
+                    call.Dispatch.Workflow,
+                    call.Dispatch.StartActivity,
                     Check(
-                        session.DeclaredInputOf(rule.Handle.Workflow, rule.Handle.StartActivity),
-                        rule.Handle.Input != null
-                            ? structRenderer.Render(rule.Handle.Input, scope)
+                        session.DeclaredInputOf(call.Dispatch.Workflow, call.Dispatch.StartActivity),
+                        call.Dispatch.Input != null
+                            ? structRenderer.Render(call.Dispatch.Input, scope)
                             : passThrough as Dictionary<string, object>,
                         SchemaBoundary.Input,
-                        SchemaValidation.InvocationInput)),
+                        SchemaValidation.InvocationInput));
 
-                { Transition: not null } => Goto(session, rule.Transition, scope, passThrough),
-
-                { Result: not null } => Return(session, rule.Result, scope),
-
-                // A value arrived, not a failure: an empty error has nothing to re-raise here, and
-                // UTOS-T005 refuses one at load.
-                { Error: not null } => Fail(rule.Error, scope, failureInScope: false),
-
-                _ => throw new InvalidOperationException(
-                    "Emission rule has no action set (none of handle, transition, result or error)")
-            };
-
-            return decision with { Match = new RuleMatch("onEmitted", number, rules.Count) };
+            default:
+                throw new InvalidOperationException(
+                    $"Rule on activity '{activityName}' has an unrecognised effect "
+                    + $"'{effect.GetType().Name}'.");
         }
+    }
 
-        return Resume(callActivityName, passThrough);
+    /// <summary>
+    /// Where the rule leaves the run. A rule without an exit does not end the activity, which is
+    /// meaningful on the emitted path alone: the value has been consumed, so the run goes back for
+    /// the next one. Anywhere else an exit is required — <c>UTOS-T001</c> and the shared
+    /// validator's "an exit is required in this list" rule reject it at load, and this is the
+    /// backstop for a bundle that reached the interpreter anyway.
+    /// </summary>
+    private TransitionDecision Leave(
+        WorkflowSession session,
+        TransitionRule rule,
+        TemplateScope scope,
+        object? passThrough,
+        string activityName,
+        bool emitted,
+        ActivityOutcomeKind outcome)
+    {
+        switch (rule.Exit)
+        {
+            case RuleExit.Goto go:
+                return Goto(session, go.Target, scope, passThrough);
+
+            case RuleExit.Return returns:
+                return Return(session, returns.Value, scope);
+
+            // On the emitted path a value arrived, not a failure: an empty error has nothing to
+            // re-raise there, and UTOS-T005 refuses one at load.
+            case RuleExit.Fail fail:
+                return Fail(fail.Error, scope,
+                    failureInScope: !emitted && outcome == ActivityOutcomeKind.Failed);
+
+            case null when emitted:
+                return Resume(activityName, passThrough);
+
+            case null:
+                throw new InvalidOperationException(
+                    $"Rule on activity '{activityName}' has no exit, which is only meaningful in "
+                    + "an onEmitted list (UTOS-T001).");
+
+            default:
+                throw new InvalidOperationException(
+                    $"Rule on activity '{activityName}' has an unrecognised exit "
+                    + $"'{rule.Exit.GetType().Name}'.");
+        }
     }
 
     /// <summary>
@@ -282,10 +319,54 @@ public sealed class WorkflowInterpreter(
             SubWorkflowActivityConfig subWorkflow =>
                 ResolveSubWorkflow(session, subWorkflow, scope, activityInput),
 
+            TimerActivityConfig timer => ResolveTimer(timer, scope, activityName),
+
             _ => throw new NotSupportedException(
                 $"Unsupported activity config type '{activity.Kind}' for activity '{activityName}'")
         };
     }
+
+    /// <summary>
+    /// How long this timer waits. The field is either a literal in the unit shorthand or a
+    /// whole-field template that renders to one, so it is rendered first and parsed after — by
+    /// <c>WorkflowDuration</c>, the parser the CLI and the shared validator use, because three
+    /// implementations of the grammar would be three sets of edge cases.
+    /// <para>
+    /// A literal was already checked at load (<c>UTOS-C201</c>–<c>C203</c>), so what actually
+    /// reaches the failure below is a template that rendered to something else. That is
+    /// <c>UTOS-E106</c>, and it is a run-time failure for the same reason a templated URL that
+    /// renders to nonsense is: the value did not exist until the run produced it.
+    /// </para>
+    /// </summary>
+    private ResolvedActivityInput ResolveTimer(
+        TimerActivityConfig timer, TemplateScope scope, string activityName)
+    {
+        if (string.IsNullOrEmpty(timer.Duration))
+            throw new InvalidOperationException($"Timer activity '{activityName}' has no duration.");
+
+        var rendered = templateEngine.RenderToString(timer.Duration, scope);
+
+        if (!durationParser.TryParse(rendered, out var duration, out var failure))
+        {
+            throw new TemplateException(
+                TimerDurationCode,
+                failure == DurationFailure.NotPositive
+                    ? $"Timer activity '{activityName}' resolved to a duration that is not "
+                      + $"positive: '{rendered}'."
+                    : $"Timer activity '{activityName}' resolved to '{rendered}', which is not a "
+                      + "duration — expected the unit shorthand, e.g. '90s', '8h' or '1h30m'.");
+        }
+
+        return new ResolvedActivityInput.Timer(duration);
+    }
+
+    /// <summary>
+    /// A timer's duration template rendered to something that is not a duration. Declared here
+    /// rather than taken from the infrastructure's <c>EvaluationCodes</c> for the reason
+    /// <see cref="ForEachCollection"/> declares its own: the domain does not reference the engine
+    /// that happens to host that table.
+    /// </summary>
+    public const string TimerDurationCode = "UTOS-E106";
 
     /// <summary>
     /// The branches a promise activity should start: conditions applied, <c>for_each</c>
@@ -439,40 +520,6 @@ public sealed class WorkflowInterpreter(
     /// </summary>
     private static bool IsReraise(ErrorAction error) =>
         string.IsNullOrEmpty(error.Code) && error.Message == null && error.Details == null;
-
-    /// <summary>
-    /// The value to append and where the run goes once it is durable. The target is required —
-    /// an emit is not a terminal action, so a rule that emits and goes nowhere is a dead end
-    /// rather than a return. <c>UTOS-T004</c> rejects that at load; this is the backstop for a
-    /// bundle that reached the interpreter without it.
-    /// </summary>
-    private TransitionDecision Emit(
-        WorkflowSession session, EmitAction emit, TemplateScope scope, object? activityOutput,
-        string activityName)
-    {
-        var target = emit.Transition
-                     ?? throw new InvalidOperationException(
-                         $"Emit rule on activity '{activityName}' has no transition target.");
-
-        // UTOS-H106. `spec.emits` describes one emitted value, and an emit that violates it fails
-        // the run for the same reason a bad result does: a consumer's onEmitted rules depend on
-        // that declaration exactly as a caller depends on a result.
-        var rendered = structRenderer.Render(emit.Value ?? ValueMap.Empty, scope);
-
-        // Check returns null only for a null input, and a rendered value never is — an emit with
-        // no value renders the empty map. The coalesce says so to the compiler rather than
-        // asserting it away.
-        var value = Check(
-            session.Graph.Workflow.Spec.Emits,
-            rendered,
-            SchemaBoundary.Emits,
-            SchemaValidation.EmittedValue) ?? rendered;
-
-        return new TransitionDecision.Emit(
-            value,
-            target.Name,
-            ResolveTransitionInput(session, target, scope, activityOutput));
-    }
 
     /// <summary>
     /// Resolves the mapped input for the target activity.

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Common.Workflow.Serialization;
 using Google.Protobuf.WellKnownTypes;
+using Utos.Workflows.V1;
 using Wire = Utos.Daemon.V1;
 
 namespace Common.Workflow.Proto;
@@ -61,9 +62,196 @@ public static class ValueMapping
         var result = new Wire.ExecutionPayload();
 
         foreach (var (key, value) in source)
-            result.Data.Add(key, ToProtoValue(value));
+            result.Data.Add(key, ToWorkflowValue(value));
 
         return result;
+    }
+
+    // ---- Run data: the typed value the daemon wire carries since spec 0.20 -------------------
+
+    /// <summary>
+    /// A <c>WorkflowValue</c> as the interpreter holds it. The same scalar rules as every other
+    /// door — a number narrows by value, because this one is a bare double too — plus the kind
+    /// that has no <c>google.protobuf.Value</c> equivalent at all: a blob.
+    /// <para>
+    /// The kinds are a closed set and an unset one is refused rather than read as null. A value
+    /// with no kind is <c>UTOS-V101</c>, and treating it as null would hand a run a missing field
+    /// where a client sent a malformed one.
+    /// </para>
+    /// </summary>
+    private static object? ToRuntimeValue(WorkflowValue source)
+    {
+        return source.KindCase switch
+        {
+            WorkflowValue.KindOneofCase.NullValue => null,
+            WorkflowValue.KindOneofCase.NumberValue => Number(source.NumberValue),
+            WorkflowValue.KindOneofCase.StringValue => source.StringValue,
+            WorkflowValue.KindOneofCase.BoolValue => source.BoolValue,
+
+            WorkflowValue.KindOneofCase.MapValue => source.MapValue.Fields.ToDictionary(
+                field => field.Key,
+                field => ToRuntimeValue(field.Value)),
+
+            WorkflowValue.KindOneofCase.ListValue =>
+                source.ListValue.Values.Select(ToRuntimeValue).ToList(),
+
+            WorkflowValue.KindOneofCase.BlobValue => source.BlobValue.ToDomain(),
+
+            _ => throw new InvalidOperationException(
+                "A workflow value must have exactly one kind set (UTOS-V101).")
+        };
+    }
+
+    public static WorkflowBlob ToDomain(this Utos.Workflows.V1.Blob source) =>
+        new(source.BackingCase == Utos.Workflows.V1.Blob.BackingOneofCase.Id ? source.Id : null,
+            source.BackingCase == Utos.Workflows.V1.Blob.BackingOneofCase.Data
+                ? source.Data.ToByteArray()
+                : null,
+            source.Offset,
+            source.Size,
+            source.MediaType,
+            source.HasName ? source.Name : null,
+            source.LastModified?.ToDateTimeOffset());
+
+    public static Utos.Workflows.V1.Blob ToProto(this WorkflowBlob source)
+    {
+        var result = new Utos.Workflows.V1.Blob
+        {
+            Offset = source.Offset,
+            Size = source.Size,
+            MediaType = source.MediaType
+        };
+
+        if (source.Data is not null)
+            result.Data = Google.Protobuf.ByteString.CopyFrom(source.Data);
+        else if (source.Id is not null)
+            result.Id = source.Id;
+
+        if (source.Name is not null)
+            result.Name = source.Name;
+
+        if (source.LastModified is { } modified)
+            result.LastModified = Timestamp.FromDateTimeOffset(modified);
+
+        return result;
+    }
+
+    /// <summary>
+    /// The outbound half of <see cref="ToRuntimeValue(WorkflowValue)"/>. Shares every scalar rule
+    /// with <see cref="ToProtoValue"/> — the two doors must agree about what 42 is — and differs
+    /// only in the two kinds the typed value adds: a blob travels as itself, and nothing is
+    /// stringified.
+    /// </summary>
+    public static WorkflowValue ToWorkflowValue(object? value)
+    {
+        switch (value)
+        {
+            case null:
+                return new WorkflowValue { NullValue = NullValue.NullValue };
+
+            case string s:
+                return new WorkflowValue { StringValue = s };
+
+            case bool b:
+                return new WorkflowValue { BoolValue = b };
+
+            case int i:
+                return new WorkflowValue { NumberValue = i };
+
+            case long l:
+                return new WorkflowValue { NumberValue = l };
+
+            case double d:
+                return new WorkflowValue { NumberValue = d };
+
+            case float f:
+                return new WorkflowValue { NumberValue = f };
+
+            case decimal m:
+                return new WorkflowValue { NumberValue = (double)m };
+
+            case WorkflowBlob blob:
+                return new WorkflowValue { BlobValue = blob.ToProto() };
+
+            // An HTTP activity's response body is parsed without converters and stays a
+            // JsonElement until it crosses a Dapr boundary, so one can still reach here.
+            case JsonElement json:
+                return WorkflowValueFromJson(json);
+
+            case ValueMap map:
+                return ToWorkflowMapValue(map.Fields);
+
+            case IReadOnlyDictionary<string, object?> nested:
+                return ToWorkflowMapValue(nested);
+
+            case IDictionary<string, object?> nested:
+                return ToWorkflowMapValue(nested.AsReadOnly());
+
+            // Ahead of IEnumerable, for the reason ToProtoValue gives.
+            case System.Collections.IEnumerable items:
+            {
+                var list = new WorkflowList();
+                foreach (var item in items) list.Values.Add(ToWorkflowValue(item));
+                return new WorkflowValue { ListValue = list };
+            }
+
+            default:
+                throw new InvalidOperationException(
+                    $"No proto mapping for {value.GetType()}.");
+        }
+    }
+
+    public static WorkflowMap ToWorkflowMap(this IReadOnlyDictionary<string, object?> source)
+    {
+        var result = new WorkflowMap();
+
+        foreach (var (key, value) in source)
+            result.Fields[key] = ToWorkflowValue(value);
+
+        return result;
+    }
+
+    private static WorkflowValue ToWorkflowMapValue(IReadOnlyDictionary<string, object?> source) =>
+        new() { MapValue = source.ToWorkflowMap() };
+
+    private static WorkflowValue WorkflowValueFromJson(JsonElement json)
+    {
+        switch (json.ValueKind)
+        {
+            case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
+                return new WorkflowValue { NullValue = NullValue.NullValue };
+
+            case JsonValueKind.True:
+                return new WorkflowValue { BoolValue = true };
+
+            case JsonValueKind.False:
+                return new WorkflowValue { BoolValue = false };
+
+            case JsonValueKind.Number:
+                return new WorkflowValue { NumberValue = json.GetDouble() };
+
+            case JsonValueKind.String:
+                return new WorkflowValue { StringValue = json.GetString() ?? string.Empty };
+
+            case JsonValueKind.Array:
+            {
+                var list = new WorkflowList();
+                foreach (var item in json.EnumerateArray()) list.Values.Add(WorkflowValueFromJson(item));
+                return new WorkflowValue { ListValue = list };
+            }
+
+            case JsonValueKind.Object:
+            {
+                var map = new WorkflowMap();
+                foreach (var property in json.EnumerateObject())
+                    map.Fields[property.Name] = WorkflowValueFromJson(property.Value);
+                return new WorkflowValue { MapValue = map };
+            }
+
+            default:
+                return new WorkflowValue { NullValue = NullValue.NullValue };
+        }
     }
 
     /// <summary>

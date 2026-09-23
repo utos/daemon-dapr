@@ -23,7 +23,6 @@ public class GrammarTests
     [InlineData("({ __proto__: input }) !== null", "UTOS-E021")]
     [InlineData("({ get x() { return 1; } }).x === 1", "UTOS-E020")]
     [InlineData("this === undefined", "UTOS-E030")]
-    [InlineData("(async () => 1)() !== null", "UTOS-E031")]
     [InlineData("new Array(5).length === 5", "UTOS-E040")]
     [InlineData("new Proxy({}, {}) !== null", "UTOS-E040")]
     [InlineData("Array(5).length === 5", "UTOS-E041")]
@@ -31,7 +30,6 @@ public class GrammarTests
     [InlineData("Function('return true')()", "UTOS-E041")]
     [InlineData("delete input.count", "UTOS-E050")]
     [InlineData("void 0 === undefined", "UTOS-E050")]
-    [InlineData("(input instanceof Object) === true", "UTOS-E051")]
     [InlineData("(1, true)", "UTOS-E035")]
     [InlineData("output.status ===", "UTOS-E060")]
     [InlineData("{{ output.status === 'ready' }}", "UTOS-E061")]
@@ -71,6 +69,19 @@ public class GrammarTests
     [InlineData("new Date(0).getTime() === 0 && new URL('https://x.test/a').pathname === '/a'")]
     [InlineData("new URLSearchParams({ q: 'a b' }).toString() === 'q=a+b'")]
     [InlineData("Buffer.from('aGk', 'base64').toString() === 'hi'")]
+    // Spec 0.20 admitted both of these, which this suite previously asserted were refused.
+    //
+    // `instanceof` came in with Blob and File: a value's kind is a type now, so asking whether
+    // something *is* one is the natural question, and `UTOS-E051` is retired. It was refused for
+    // reaching a prototype chain, which the constructible-type list bounds instead — the chains a
+    // program can reach are the ones the host built.
+    //
+    // An async arrow and a top-level `await` came in with the asynchronous conversions a blob
+    // needs (`await response.body.text()`), retiring `UTOS-E031`. Programs parse with
+    // `AllowAwaitOutsideFunction`, which is what the spec means by "await is permitted at a
+    // program's top level".
+    [InlineData("(input instanceof Object) === true")]
+    [InlineData("(async () => 1)() !== null")]
     public void Ordinary_programs_are_accepted(string condition)
     {
         var report = WorkflowBundleValidator.Validate(BundleWithCondition(condition));

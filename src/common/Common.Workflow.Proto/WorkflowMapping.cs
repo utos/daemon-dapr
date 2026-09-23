@@ -158,11 +158,14 @@ public static class WorkflowMapping
                     ? null
                     : source.Http.Headers.ToDictionary(header => header.Key, header => header.Value)),
 
-            // A timer authored with no duration maps to null rather than throwing here — the
-            // validator rejects it by name a moment later, which is a far better diagnostic
-            // than a mapping failure.
+            // Carried as the author's string — a literal in the unit shorthand, or a whole-field
+            // template — because a template has no TimeSpan until it is rendered. A timer
+            // authored with no duration maps to null rather than throwing here; the validator
+            // rejects it by name a moment later, which is a far better diagnostic than a mapping
+            // failure.
             Wire.WorkflowActivity.ConfigOneofCase.Timer =>
-                new Domain.TimerActivityConfig(source.Timer.Duration?.ToTimeSpan()),
+                new Domain.TimerActivityConfig(
+                    source.Timer.Duration.Length == 0 ? null : source.Timer.Duration),
 
             Wire.WorkflowActivity.ConfigOneofCase.Workflow => source.Workflow.ToDomainSubWorkflow(),
 
@@ -192,12 +195,7 @@ public static class WorkflowMapping
     }
 
     private static Wire.TimerActivityConfig ToProto(this Domain.TimerActivityConfig source) =>
-        new()
-        {
-            Duration = source.Duration.HasValue
-                ? Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(source.Duration.Value)
-                : null
-        };
+        new() { Duration = source.Duration ?? string.Empty };
 
     /// <summary>
     /// Selects the domain sub-workflow shape from the wire mode oneof. An unset mode is a
@@ -326,45 +324,6 @@ public static class WorkflowMapping
         return result;
     }
 
-    /// <summary>
-    /// The action is read from <c>ActionCase</c> rather than from whether a field is populated:
-    /// <c>result</c> is a Struct, and an empty one is a perfectly good "end with nothing", which a
-    /// null check would silently turn into a rule with no action at all.
-    /// </summary>
-    public static Domain.EmissionRule ToDomain(this Wire.EmissionRule source) =>
-        new(source.ActionCase == Wire.EmissionRule.ActionOneofCase.Handle
-                ? source.Handle.ToDomain()
-                : null,
-            source.ActionCase == Wire.EmissionRule.ActionOneofCase.Transition
-                ? source.Transition.ToDomain()
-                : null,
-            source.ActionCase == Wire.EmissionRule.ActionOneofCase.Result
-                ? source.Result.ToDomain()
-                : null,
-            source.HasCondition ? source.Condition : null,
-            source.ActionCase == Wire.EmissionRule.ActionOneofCase.Error
-                ? source.Error.ToDomain()
-                : null);
-
-    public static Wire.EmissionRule ToProto(this Domain.EmissionRule source)
-    {
-        var result = new Wire.EmissionRule();
-
-        if (source.Handle != null)
-            result.Handle = source.Handle.ToProto();
-        else if (source.Transition != null)
-            result.Transition = source.Transition.ToProto();
-        else if (source.Result != null)
-            result.Result = source.Result.ToProto();
-        else if (source.Error != null)
-            result.Error = source.Error.ToProto();
-
-        if (source.Condition != null)
-            result.Condition = source.Condition;
-
-        return result;
-    }
-
     // ---- error action ------------------------------------------------------
 
     /// <summary>
@@ -410,63 +369,106 @@ public static class WorkflowMapping
     // ---- transitions -----------------------------------------------------
 
     /// <summary>
-    /// Read from <c>ActionCase</c> for the reason the emission rule is: an empty <c>result</c> is a
-    /// complete action, and a null check would read it as no action at all.
+    /// One rule, in any list. Both halves are read from their oneof case rather than from whether
+    /// a field is populated: <c>result</c> is a Struct and an empty one is a perfectly good "end
+    /// with nothing", which a null check would silently turn into a rule with no exit at all.
+    /// <para>
+    /// Neither half is required here. A rule with no exit is ordinary in an <c>on_emitted</c> list
+    /// and a rule with neither half is malformed — <c>UTOS-T001</c> names it — and refusing at the
+    /// mapping boundary would report that as a mapping failure, which says nothing about which
+    /// rule is wrong.
+    /// </para>
     /// </summary>
     public static Domain.TransitionRule ToDomain(this Wire.TransitionRule source) =>
-        new(source.ActionCase == Wire.TransitionRule.ActionOneofCase.Transition
-                ? source.Transition.ToDomain()
-                : null,
-            source.ActionCase == Wire.TransitionRule.ActionOneofCase.Result
-                ? source.Result.ToDomain()
-                : null,
-            source.ActionCase == Wire.TransitionRule.ActionOneofCase.Emit
-                ? source.Emit.ToDomain()
-                : null,
-            source.HasCondition ? source.Condition : null,
-            source.ActionCase == Wire.TransitionRule.ActionOneofCase.Error
-                ? source.Error.ToDomain()
-                : null);
+        new(source.HasCondition ? source.Condition : null,
+            source.EffectCase switch
+            {
+                Wire.TransitionRule.EffectOneofCase.Emit =>
+                    new Domain.RuleEffect.Emit(source.Emit.ToDomain()),
+
+                Wire.TransitionRule.EffectOneofCase.Workflow =>
+                    source.Workflow.ToDomainEffect(),
+
+                _ => null
+            },
+            source.ExitCase switch
+            {
+                Wire.TransitionRule.ExitOneofCase.Transition =>
+                    new Domain.RuleExit.Goto(source.Transition.ToDomain()),
+
+                Wire.TransitionRule.ExitOneofCase.Result =>
+                    new Domain.RuleExit.Return(source.Result.ToDomain()),
+
+                Wire.TransitionRule.ExitOneofCase.Error =>
+                    new Domain.RuleExit.Fail(source.Error.ToDomain()),
+
+                _ => null
+            });
 
     public static Wire.TransitionRule ToProto(this Domain.TransitionRule source)
     {
         var result = new Wire.TransitionRule();
 
-        if (source.Transition != null)
-            result.Transition = source.Transition.ToProto();
-        else if (source.Result != null)
-            result.Result = source.Result.ToProto();
-        else if (source.Emit != null)
-            result.Emit = source.Emit.ToProto();
-        else if (source.Error != null)
-            result.Error = source.Error.ToProto();
-
         if (source.Condition != null)
             result.Condition = source.Condition;
+
+        switch (source.Effect)
+        {
+            case Domain.RuleEffect.Emit emit:
+                result.Emit = (emit.Value ?? Domain.ValueMap.Empty).ToProto();
+                break;
+
+            case Domain.RuleEffect.Call call:
+                result.Workflow = new Wire.DispatchEffect { Call = call.Dispatch.ToProto() };
+                break;
+
+            case null:
+                break;
+
+            default:
+                throw new NotSupportedException(
+                    $"No wire mapping for rule effect '{source.Effect.GetType().Name}'.");
+        }
+
+        switch (source.Exit)
+        {
+            case Domain.RuleExit.Goto go:
+                result.Transition = go.Target.ToProto();
+                break;
+
+            case Domain.RuleExit.Return returns:
+                result.Result = returns.Value.ToProto();
+                break;
+
+            case Domain.RuleExit.Fail fail:
+                result.Error = fail.Error.ToProto();
+                break;
+
+            case null:
+                break;
+
+            default:
+                throw new NotSupportedException(
+                    $"No wire mapping for rule exit '{source.Exit.GetType().Name}'.");
+        }
 
         return result;
     }
 
     /// <summary>
-    /// An emit's value and target both map leniently. A rule authored without a target is
-    /// malformed — <c>UTOS-T004</c> names it — and refusing here would report it as a mapping
-    /// failure instead, which says nothing about which rule is wrong.
+    /// The dispatch modes a rule can carry. Only <c>call</c> today; field 2 of the wire oneof is
+    /// reserved for <c>spawn</c>, so an unset mode is a bundle from a newer spec rather than a
+    /// shape this one should guess at.
     /// </summary>
-    public static Domain.EmitAction ToDomain(this Wire.EmitAction source) =>
-        new(source.Value?.ToDomain(), source.Transition?.ToDomain());
+    private static Domain.RuleEffect ToDomainEffect(this Wire.DispatchEffect source) =>
+        source.ModeCase switch
+        {
+            Wire.DispatchEffect.ModeOneofCase.Call =>
+                new Domain.RuleEffect.Call(source.Call.ToDomain()),
 
-    public static Wire.EmitAction ToProto(this Domain.EmitAction source)
-    {
-        var result = new Wire.EmitAction();
-
-        if (source.Value != null)
-            result.Value = source.Value.ToProto();
-
-        if (source.Transition != null)
-            result.Transition = source.Transition.ToProto();
-
-        return result;
-    }
+            _ => throw new NotSupportedException(
+                "Dispatch effect has no mode set (expected call).")
+        };
 
     public static Domain.TransitionTarget ToDomain(this Wire.TransitionTarget source) =>
         new(source.Name, source.Input?.ToDomain());

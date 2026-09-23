@@ -1,3 +1,5 @@
+using Common.Workflow;
+using Common.Workflow.Proto;
 using Execution.Api.Services;
 using Execution.Application.Commands;
 using Execution.Application.Validation;
@@ -15,6 +17,13 @@ public static class ExecutionExtensions
         string databaseName)
     {
         builder.AddExecutionInfrastructure(databaseName);
+
+        // The spec's duration grammar, supplied from here because this is the layer that may see
+        // `Utos.Workflow`. The interpreter needs it to enter a timer whose duration is a template,
+        // and reimplementing the grammar behind the boundary would be a second set of edge cases —
+        // the first workflow to find the difference would be one the CLI accepted and this daemon
+        // refused.
+        builder.Services.AddSingleton<IDurationParser, SpecDurationParser>();
 
         // Only what scheduling means beyond the bundle. The bundle's own shape was validated
         // against the spec when it was loaded, and it has not changed since — it comes from the

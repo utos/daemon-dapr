@@ -32,6 +32,10 @@ public sealed record ResolveActivityInputOutput(
     // True when the sub-workflow is fire-and-forget: the executor starts it as an independent
     // execution and does not await it. False for HTTP and awaited sub-workflows.
     bool Detached = false,
+    // How long a timer waits, resolved (null when not a timer). Recorded here, in the
+    // orchestration history, which is what makes a replay read the same deadline rather than
+    // computing a new one from a later clock or a re-rendered template.
+    TimeSpan? Duration = null,
     // UTOS-H104: the invocation input did not satisfy the callee's declared input. Carried as
     // data rather than thrown, because an exception crossing the Dapr boundary arrives flattened
     // to a message — the driver re-raises it so the code and the details survive.
@@ -83,6 +87,12 @@ public class ResolveActivityInputActivity(
                 ActivityKind.Workflow,
                 null, null, null, null,
                 sub.WorkflowKey, sub.StartActivity, sub.Input, sub.Detached),
+
+            ResolvedActivityInput.Timer timer => new ResolveActivityInputOutput(
+                ActivityKind.Timer,
+                null, null, null, null,
+                null, null, null,
+                Duration: timer.Duration),
 
             _ => throw new NotSupportedException(
                 $"Unsupported resolved activity input '{resolved.GetType().Name}'")

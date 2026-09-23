@@ -25,4 +25,16 @@ public abstract record ResolvedActivityInput
         string StartActivity,
         Dictionary<string, object>? Input,
         bool Detached) : ResolvedActivityInput;
+
+    /// <summary>
+    /// How long a timer waits, parsed. The author wrote either the unit shorthand or a whole-field
+    /// template; by the time it is here both have become one <see cref="TimeSpan"/>.
+    /// <para>
+    /// Resolved through this activity rather than read straight off the configuration because a
+    /// template may read <c>now()</c> or the run's <c>env</c>, and an orchestrator must not render
+    /// anything: rendering here records the result in history, so a replay reads the same deadline
+    /// instead of computing a new one from a later clock.
+    /// </para>
+    /// </summary>
+    public sealed record Timer(TimeSpan Duration) : ResolvedActivityInput;
 }

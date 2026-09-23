@@ -162,7 +162,7 @@ public class FailureRoutingTests
     // ---- the re-raise (spec 0.0.17): a bare `error` on onFailure -------------------------------
 
     private static TransitionRule BareError(string? condition = null) =>
-        new(Error: new ErrorAction(string.Empty), Condition: condition);
+        new(condition, Exit: new RuleExit.Fail(new ErrorAction(string.Empty)));
 
     [Fact]
     public void A_bare_error_on_the_failure_path_reraises_the_failure_as_it_is()
@@ -197,7 +197,7 @@ public class FailureRoutingTests
         // UTOS-T005 refuses this at load. Should one reach the interpreter anyway, it fails with the
         // backstop code rather than quietly re-raising — a message with no code is a mistake.
         var decision = Advance(Failing(
-            onFailure: [new TransitionRule(Error: new ErrorAction(string.Empty, "wrapped: {{ error.message }}"))]));
+            onFailure: [new TransitionRule(Exit: new RuleExit.Fail(new ErrorAction(string.Empty, "wrapped: {{ error.message }}")))]));
 
         var fail = Assert.IsType<TransitionDecision.Fail>(decision);
         Assert.Equal(WorkflowErrorContext.UnspecifiedCode, fail.Code);

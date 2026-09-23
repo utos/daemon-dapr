@@ -1,3 +1,4 @@
+using Common.Workflow.Proto;
 using Common.Workflow;
 // Aliased rather than imported: Utos.Workflows.V1 also contains Workflow and WorkflowActivity,
 // which would collide with the domain types this builder constructs.
@@ -52,7 +53,11 @@ internal static class Wf
     public static WorkflowInterpreter Interpreter()
     {
         var engine = Engine();
-        return new WorkflowInterpreter(engine, new StructRenderer(engine), new JsonSchemaValidator());
+        return new WorkflowInterpreter(
+            engine, new StructRenderer(engine), new JsonSchemaValidator(),
+            // The spec's own duration parser, for the reason the validator above is real: what
+            // `1h30m` means is part of what the interpreter decides.
+            new SpecDurationParser());
     }
 
     public static JintTemplateEngine Engine()
@@ -83,7 +88,7 @@ internal static class Wf
             onSuccess);
     }
 
-    public static WorkflowActivity Timer(TimeSpan duration, params TransitionRule[] onSuccess)
+    public static WorkflowActivity Timer(string duration, params TransitionRule[] onSuccess)
     {
         return new WorkflowActivity(new TimerActivityConfig(duration), onSuccess);
     }
@@ -110,7 +115,7 @@ internal static class Wf
     public static WorkflowActivity ConsumingCall(
         string workflowKey,
         string startActivity,
-        EmissionRule[] onEmitted,
+        TransitionRule[] onEmitted,
         params TransitionRule[] onSuccess)
     {
         return new WorkflowActivity(
@@ -148,23 +153,31 @@ internal static class Wf
     }
 
     /// <summary>An on_emitted rule: hand the value to a document and take the next one.</summary>
-    public static EmissionRule Dispatch(
+    public static TransitionRule Dispatch(
         string startActivity,
         ValueMap? input = null,
         string? condition = null,
         string workflow = SelfKey)
     {
-        return EmissionRule.Handles(workflow, startActivity, input, condition);
+        return TransitionRule.Calls(workflow, startActivity, input, condition);
     }
 
     /// <summary>An on_emitted rule: stop consuming and continue at an activity in this workflow.</summary>
-    public static EmissionRule EmittedGoto(
+    public static TransitionRule EmittedGoto(
         string name, ValueMap? input = null, string? condition = null) =>
-        EmissionRule.Goto(name, input, condition);
+        TransitionRule.Goto(name, input, condition);
 
     /// <summary>An on_emitted rule: stop consuming and end this run with a result.</summary>
-    public static EmissionRule EmittedResult(ValueMap result, string? condition = null) =>
-        EmissionRule.Returns(result, condition);
+    public static TransitionRule EmittedResult(ValueMap result, string? condition = null) =>
+        TransitionRule.Returns(result, condition);
+
+    /// <summary>
+    /// An on_emitted rule that does both: run a document for this value, then leave. Only
+    /// expressible since spec 0.20, when an effect and an exit stopped being one field.
+    /// </summary>
+    public static TransitionRule DispatchThen(
+        string startActivity, RuleExit exit, string? condition = null, string workflow = SelfKey) =>
+        new(condition, new RuleEffect.Call(new HandlerDispatch(workflow, startActivity)), exit);
 
     // ---- transitions ---------------------------------------------------
 
@@ -183,6 +196,11 @@ internal static class Wf
     {
         return TransitionRule.Emits(value, target, input, condition);
     }
+
+    /// <summary>Emit and then end the run — one rule since spec 0.20, where it took two before.</summary>
+    public static TransitionRule EmitAndReturn(
+        ValueMap value, ValueMap result, string? condition = null) =>
+        new(condition, new RuleEffect.Emit(value), new RuleExit.Return(result));
 
     // ---- values --------------------------------------------------------
 

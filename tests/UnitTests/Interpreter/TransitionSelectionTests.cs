@@ -141,7 +141,7 @@ public class TransitionSelectionTests
     [Fact]
     public void A_timer_passes_its_input_through_as_its_output()
     {
-        var session = Wf.Session(Wf.Graph(("wait", Wf.Timer(TimeSpan.FromSeconds(1),
+        var session = Wf.Session(Wf.Graph(("wait", Wf.Timer("1s",
             Wf.Goto("poll", Wf.Fields(("attempt", "{{ output.attempt + 1 }}")))))));
 
         // A timer does no work, so the driver hands the interpreter no output at all.
@@ -155,7 +155,7 @@ public class TransitionSelectionTests
     [Fact]
     public void A_timer_used_as_the_start_activity_falls_back_to_the_run_input()
     {
-        var graph = Wf.Graph(("wait", Wf.Timer(TimeSpan.FromSeconds(1),
+        var graph = Wf.Graph(("wait", Wf.Timer("1s",
             Wf.Goto("poll", Wf.Fields(("seen", "{{ output.attempt }}"))))));
 
         var session = Wf.Session(graph, runInput: new Dictionary<string, object> { ["attempt"] = 9 });
@@ -196,7 +196,7 @@ public class TransitionSelectionTests
     }
 
     [Fact]
-    public void A_rule_with_no_action_is_rejected()
+    public void A_rule_with_neither_an_effect_nor_an_exit_is_rejected()
     {
         var activity = Wf.Http("https://example.com", onSuccess: [new TransitionRule()]);
 
@@ -205,7 +205,7 @@ public class TransitionSelectionTests
         var ex = Assert.Throws<InvalidOperationException>(
             () => _interpreter.Advance(session, "a", null, null));
 
-        Assert.Equal("Transition rule has no action set (none of transition, result, emit or error)", ex.Message);
+        Assert.Contains("UTOS-T001", ex.Message);
     }
 
     [Fact]
@@ -216,12 +216,13 @@ public class TransitionSelectionTests
 
         var decision = _interpreter.Advance(session, "a", null, Output(("count", 7)));
 
-        var emit = Assert.IsType<TransitionDecision.Emit>(decision);
+        var emit = Assert.IsType<DecisionEffect.Emit>(decision.Effect);
         Assert.Equal(7, emit.Value["batch"]);
 
         // Emit-and-continue: unlike a result, the run has somewhere to be afterwards. Here that
-        // is a back-edge, which is what a producer emitting in a loop looks like.
-        Assert.Equal("a", emit.ActivityName);
+        // is a back-edge, which is what a producer emitting in a loop looks like. The target is
+        // the rule's *exit*, a separate question from the emit since spec 0.20.
+        Assert.Equal("a", Assert.IsType<TransitionDecision.Goto>(decision).ActivityName);
     }
 
     [Fact]
@@ -236,11 +237,11 @@ public class TransitionSelectionTests
                     Wf.Fields(("cursor", "{{ output.count + 1 }}")))
             ]))));
 
-        var emit = Assert.IsType<TransitionDecision.Emit>(
+        var go = Assert.IsType<TransitionDecision.Goto>(
             _interpreter.Advance(session, "a", null, Output(("count", 41))));
 
-        Assert.NotNull(emit.Input);
-        Assert.Equal(42, emit.Input["cursor"]);
+        Assert.NotNull(go.Input);
+        Assert.Equal(42, go.Input["cursor"]);
     }
 
     [Fact]
@@ -251,10 +252,10 @@ public class TransitionSelectionTests
 
         var output = Output(("count", 3));
 
-        var emit = Assert.IsType<TransitionDecision.Emit>(
+        var go = Assert.IsType<TransitionDecision.Goto>(
             _interpreter.Advance(session, "a", null, output));
 
-        Assert.Same(output, emit.Input);
+        Assert.Same(output, go.Input);
     }
 
     [Fact]
@@ -268,28 +269,53 @@ public class TransitionSelectionTests
                 Wf.Result(Wf.Fields(("done", true)))
             ]))));
 
-        Assert.IsType<TransitionDecision.Emit>(
-            _interpreter.Advance(session, "a", null, Output(("count", 1))));
+        Assert.NotNull(
+            _interpreter.Advance(session, "a", null, Output(("count", 1))).Effect);
 
-        Assert.IsType<TransitionDecision.Return>(
-            _interpreter.Advance(session, "a", null, Output(("count", 0))));
+        Assert.Null(
+            _interpreter.Advance(session, "a", null, Output(("count", 0))).Effect);
     }
 
     [Fact]
-    public void An_emit_with_nowhere_to_go_is_rejected_naming_the_activity()
+    public void A_rule_may_emit_and_then_end_the_run()
     {
-        // UTOS-T004 rejects this at load; the interpreter is the backstop for a bundle that
-        // reached it anyway. An emit is not terminal, so a rule that emits and stops is a dead
-        // end rather than a return, and defaulting it to 'end' would invent a meaning.
+        // Spec 0.20. An emit carried its own transition until then, so "here is the last item,
+        // and here is the summary" took two rules and an activity between them; UTOS-T004, which
+        // rejected an emit with no target, is retired because an exit beside the emit is now the
+        // thing that says where the run goes.
+        var session = Wf.Session(Wf.Graph(("a", Wf.Http("https://example.com",
+            onSuccess:
+            [
+                Wf.EmitAndReturn(
+                    Wf.Fields(("v", "{{ output.count }}")),
+                    Wf.Fields(("total", "{{ output.count }}")))
+            ]))));
+
+        var decision = _interpreter.Advance(session, "a", null, Output(("count", 9)));
+
+        Assert.Equal(9, Assert.IsType<DecisionEffect.Emit>(decision.Effect).Value["v"]);
+
+        var returned = Assert.IsType<TransitionDecision.Return>(decision);
+        Assert.Equal(9, Assert.IsAssignableFrom<Dictionary<string, object>>(returned.Value)["total"]);
+    }
+
+    [Fact]
+    public void A_rule_with_an_effect_but_no_exit_is_rejected_off_the_emitted_path()
+    {
+        // UTOS-T001 and the shared validator's "this list requires an exit" rule reject it at
+        // load; the interpreter is the backstop for a bundle that reached it anyway. An exit is
+        // optional only in an onEmitted list, where its absence means "take the next value" —
+        // there is no next value here, so defaulting to 'end' would invent a meaning.
         var activity = Wf.Http("https://example.com",
-            onSuccess: [new TransitionRule(Emit: new EmitAction(Wf.Fields(("v", 1)), null))]);
+            onSuccess: [new TransitionRule(Effect: new RuleEffect.Emit(Wf.Fields(("v", 1))))]);
 
         var session = Wf.Session(Wf.Graph(("a", activity)));
 
         var ex = Assert.Throws<InvalidOperationException>(
             () => _interpreter.Advance(session, "a", null, null));
 
-        Assert.Equal("Emit rule on activity 'a' has no transition target.", ex.Message);
+        Assert.Contains("'a'", ex.Message);
+        Assert.Contains("UTOS-T001", ex.Message);
     }
 
     private static Dictionary<string, object> Output(params (string Key, object Value)[] fields)

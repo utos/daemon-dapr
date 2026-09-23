@@ -24,7 +24,7 @@ public class HandlerResumeTests
     private readonly WorkflowInterpreter _interpreter = Wf.Interpreter();
 
     /// <summary>The consumer: a call activity, plus a document-local activity to dispatch to.</summary>
-    private static WorkflowGraph Consumer(EmissionRule[] onEmitted)
+    private static WorkflowGraph Consumer(TransitionRule[] onEmitted)
     {
         return Wf.Graph(
             ("watch", Wf.ConsumingCall("acme/producer:1.0.0", "poll", onEmitted)),
@@ -68,9 +68,37 @@ public class HandlerResumeTests
             new Dictionary<string, object> { ["urgent"] = true },
             ActivityOutcomeKind.Emitted);
 
-        var dispatch = Assert.IsType<TransitionDecision.Dispatch>(decision);
+        var dispatch = Assert.IsType<DecisionEffect.Dispatch>(decision.Effect);
         Assert.Equal(Wf.SelfKey, dispatch.Workflow);
         Assert.Equal("process", dispatch.StartActivity);
+
+        // The dispatch is the rule's *effect*; its exit is what says where the consumer goes
+        // afterwards, and a rule with none goes back for the next value. Asserted here because
+        // since spec 0.20 the two are separable — a rule may dispatch and then leave.
+        Assert.Equal("watch", Assert.IsType<TransitionDecision.Resume>(decision).ActivityName);
+    }
+
+    [Fact]
+    public void A_rule_may_dispatch_and_then_leave_the_loop()
+    {
+        // Not expressible before spec 0.20, when a rule carried exactly one action: handling a
+        // value and then stopping needed the handler itself to somehow end the consumer, which it
+        // structurally cannot do. Now the effect runs and the exit is taken.
+        var graph = Consumer(
+        [
+            Wf.DispatchThen("process", new RuleExit.Return(Wf.Fields(("seen", true))),
+                condition: "output.last")
+        ]);
+
+        var decision = _interpreter.Advance(
+            Wf.Session(graph), "watch", null,
+            new Dictionary<string, object> { ["last"] = true },
+            ActivityOutcomeKind.Emitted);
+
+        Assert.Equal("process", Assert.IsType<DecisionEffect.Dispatch>(decision.Effect).StartActivity);
+
+        var returned = Assert.IsType<TransitionDecision.Return>(decision);
+        Assert.Equal(true, Assert.IsAssignableFrom<Dictionary<string, object>>(returned.Value)["seen"]);
     }
 
     [Fact]
@@ -92,7 +120,7 @@ public class HandlerResumeTests
             new Dictionary<string, object> { ["urgent"] = true },
             ActivityOutcomeKind.Emitted);
 
-        Assert.Equal("first", Assert.IsType<TransitionDecision.Dispatch>(decision).StartActivity);
+        Assert.Equal("first", Assert.IsType<DecisionEffect.Dispatch>(decision.Effect).StartActivity);
     }
 
     [Fact]
@@ -107,7 +135,7 @@ public class HandlerResumeTests
             new Dictionary<string, object> { ["n"] = 7 },
             ActivityOutcomeKind.Emitted);
 
-        var dispatch = Assert.IsType<TransitionDecision.Dispatch>(decision);
+        var dispatch = Assert.IsType<DecisionEffect.Dispatch>(decision.Effect);
         Assert.Equal(7, dispatch.Input!["n"]);
     }
 
