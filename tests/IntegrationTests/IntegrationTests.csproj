@@ -31,6 +31,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="../../src/common/Common.Blobs.S3/Common.Blobs.S3.csproj"/>
         <ProjectReference Include="../../src/tools/Tools.AppHost/Tools.AppHost.csproj"/>
     </ItemGroup>
 
