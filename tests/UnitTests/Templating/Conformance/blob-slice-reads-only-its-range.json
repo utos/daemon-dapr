@@ -1,0 +1,35 @@
+{
+  "form": "value",
+  "expression": "const s = input.file.slice(2, 5); [s.size, s.type, await s.text(), input.file.slice(-3).size]",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "file": {
+              "blobValue": {
+                "id": "b_1",
+                "size": "8",
+                "mediaType": "text/plain"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "limits": {
+    "materialization": 4
+  },
+  "store": {
+    "b_1": "YWJjZGVmZ2g="
+  },
+  "expect": {
+    "value": [
+      3,
+      "",
+      "cde",
+      3
+    ]
+  }
+}

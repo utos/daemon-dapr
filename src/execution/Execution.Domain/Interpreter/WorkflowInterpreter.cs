@@ -344,29 +344,11 @@ public sealed class WorkflowInterpreter(
         if (string.IsNullOrEmpty(timer.Duration))
             throw new InvalidOperationException($"Timer activity '{activityName}' has no duration.");
 
-        var rendered = templateEngine.RenderToString(timer.Duration, scope);
-
-        if (!durationParser.TryParse(rendered, out var duration, out var failure))
-        {
-            throw new TemplateException(
-                TimerDurationCode,
-                failure == DurationFailure.NotPositive
-                    ? $"Timer activity '{activityName}' resolved to a duration that is not "
-                      + $"positive: '{rendered}'."
-                    : $"Timer activity '{activityName}' resolved to '{rendered}', which is not a "
-                      + "duration — expected the unit shorthand, e.g. '90s', '8h' or '1h30m'.");
-        }
+        var (_, duration) = DurationTemplate.Resolve(
+            templateEngine, timer.Duration, scope, durationParser, activityName);
 
         return new ResolvedActivityInput.Timer(duration);
     }
-
-    /// <summary>
-    /// A timer's duration template rendered to something that is not a duration. Declared here
-    /// rather than taken from the infrastructure's <c>EvaluationCodes</c> for the reason
-    /// <see cref="ForEachCollection"/> declares its own: the domain does not reference the engine
-    /// that happens to host that table.
-    /// </summary>
-    public const string TimerDurationCode = "UTOS-E106";
 
     /// <summary>
     /// The branches a promise activity should start: conditions applied, <c>for_each</c>

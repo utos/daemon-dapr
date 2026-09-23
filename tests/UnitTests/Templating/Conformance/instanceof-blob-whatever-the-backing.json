@@ -1,0 +1,19 @@
+{
+  "form": "value",
+  "expression": "[input.a instanceof Blob, input.b instanceof Blob, input.b instanceof File, input.c instanceof File, input.c instanceof Blob, input.c.slice(0, 1) instanceof File]",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "a": { "blobValue": { "data": "aGk=", "size": "2", "mediaType": "text/plain" } },
+            "b": { "blobValue": { "id": "b_1", "size": "8", "mediaType": "text/plain" } },
+            "c": { "blobValue": { "id": "b_1", "size": "8", "mediaType": "text/plain", "name": "letters.txt" } }
+          }
+        }
+      }
+    }
+  },
+  "store": { "b_1": "YWJjZGVmZ2g=" },
+  "expect": { "value": [true, true, false, true, true, false] }
+}

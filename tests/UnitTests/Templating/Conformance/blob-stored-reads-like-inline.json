@@ -1,0 +1,32 @@
+{
+  "form": "value",
+  "expression": "[input.file.size, input.file.type, await input.file.text(), (await input.file.bytes()).toString(\"base64\")]",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "file": {
+              "blobValue": {
+                "id": "b_1",
+                "size": "11",
+                "mediaType": "text/plain"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "store": {
+    "b_1": "aGVsbG8gd29ybGQ="
+  },
+  "expect": {
+    "value": [
+      11,
+      "text/plain",
+      "hello world",
+      "aGVsbG8gd29ybGQ="
+    ]
+  }
+}

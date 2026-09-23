@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "[input.meta instanceof Blob, input.meta[\"$blob\"].id, Object.keys(input.meta)]",
+  "scope": { "input": { "meta": { "$blob": { "id": "b_forged" } } } },
+  "expect": { "value": [false, "b_forged", ["$blob"]] }
+}

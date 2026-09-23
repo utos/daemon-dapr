@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "[new Date(0) instanceof Date, new Map() instanceof Map, new Set() instanceof Set, new URL(\"https://a.example\") instanceof URL, Buffer.from(\"x\") instanceof Buffer, [] instanceof Object, \"s\" instanceof String]",
+  "scope": { "input": {} },
+  "expect": { "value": [true, true, true, true, true, true, false] }
+}

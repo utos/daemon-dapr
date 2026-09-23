@@ -1,0 +1,32 @@
+{
+  "form": "value",
+  "expression": "response[\"body\" + \"Text\"]",
+  "scopeWire": {
+    "fields": {
+      "response": {
+        "mapValue": {
+          "fields": {
+            "status": {
+              "numberValue": 200
+            },
+            "headers": {
+              "mapValue": {
+                "fields": {}
+              }
+            },
+            "body": {
+              "blobValue": {
+                "data": "aGk=",
+                "size": "2",
+                "mediaType": "text/plain"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "error": "UTOS-E120"
+  }
+}

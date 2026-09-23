@@ -102,6 +102,19 @@ public static class ValueMapping
         };
     }
 
+    /// <summary>
+    /// A <c>WorkflowMap</c> as the interpreter holds it: plain dictionaries and lists, CLR
+    /// primitives, and a <see cref="WorkflowBlob"/> wherever the map carried a blob.
+    /// <para>
+    /// The same conversion <see cref="ToDictionary(Wire.ExecutionPayload?)"/> performs, exposed for
+    /// every other door a typed map arrives through — a sub-workflow's result, an emitted value, a
+    /// conformance fixture's scope. One function, because two would eventually disagree about a
+    /// number, which is the disagreement this file exists to have ended.
+    /// </para>
+    /// </summary>
+    public static Dictionary<string, object?> ToRuntimeDictionary(this WorkflowMap source) =>
+        source.Fields.ToDictionary(field => field.Key, field => ToRuntimeValue(field.Value));
+
     public static WorkflowBlob ToDomain(this Utos.Workflows.V1.Blob source) =>
         new(source.BackingCase == Utos.Workflows.V1.Blob.BackingOneofCase.Id ? source.Id : null,
             source.BackingCase == Utos.Workflows.V1.Blob.BackingOneofCase.Data

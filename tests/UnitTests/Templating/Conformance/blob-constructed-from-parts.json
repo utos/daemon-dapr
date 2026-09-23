@@ -1,0 +1,31 @@
+{
+  "form": "value",
+  "expression": "const b = new Blob([Buffer.from(\"hi\"), \" \", input.tail], { type: \"TEXT/Plain\" }); [b.size, b.type, await b.text()]",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "tail": {
+              "blobValue": {
+                "id": "b_1",
+                "size": "5",
+                "mediaType": "text/plain"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "store": {
+    "b_1": "dGhlcmU="
+  },
+  "expect": {
+    "value": [
+      8,
+      "text/plain",
+      "hi there"
+    ]
+  }
+}

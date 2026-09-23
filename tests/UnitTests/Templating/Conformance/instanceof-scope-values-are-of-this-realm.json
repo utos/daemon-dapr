@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "[input.items instanceof Array, input.o instanceof Object, input instanceof Object, Array.isArray(input.items), input.items.map(x => x) instanceof Array]",
+  "scope": { "input": { "items": [1, 2], "o": { "k": "v" } } },
+  "expect": { "value": [true, true, true, true, true] }
+}

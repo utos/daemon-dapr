@@ -1,0 +1,34 @@
+{
+  "form": "value",
+  "expression": "input.file.slice(0, input.file.size, \"image/png\")",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "file": {
+              "blobValue": {
+                "id": "b_1",
+                "size": "8",
+                "mediaType": "application/octet-stream",
+                "name": "cat.bin"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "store": {
+    "b_1": "iVBORw0KGgo="
+  },
+  "expect": {
+    "wire": {
+      "blobValue": {
+        "data": "iVBORw0KGgo=",
+        "size": "8",
+        "mediaType": "image/png"
+      }
+    }
+  }
+}

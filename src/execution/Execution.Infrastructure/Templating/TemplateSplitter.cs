@@ -8,6 +8,27 @@ namespace Execution.Infrastructure.Templating;
 public sealed record TemplateSegment(bool IsExpression, string Text);
 
 /// <summary>
+/// The parser every expression in this engine is read with, in one place so the two parse sites —
+/// finding a program's end while splitting, and wrapping it to run — cannot disagree about what
+/// the language is.
+/// <para>
+/// <c>AllowAwaitOutsideFunction</c> is what <c>api/docs/template-expressions.md</c> § Awaiting
+/// means by "await is permitted at a program's top level": <c>bytes()</c> and <c>text()</c> are
+/// asynchronous and there is no enclosing function to put the <c>await</c> inside.
+/// </para>
+/// <para>
+/// The shared validator has admitted <c>await</c> since spec 0.20 while this parser still refused
+/// it, so a document passed load-time validation and then failed at run time with
+/// <c>UTOS-E060</c> — a parse error, on an expression the spec says parses. Accept-then-fail is the
+/// worst shape a rule can have, and the evaluation conformance corpus is what named it.
+/// </para>
+/// </summary>
+internal static class ExpressionParser
+{
+    internal static Parser Create() => new(new ParserOptions { AllowAwaitOutsideFunction = true });
+}
+
+/// <summary>
 /// Splits a templated string the way <c>api/docs/template-expressions.md</c> § Forms defines
 /// it: at <c>{{</c>, one complete program is parsed and must be followed by <c>}}</c>. The
 /// closing delimiter is found by parsing, never by scanning, which is what lets
@@ -48,7 +69,7 @@ public static class TemplateSplitter
                 var candidate = text[contentStart..close];
                 try
                 {
-                    new Parser().ParseScript(candidate, strict: true);
+                    ExpressionParser.Create().ParseScript(candidate, strict: true);
                     parsedEnd = close;
                     break;
                 }
@@ -93,12 +114,16 @@ public static class TemplateSplitter
 /// </summary>
 public static class ProgramWrapper
 {
-    public static string Wrap(string source)
+    /// <returns>
+    /// The wrapped source, and whether it was made <c>async</c> — which the caller needs, because
+    /// only a promise this wrapper introduced may be unwrapped.
+    /// </returns>
+    public static (string Source, bool Awaits) Wrap(string source)
     {
         Program program;
         try
         {
-            program = new Parser().ParseScript(source, strict: true);
+            program = ExpressionParser.Create().ParseScript(source, strict: true);
         }
         catch (SyntaxErrorException error)
         {
@@ -116,6 +141,29 @@ public static class ProgramWrapper
         if (statement.EndsWith(';')) statement = statement[..^1];
         var rewritten = source[..last.Start] + "return (" + statement + ");" + source[last.End..];
 
-        return "(() => {\n" + rewritten + "\n})()";
+        // `async` only when the program actually awaits. `await` is legal solely inside an async
+        // function however the parser was configured, so a program that reads a blob needs one.
+        //
+        // Only when needed, though, and that is not an optimization. An async function *absorbs* a
+        // returned promise: `return blob.text()` with no `await` would resolve to the text, where
+        // the spec says a promise left un-awaited as a result is `UTOS-E103`. Wrapping every
+        // program would make that rule unobservable, silently turning an authoring mistake into a
+        // value. A plain arrow lets the promise out, where the result converter refuses it by name.
+        return HasAwait(program)
+            ? ("(async () => {\n" + rewritten + "\n})()", true)
+            : ("(() => {\n" + rewritten + "\n})()", false);
+    }
+
+    /// <summary>Whether any <c>await</c> appears in the program, at any depth.</summary>
+    private static bool HasAwait(Acornima.Ast.Node node)
+    {
+        if (node is AwaitExpression) return true;
+
+        foreach (var child in node.ChildNodes)
+        {
+            if (child is not null && HasAwait(child)) return true;
+        }
+
+        return false;
     }
 }

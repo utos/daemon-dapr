@@ -1,6 +1,49 @@
 {
   "form": "condition",
   "expression": "error.details === null && error.details?.orderId === undefined",
-  "scope": { "output": null, "error": { "code": "EXECUTION_FAILED", "message": "HTTP activity 'fetch' failed with status 500", "details": null }, "response": { "status": 500, "headers": {}, "bodyText": "" } },
-  "expect": { "value": true }
+  "scopeWire": {
+    "fields": {
+      "output": {
+        "nullValue": null
+      },
+      "error": {
+        "mapValue": {
+          "fields": {
+            "code": {
+              "stringValue": "EXECUTION_FAILED"
+            },
+            "message": {
+              "stringValue": "HTTP activity 'fetch' failed with status 500"
+            },
+            "details": {
+              "nullValue": null
+            }
+          }
+        }
+      },
+      "response": {
+        "mapValue": {
+          "fields": {
+            "status": {
+              "numberValue": 500
+            },
+            "headers": {
+              "mapValue": {
+                "fields": {}
+              }
+            },
+            "body": {
+              "blobValue": {
+                "data": "",
+                "size": "0"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "value": true
+  }
 }

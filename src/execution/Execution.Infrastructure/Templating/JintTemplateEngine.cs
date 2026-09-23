@@ -41,17 +41,33 @@ public sealed class JintTemplateEngine : ITemplateEngine
 
     private readonly TemplateEngineOptions _options;
     private readonly ConditionalWeakTable<TemplateScope, Engine> _engines = new();
-    private readonly ConcurrentDictionary<string, Prepared<Script>> _programs = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CompiledProgram> _programs = new(StringComparer.Ordinal);
 
-    public JintTemplateEngine(IOptions<TemplateEngineOptions> options)
-        : this(options.Value)
+    /// <param name="Awaits">
+    /// Whether the program was wrapped in an async function, and so whether what comes back is a
+    /// promise around its value. Only a program this engine made async is unwrapped: a promise a
+    /// program produced <em>itself</em> and never awaited must reach the result converter, which
+    /// refuses it as UTOS-E103.
+    /// </param>
+    private sealed record CompiledProgram(Prepared<Script> Script, bool Awaits);
+
+    public JintTemplateEngine(IOptions<TemplateEngineOptions> options, IBlobReader? blobReader = null)
+        : this(options.Value, blobReader)
     {
     }
 
-    public JintTemplateEngine(TemplateEngineOptions options)
+    /// <param name="blobReader">
+    /// How a stored blob's bytes are read. Null where there is no blob store — a supported
+    /// deployment — and then an inline blob still works while a stored one is <c>UTOS-F103</c>,
+    /// which is the same answer a deleted blob gets and deliberately so.
+    /// </param>
+    public JintTemplateEngine(TemplateEngineOptions options, IBlobReader? blobReader = null)
     {
         _options = options;
+        _blobReader = blobReader;
     }
+
+    private readonly IBlobReader? _blobReader;
 
     public bool EvaluateCondition(string condition, TemplateScope scope)
     {
@@ -109,6 +125,14 @@ public sealed class JintTemplateEngine : ITemplateEngine
     /// <summary>Rendering for interpolation: § Forms of the spec.</summary>
     private string ToText(Engine engine, JsValue value)
     {
+        // Bytes have no text form an author did not choose. A blob interpolated into a larger
+        // body, a URL or a header is `UTOS-E103` — the same refusal as a Buffer — and not a
+        // rendering of the handle, which is what serializing it would silently produce.
+        if (value is Node.BlobInstance)
+            throw new TemplateException(EvaluationCodes.ResultNotPlainData,
+                "A Blob cannot be rendered into a text field. Send it as a whole-field body, or "
+                + "read it with `await blob.text()`.");
+
         if (value.IsUndefined() || value.IsNull()) return string.Empty;
         if (value.IsString()) return value.AsString();
         if (value.IsBoolean()) return value.AsBoolean() ? "true" : "false";
@@ -138,7 +162,17 @@ public sealed class JintTemplateEngine : ITemplateEngine
 
         try
         {
-            return engine.Evaluate(prepared);
+            var value = engine.Evaluate(prepared.Script);
+
+            // Unwrapped only when *this engine* made the program async (see ProgramWrapper). A
+            // promise the program produced itself and never awaited is not unwrapped: it must
+            // reach the result converter, which refuses it as UTOS-E103, because a promise is not
+            // a value.
+            return prepared.Awaits ? value.UnwrapIfPromise() : value;
+        }
+        catch (PromiseRejectedException ex) when (Inner(ex) is TemplateException template)
+        {
+            throw template;
         }
         catch (StatementsCountOverflowException ex)
         {
@@ -186,10 +220,10 @@ public sealed class JintTemplateEngine : ITemplateEngine
     private static TemplateException Limit(string code, string message, Exception inner) =>
         new(code, message, inner);
 
-    private Prepared<Script> Prepare(string program)
+    private CompiledProgram Prepare(string program)
     {
-        var wrapped = ProgramWrapper.Wrap(program);
-        return Engine.PrepareScript(wrapped, strict: true, options: new ScriptPreparationOptions
+        var (wrapped, awaits) = ProgramWrapper.Wrap(program);
+        return new CompiledProgram(Engine.PrepareScript(wrapped, strict: true, options: new ScriptPreparationOptions
         {
             // A prepared script compiles its regex literals now, with THIS timeout; the engine's
             // RegexTimeoutInterval covers matches at run time only.
@@ -197,7 +231,7 @@ public sealed class JintTemplateEngine : ITemplateEngine
             {
                 RegexTimeout = TimeSpan.FromMilliseconds(_options.RegexTimeoutMilliseconds),
             },
-        });
+        }), awaits);
     }
 
     // ---- engines --------------------------------------------------------------------------
@@ -225,14 +259,24 @@ public sealed class JintTemplateEngine : ITemplateEngine
             options.Constraints.StackOverflowGuard = true;
         });
 
-        // Order matters: the Node globals before the scope (a `response.body` is a Buffer, whose
-        // prototype the scope converter needs), and both before the lockdown, which deletes the
-        // temporaries they leave and freezes everything they installed.
+        // Order matters: the Node globals before the scope (a Buffer in scope needs its prototype),
+        // then Blob and File — which need the Buffer prototype, since `bytes()` produces one — and
+        // all of them before the lockdown, which deletes the temporaries they leave and freezes
+        // everything they installed.
         var node = NodeGlobals.Install(engine, scope.Moment);
-        ScopeConverter.Inject(engine, scope, node.BufferPrototype);
+
+        var blobs = BlobObjects.Install(
+            engine, node.BufferPrototype, _blobReader,
+            _options.MaterializationLimitBytes, scope.Moment.Instant);
+
+        ScopeConverter.Inject(engine, scope, node.BufferPrototype, blobs);
         EngineLockdown.Apply(engine, scope.Values.Keys);
         return engine;
     }
+
+    /// <summary>The exception a rejected promise carries, when it carries a CLR one.</summary>
+    private static Exception? Inner(PromiseRejectedException ex) =>
+        ex.RejectedValue is Jint.Runtime.Interop.ObjectWrapper wrapper ? wrapper.Target as Exception : ex.InnerException;
 
     private static string Describe(JsValue value)
     {

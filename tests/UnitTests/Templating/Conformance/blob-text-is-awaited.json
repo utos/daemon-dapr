@@ -1,0 +1,45 @@
+{
+  "form": "condition",
+  "expression": "(await response.body.text()).startsWith(\"{\") && output.ok === true",
+  "scopeWire": {
+    "fields": {
+      "output": {
+        "mapValue": {
+          "fields": {
+            "ok": {
+              "boolValue": true
+            }
+          }
+        }
+      },
+      "response": {
+        "mapValue": {
+          "fields": {
+            "status": {
+              "numberValue": 200
+            },
+            "headers": {
+              "mapValue": {
+                "fields": {
+                  "content-type": {
+                    "stringValue": "application/json"
+                  }
+                }
+              }
+            },
+            "body": {
+              "blobValue": {
+                "data": "eyJvayI6dHJ1ZX0=",
+                "size": "11",
+                "mediaType": "application/json"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "value": true
+  }
+}

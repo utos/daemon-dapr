@@ -1,6 +1,0 @@
-{
-  "form": "value",
-  "expression": "[response.body.length, response.body.readUInt8(0), response.body.slice(1, 4).toString('latin1'), response.body.toString('hex')]",
-  "scope": { "response": { "status": 200, "headers": { "content-type": "image/png" }, "body": { "$buffer": "iVBORw0KGgo=" }, "bodyText": null } },
-  "expect": { "value": [8, 137, "PNG", "89504e470d0a1a0a"] }
-}

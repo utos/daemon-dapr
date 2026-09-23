@@ -1,0 +1,28 @@
+{
+  "form": "value",
+  "expression": "[input.part.size, await input.part.text(), (await input.part.slice(1).bytes()).toString('utf8')]",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "part": {
+              "blobValue": {
+                "id": "b_1",
+                "offset": "2",
+                "size": "3",
+                "mediaType": "text/plain"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "store": {
+    "b_1": "YWJjZGVmZ2g="
+  },
+  "expect": {
+    "value": [3, "cde", "de"]
+  }
+}

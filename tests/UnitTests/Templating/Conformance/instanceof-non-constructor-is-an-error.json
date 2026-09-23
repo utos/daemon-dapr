@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "input instanceof input.o",
+  "scope": { "input": { "o": { "k": "v" } } },
+  "expect": { "error": "UTOS-E120" }
+}

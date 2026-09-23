@@ -1,0 +1,55 @@
+{
+  "form": "value",
+  "expression": "({ photo: input.photo, copy: input.photo, width: 640 })",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "photo": {
+              "blobValue": {
+                "id": "b_1",
+                "size": "8",
+                "mediaType": "image/png",
+                "name": "cat.png",
+                "lastModified": "2026-09-15T10:00:00Z"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "store": {
+    "b_1": "iVBORw0KGgo="
+  },
+  "expect": {
+    "wire": {
+      "mapValue": {
+        "fields": {
+          "photo": {
+            "blobValue": {
+              "data": "iVBORw0KGgo=",
+              "size": "8",
+              "mediaType": "image/png",
+              "name": "cat.png",
+              "lastModified": "2026-09-15T10:00:00Z"
+            }
+          },
+          "copy": {
+            "blobValue": {
+              "data": "iVBORw0KGgo=",
+              "size": "8",
+              "mediaType": "image/png",
+              "name": "cat.png",
+              "lastModified": "2026-09-15T10:00:00Z"
+            }
+          },
+          "width": {
+            "numberValue": 640
+          }
+        }
+      }
+    }
+  }
+}
