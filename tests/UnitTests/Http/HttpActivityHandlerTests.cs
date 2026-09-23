@@ -9,6 +9,82 @@ namespace UnitTests.Http;
 
 public class HttpActivityHandlerTests
 {
+    [Theory]
+    [InlineData("application/json")]
+    [InlineData("application/problem+json")]      // RFC 7807, how a great many APIs report an error
+    [InlineData("application/vnd.api+json")]      // JSON:API
+    [InlineData("APPLICATION/JSON")]              // media types are case-insensitive
+    public async Task A_json_body_reaches_output_whatever_spells_json(string mediaType)
+    {
+        // `output` is the parsed body when the media type's essence is application/json or ends in
+        // +json (binary-data.md § Reading a response). The `+json` half was missing, so a workflow
+        // reading `output.detail` from a problem+json error saw null and had to re-parse the body
+        // itself — which is the work `output` exists to spare it.
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"detail":"nope"}""", Encoding.UTF8, mediaType),
+        };
+
+        var (handler, _) = Build(response);
+
+        var result = await handler.ExecuteAsync(Request());
+
+        // A JsonElement, which is the shape that preserves the body's own number tokens across the
+        // Dapr hop — see the note on ParseJsonResponse.
+        var output = Assert.IsType<System.Text.Json.JsonElement>(result.Output);
+        Assert.Equal("nope", output.GetProperty("detail").GetString());
+    }
+
+    [Theory]
+    [InlineData("text/plain")]
+    [InlineData("application/xml")]
+    [InlineData("application/jsonl")]             // ends in `json` but not `+json`
+    public async Task A_body_that_is_not_json_leaves_output_null(string mediaType)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"detail":"nope"}""", Encoding.UTF8, mediaType),
+        };
+
+        var (handler, _) = Build(response);
+
+        Assert.Null((await handler.ExecuteAsync(Request())).Output);
+    }
+
+    [Fact]
+    public async Task A_response_past_the_maximum_body_is_refused_by_name()
+    {
+        // UTOS-F101. Read from the stream and stopped, rather than buffered and then measured —
+        // otherwise a response the daemon has already decided to refuse gets to decide how much
+        // memory it takes on the way.
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[4096]),
+        };
+
+        var (handler, _) = Build(response, maxBody: 1024);
+
+        var failure = await Assert.ThrowsAsync<ResponseTooLargeException>(
+            () => handler.ExecuteAsync(Request()));
+
+        Assert.Equal(1024, failure.Limit);
+        Assert.Equal("UTOS-F101", ResponseTooLargeException.Code);
+    }
+
+    [Fact]
+    public async Task A_response_at_the_maximum_body_is_read()
+    {
+        // The boundary is inclusive: a body that ends exactly at the limit is not past it.
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[1024]),
+        };
+
+        var (handler, _) = Build(response, maxBody: 1024);
+
+        Assert.Equal(1024, (await handler.ExecuteAsync(Request())).Body!.Length);
+    }
+
     /// <summary>
     /// Captures the outgoing request and returns a canned response, so the handler can be
     /// exercised without a socket.
@@ -30,11 +106,18 @@ public class HttpActivityHandlerTests
         }
     }
 
-    private static (HttpActivityHandler Handler, StubHandler Stub) Build(HttpResponseMessage response)
+    private static (HttpActivityHandler Handler, StubHandler Stub) Build(
+        HttpResponseMessage response, long? maxBody = null)
     {
         var stub = new StubHandler(response);
+
+        var options = new HttpActivityOptions();
+        if (maxBody is { } limit) options.MaxResponseBodyBytes = limit;
+
         var handler = new HttpActivityHandler(
-            new HttpClient(stub), NullLogger<HttpActivityHandler>.Instance);
+            new HttpClient(stub),
+            NullLogger<HttpActivityHandler>.Instance,
+            new Microsoft.Extensions.Options.OptionsWrapper<HttpActivityOptions>(options));
 
         return (handler, stub);
     }
