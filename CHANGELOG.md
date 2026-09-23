@@ -13,6 +13,49 @@ statement about what it supports rather than a number a pipeline invented.
 
 ## [Unreleased]
 
+Spec 0.20's binary data, in progress. The structural half shipped in `0.20.0`; this is the half
+that moves bytes. Nothing here is reachable by a workflow yet — a run input containing a blob is
+still refused with `Unimplemented` — so this release is not yet a daemon that implements spec 0.20's
+`§ Blobs`.
+
+### Added
+
+- **A blob store, and an S3 driver for it** (`api/docs/binary-data.md` § Storage). `IObjectStore` is
+  the port: streaming writes, windowed reads, stat, delete, and signed upload and download
+  locations. One driver for MinIO, any S3-compatible server and real S3, because § Storage's four
+  requirements *are* the S3 API's guarantees — a separate driver for the development store would be
+  a second code path exercised only in tests, and the first difference between them would be found
+  in production
+- **MinIO in the Aspire model** as the development store, so the integration suite has somewhere for
+  bytes to go. From `quay.io`, not the Docker Hub default the Aspire integration ships with:
+  `docker.io/minio/minio` answers an anonymous pull with "access denied", while `quay.io/minio/minio`
+  at the same tag pulls. Docker Hub itself is fine — every other container here comes from it
+- Registration is **conditional**, and that is the spec's design rather than a convenience: a daemon
+  with no store configured is a supported deployment, where inline blobs still work and anything
+  larger is refused by name (`UTOS-F102`). So `IObjectStore` is a nullable dependency and its
+  absence is a question callers ask, not a startup crash that would make binary data mandatory for
+  every deployment
+- No data volume for the development store, for the reason Postgres beside it has none: a test run
+  must not inherit objects from the last one, and retention is a rule the daemon has to enforce
+  rather than something a wiped volume can hide
+
+### Notes
+
+Three defects in the driver were found only by running it against a real S3 server, and each would
+have passed against a mock:
+
+- `DisablePayloadSigning` requires HTTPS, so it failed before a byte was sent against a plaintext
+  development store. The SDK's `aws-chunked` signing is what actually streams a body of unknown
+  length — a chunked response has no trustworthy `content-length` — rather than buffering it to be
+  measured
+- `AmazonS3Config.UseHttp` governs the SDK's own calls but **not** `GetPreSignedURL`, which defaults
+  to HTTPS regardless. The driver was handing clients `https` locations for a plaintext store, and
+  only a test that replays a signed URL *as a client* could see it
+- Asking whether a bucket exists before creating it does not work: `GetBucketLocation` does not
+  answer 404 for a missing bucket on every S3 implementation, so the check believed the bucket was
+  there and every write then failed with "the specified bucket does not exist". Creating is
+  idempotent on the only answer that matters
+
 ## [0.20.0] - 2026-09-23
 
 Implements spec `0.20` (pinned at `0.20.2` in `SPEC_VERSION`). The spec re-cut what a transition

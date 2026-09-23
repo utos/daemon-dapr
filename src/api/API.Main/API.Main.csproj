@@ -17,6 +17,7 @@
 
     <!-- Modules are composed through their Api layer; nothing deeper is referenced. -->
     <ItemGroup>
+        <ProjectReference Include="../../common/Common.Blobs.S3/Common.Blobs.S3.csproj"/>
         <ProjectReference Include="../../common/Common.Constants/Common.Constants.csproj"/>
         <ProjectReference Include="../../common/Common.Application/Common.Application.csproj"/>
         <ProjectReference Include="../../tools/Tools.ServiceDefaults/Tools.ServiceDefaults.csproj"/>
