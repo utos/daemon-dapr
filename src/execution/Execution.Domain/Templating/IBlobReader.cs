@@ -1,3 +1,4 @@
+using Common.SeedWork;
 using Common.Workflow;
 
 namespace Execution.Domain.Templating;
@@ -29,7 +30,7 @@ public interface IBlobReader
     /// exception: a handle naming another tree's object must fail exactly as a deleted one does,
     /// or the difference would tell an attacker which ids exist.
     /// </exception>
-    byte[] Read(WorkflowBlob blob);
+    byte[] Read(WorkflowBlob blob, ExecutionId runTree);
 }
 
 /// <summary>A blob's bytes could not be read — <c>UTOS-F103</c>.</summary>

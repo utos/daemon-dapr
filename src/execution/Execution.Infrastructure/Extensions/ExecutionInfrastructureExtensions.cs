@@ -88,6 +88,10 @@ public static class ExecutionInfrastructureExtensions
         // The expression engine (api/docs/template-expressions.md) and the limits it runs under.
         builder.Services.Configure<TemplateEngineOptions>(
             builder.Configuration.GetSection(TemplateEngineOptions.SectionName));
+        // How a stored blob's bytes reach an expression. Registered here and resolved as nullable by
+        // the engine, so a daemon with no blob store still evaluates every expression that does not
+        // read one.
+        builder.Services.AddSingleton<IBlobReader, BlobAccessReader>();
         builder.Services.AddSingleton<ITemplateEngine, JintTemplateEngine>();
 
         // Applies a workflow's declared schemas to the data crossing a boundary. A singleton

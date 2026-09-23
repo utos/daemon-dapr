@@ -1,3 +1,4 @@
+using Common.Workflow;
 namespace Execution.Domain.Interpreter;
 
 /// <summary>
@@ -6,15 +7,14 @@ namespace Execution.Domain.Interpreter;
 /// tell a 429 from a 401 without an error-code taxonomy.
 /// </summary>
 /// <param name="Body">
-/// The raw response bytes, surfaced as a <c>Buffer</c> — the only way a binary body, or a body in
-/// an encoding <paramref name="BodyText"/> guessed wrong, reaches an expression intact. Null on a
-/// response recorded before the field existed, which a replay of such a run still reads.
+/// The response body as a <c>Blob</c>, inline or stored. Null when there was no response to read —
+/// after a timeout, a blocked destination, or a body past the maximum size (<c>UTOS-F101</c>),
+/// where the status and headers are still set so an <c>onFailure</c> rule can tell what happened.
 /// </param>
 public sealed record HttpResponseContext(
     int StatusCode,
     Dictionary<string, string> Headers,
-    string? BodyText,
-    byte[]? Body = null)
+    WorkflowBlob? Body = null)
 {
     /// <summary>
     /// The scope value for <c>response</c>. Every key is present even when there was no response
@@ -38,9 +38,12 @@ public sealed record HttpResponseContext(
                     header => header.Key.ToLowerInvariant(),
                     header => (object?)header.Value,
                     StringComparer.Ordinal),
-            // A byte[] in scope is what the engine presents as a Buffer; nothing else is one.
-            ["body"] = response?.Body,
-            ["bodyText"] = response?.BodyText
+            // A WorkflowBlob in scope is what the engine presents as a Blob.
+            //
+            // `bodyText` is deliberately absent, not null: it was retired in spec 0.20, and the
+            // scope converter installs a getter that throws for it. A null would read as an empty
+            // body, which is the silent wrong answer this is here to prevent.
+            ["body"] = response?.Body
         };
     }
 }

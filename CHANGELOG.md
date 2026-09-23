@@ -14,9 +14,17 @@ statement about what it supports rather than a number a pipeline invented.
 ## [Unreleased]
 
 Spec 0.20's binary data, in progress. The structural half shipped in `0.20.0`; this is the half
-that moves bytes. Nothing here is reachable by a workflow yet — a run input containing a blob is
-still refused with `Unimplemented` — so this release is not yet a daemon that implements spec 0.20's
-`§ Blobs`.
+that moves bytes.
+
+**A workflow can now fetch something too large to carry, keep it as a handle and read it back.** An
+HTTP response body is a `Blob`, stored in object storage when it crosses the inline threshold, and
+`await response.body.text()` reads it through the store with the run-tree access check applied.
+
+Still not a daemon that implements the whole of `§ Blobs`: there is no `BlobService`, a client cannot
+attach a blob at `ScheduleExecution` (that is still refused with `Unimplemented`), nothing is promoted
+to durable when it reaches a root execution's output stream, and nothing is ever swept. So a blob a
+run produces is readable for as long as the run tree lives and is then orphaned — which is why this
+is `[Unreleased]` rather than a dated version.
 
 ### Added
 
@@ -49,6 +57,25 @@ still refused with `Unimplemented` — so this release is not yet a daemon that 
   daemon is a conformant evaluator rather than one that happens to agree today", and against a
   three-version-old corpus it said considerably less than that. All 71 cases now pass; 31 of them
   were failing when the corpus was updated
+
+- **`response.body` is a `Blob`, and a large one is stored rather than carried.** At or below the
+  inline threshold the bytes travel in the value; above it they go to object storage and the value
+  becomes a handle of a few dozen bytes. The threshold is a few hundred kibibytes, and the reason is
+  durability rather than memory: a response reaches the interpreter as a Dapr activity input, so an
+  inline body is serialized into the orchestration history on *every transition* of the run. A
+  megabyte-scale threshold would quietly turn one large response into tens of megabytes of durable
+  state
+- **`IBlobAccess`**, the contract between the two modules: execution asks for bytes to be stored and
+  for a handle to be read, and never learns what a blob record is or where the store lives. Producing
+  mints an id, attaches the blob to the run tree and records its provenance; reading enforces the
+  access rule — an execution may read a stored blob only if the blob belongs to its run tree — and
+  every refusal is the same code, because "no such blob", "deleted" and "not yours" must be
+  indistinguishable or the difference says which ids exist
+- **`UTOS-F102`** when a body must be stored and no store is configured, reported by name rather than
+  as a generic failure, so an `onFailure` rule can tell it from any other reason an activity failed
+- `response.bodyText` is gone from the daemon's side of the scope — *absent*, not null, so the
+  throwing getter fires rather than a document silently reading an empty body. A bounded 200-character
+  summary survives for the failure *message* only, and never enters a scope
 
 ### Fixed
 
@@ -143,7 +170,9 @@ in every direction.
   path. `tests/UnitTests/Persistence/ActivityConfigJsonShapeTests.cs` pins exactly that
 - **Persisted shape: a timer.** `Duration` is `"30s"` where it was `"00:00:30"`
 - **Wire:** clients on `0.19.x` cannot call this daemon, and vice versa. Use `utos/cli` `0.20.x`
-- **Not implemented yet:** spec 0.20's blob store. A run input containing a blob is refused with
+- **Not implemented yet:** the rest of spec 0.20 § Blobs — `BlobService`, attaching a client's blob
+  at `ScheduleExecution` and `workflow.spawn`, promotion at a root output stream, retention and the
+  sweep. A run input containing a blob is still refused with `Unimplemented`. A run input containing a blob is refused with
   `Unimplemented` rather than a spec code — this daemon can neither resolve a handle nor carry
   inline bytes through a run, and reporting that as `UTOS-F104` would tell a client its handle was
   wrong when what is missing is here. `BlobService`, spill-to-storage in the HTTP activity, run-tree

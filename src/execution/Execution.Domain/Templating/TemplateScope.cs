@@ -1,3 +1,4 @@
+using Common.SeedWork;
 namespace Execution.Domain.Templating;
 
 /// <summary>
@@ -18,10 +19,11 @@ public sealed class TemplateScope
         Moment = EvaluationMoment.Unset;
     }
 
-    private TemplateScope(Dictionary<string, object?> values, EvaluationMoment moment)
+    private TemplateScope(Dictionary<string, object?> values, EvaluationMoment moment, ExecutionId runTree = default)
     {
         _values = values;
         Moment = moment;
+        RunTree = runTree;
     }
 
     public IReadOnlyDictionary<string, object?> Values => _values;
@@ -33,12 +35,24 @@ public sealed class TemplateScope
     /// </summary>
     public EvaluationMoment Moment { get; }
 
+    /// <summary>
+    /// The run tree these expressions belong to, which is what decides whether a stored blob they
+    /// name may be read. Not a name in scope — nothing reads it as a variable — but a property of
+    /// the scope for the same reason <see cref="Moment"/> is: it is fixed per evaluation, and an
+    /// engine built for the scope is built for its tree.
+    /// </summary>
+    public ExecutionId RunTree { get; }
+
+    /// <summary>The run tree whose blobs these expressions may read.</summary>
+    public TemplateScope WithRunTree(ExecutionId runTree) =>
+        new(_values, Moment, runTree);
+
     /// <summary>The moment to evaluate at; null keeps <see cref="EvaluationMoment.Unset"/>.</summary>
     public TemplateScope WithMoment(EvaluationMoment? moment)
     {
         return moment == null
             ? this
-            : new TemplateScope(new Dictionary<string, object?>(_values, StringComparer.Ordinal), moment);
+            : new TemplateScope(new Dictionary<string, object?>(_values, StringComparer.Ordinal), moment, RunTree);
     }
 
     /// <summary>The input the current activity received, as <c>{{ input.x }}</c>.</summary>
@@ -90,7 +104,7 @@ public sealed class TemplateScope
             [key] = value
         };
 
-        return new TemplateScope(copy, Moment);
+        return new TemplateScope(copy, Moment, RunTree);
     }
 }
 

@@ -1,3 +1,4 @@
+using Common.Blobs;
 using Blobs.Domain;
 using Blobs.Infrastructure.Data;
 using Blobs.Infrastructure.Store;
@@ -22,6 +23,14 @@ public static class BlobsExtensions
         builder.AddNpgsqlDbContext<BlobsDbContext>(databaseName);
 
         builder.Services.AddScoped<IBlobRepository, EfBlobRepository>();
+
+        builder.Services.Configure<BlobOptions>(
+            builder.Configuration.GetSection(BlobOptions.SectionName));
+
+        // What the execution module consumes. Registered here because this module owns the
+        // implementation, and consumed through the contract in `common/` because the two modules do
+        // not reference each other.
+        builder.Services.AddScoped<IBlobAccess, BlobAccess>();
 
         return builder;
     }

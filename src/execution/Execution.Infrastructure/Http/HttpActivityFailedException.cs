@@ -1,3 +1,4 @@
+using Common.Workflow;
 namespace Execution.Infrastructure.Http;
 
 /// <summary>
@@ -16,17 +17,17 @@ public sealed class HttpActivityFailedException(
     string activityName,
     int statusCode,
     IReadOnlyDictionary<string, string> headers,
-    string? bodyText,
-    byte[]? body = null)
-    : Exception($"HTTP activity '{activityName}' failed with status {statusCode}: {Summarise(bodyText)}")
+    string? bodySummary,
+    WorkflowBlob? body = null)
+    : Exception($"HTTP activity '{activityName}' failed with status {statusCode}: {Summarise(bodySummary)}")
 {
     public int StatusCode { get; } = statusCode;
 
     public IReadOnlyDictionary<string, string> Headers { get; } = headers;
 
-    public string? BodyText { get; } = bodyText;
+    public string? BodySummary { get; } = bodySummary;
 
-    public byte[]? Body { get; } = body;
+    public WorkflowBlob? Body { get; } = body;
 
     /// <summary>
     /// The same response, shaped for <c>{{ response.x }}</c> — so a failure handler branches on a
@@ -37,7 +38,6 @@ public sealed class HttpActivityFailedException(
         return new Execution.Domain.Interpreter.HttpResponseContext(
             StatusCode,
             new Dictionary<string, string>(Headers, StringComparer.OrdinalIgnoreCase),
-            BodyText,
             Body);
     }
 

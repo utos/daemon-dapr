@@ -267,7 +267,7 @@ public sealed class JintTemplateEngine : ITemplateEngine
 
         var blobs = BlobObjects.Install(
             engine, node.BufferPrototype, _blobReader,
-            _options.MaterializationLimitBytes, scope.Moment.Instant);
+            _options.MaterializationLimitBytes, scope.Moment.Instant, scope.RunTree);
 
         ScopeConverter.Inject(engine, scope, node.BufferPrototype, blobs);
         EngineLockdown.Apply(engine, scope.Values.Keys);

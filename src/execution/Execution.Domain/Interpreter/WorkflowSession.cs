@@ -19,9 +19,13 @@ public sealed record WorkflowSession(
     WorkflowGraph Graph,
     IReadOnlyDictionary<string, object> RunInput,
     IReadOnlyDictionary<string, string> Env,
-    WorkflowBundle? Bundle = null)
+    WorkflowBundle? Bundle = null,
+    Common.SeedWork.ExecutionId RunTree = default)
 {
-    public static WorkflowSession From(Services.ExecutionContext context, string workflowKey)
+    public static WorkflowSession From(
+        Services.ExecutionContext context,
+        string workflowKey,
+        Common.SeedWork.ExecutionId? runTree = null)
     {
         if (!context.Bundle.Workflows.TryGetValue(workflowKey, out var workflow))
             throw new InvalidOperationException(
@@ -31,7 +35,10 @@ public sealed record WorkflowSession(
             new WorkflowGraph(workflow, workflowKey),
             context.Input,
             context.Env,
-            context.Bundle);
+            context.Bundle,
+            // The tree this run belongs to, which is what decides whether a stored blob it names
+            // may be read. A root execution is its own tree.
+            runTree ?? context.ExecutionId);
     }
 
     /// <summary>

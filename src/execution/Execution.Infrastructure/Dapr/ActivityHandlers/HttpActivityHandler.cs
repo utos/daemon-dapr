@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Common.Workflow;
 using Microsoft.Extensions.Logging;
+using Common.Blobs;
 using Microsoft.Extensions.Options;
 using Execution.Domain.Services;
 
@@ -10,7 +11,8 @@ namespace Execution.Infrastructure.Dapr.ActivityHandlers;
 public class HttpActivityHandler(
     HttpClient httpClient,
     ILogger<HttpActivityHandler> logger,
-    IOptions<HttpActivityOptions> options)
+    IOptions<HttpActivityOptions> options,
+    IBlobAccess blobs)
     : IActivityHandler
 {
     public ActivityKind Kind => ActivityKind.Http;
@@ -59,6 +61,7 @@ public class HttpActivityHandler(
         // its own second look at the content.
         var responseBytes = await ReadBounded(response, options.Value.MaxResponseBodyBytes, ct);
         var responseContent = DecodeText(responseBytes, response.Content.Headers.ContentType?.CharSet);
+        var bodyBlob = await ToBlob(responseBytes, response, input, ct);
         var duration = (DateTimeOffset.UtcNow - startTime).TotalMilliseconds;
 
         var statusCode = (int)response.StatusCode;
@@ -94,8 +97,60 @@ public class HttpActivityHandler(
             response.IsSuccessStatusCode,
             parsedBody,
             CollectHeaders(response),
-            responseContent,
-            responseBytes);
+            bodyBlob,
+            // Bounded here rather than carried whole: a failure message needs a hint of what the
+            // server said, not the body.
+            Truncate(responseContent));
+    }
+
+    private const int SummaryLength = 200;
+
+    private static string? Truncate(string text) =>
+        string.IsNullOrEmpty(text) ? null
+        : text.Length <= SummaryLength ? text
+        : text[..SummaryLength] + "…";
+
+    /// <summary>
+    /// The body as a <c>Blob</c>: inline when it is small, stored when it is not
+    /// (<c>api/docs/binary-data.md</c> § Reading a response).
+    /// <para>
+    /// The decision is invisible to authors — nothing in an expression reveals which backing a blob
+    /// has — so it is purely the daemon's, and it is made on the count of bytes actually read rather
+    /// than on <c>content-length</c>, which is missing on a chunked response and sometimes wrong.
+    /// </para>
+    /// <para>
+    /// Above the threshold and with no store configured, the activity fails with <c>UTOS-F102</c>:
+    /// the bytes have nowhere to go. That is an operator's problem rather than an author's, which is
+    /// why it is its own code and not a read failure.
+    /// </para>
+    /// </summary>
+    private async Task<WorkflowBlob> ToBlob(
+        byte[] bytes, HttpResponseMessage response, ActivityHandlerInput input, CancellationToken ct)
+    {
+        // The response's content type, serialized as a media type — type and subtype lowercased,
+        // parameters kept — or '' when the header is absent or unparsable. Always a Blob and never a
+        // File, whatever content-disposition says.
+        var mediaType = response.Content.Headers.ContentType?.MediaType?.ToLowerInvariant() ?? string.Empty;
+
+        if (bytes.Length <= blobs.InlineThreshold)
+            return WorkflowBlob.Inline(bytes, mediaType);
+
+        if (!blobs.CanStore)
+            throw new BlobStoreUnavailableException(
+                $"The response body is {bytes.Length} bytes, above the inline threshold of "
+                + $"{blobs.InlineThreshold}, and no blob store is configured.");
+
+        return await blobs.ProduceAsync(
+            new MemoryStream(bytes, writable: false),
+            mediaType,
+            name: null,
+            new BlobUsage(
+                input.ExecutionId,
+                input.RootExecutionId,
+                input.Workflow ?? string.Empty,
+                input.WorkflowDigest,
+                input.ActivityName),
+            ct);
     }
 
     /// <summary>

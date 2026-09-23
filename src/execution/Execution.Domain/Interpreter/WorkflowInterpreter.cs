@@ -99,6 +99,7 @@ public sealed class WorkflowInterpreter(
         var passThrough = outcome == ActivityOutcomeKind.Failed ? input : output;
 
         var scope = new TemplateScope()
+            .WithRunTree(session.RunTree)
             .WithMoment(moment)
             .WithInput(input)
             .WithOutput(output)
@@ -308,6 +309,7 @@ public sealed class WorkflowInterpreter(
         var input = session.InputFor(activityInput);
 
         var scope = new TemplateScope()
+            .WithRunTree(session.RunTree)
             .WithMoment(moment)
             .WithInput(input)
             .WithEnv(session.Env);
@@ -369,6 +371,7 @@ public sealed class WorkflowInterpreter(
         var input = session.InputFor(activityInput);
 
         var scope = new TemplateScope()
+            .WithRunTree(session.RunTree)
             .WithMoment(moment)
             .WithInput(input)
             .WithEnv(session.Env);

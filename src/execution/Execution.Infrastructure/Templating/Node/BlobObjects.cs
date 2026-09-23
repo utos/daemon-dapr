@@ -20,7 +20,8 @@ internal sealed class BlobObjects(
     ObjectInstance bufferPrototype,
     IBlobReader? reader,
     long materializationLimit,
-    DateTimeOffset capturedInstant)
+    DateTimeOffset capturedInstant,
+    Common.SeedWork.ExecutionId runTree)
 {
     public ObjectInstance BlobPrototype { get; private set; } = null!;
 
@@ -36,9 +37,11 @@ internal sealed class BlobObjects(
         ObjectInstance bufferPrototype,
         IBlobReader? reader,
         long materializationLimit,
-        DateTimeOffset capturedInstant)
+        DateTimeOffset capturedInstant,
+        Common.SeedWork.ExecutionId runTree)
     {
-        var objects = new BlobObjects(engine, bufferPrototype, reader, materializationLimit, capturedInstant);
+        var objects = new BlobObjects(
+            engine, bufferPrototype, reader, materializationLimit, capturedInstant, runTree);
 
         objects.BlobPrototype = objects.CreateBlobPrototype();
         objects.FilePrototype = objects.CreateFilePrototype(objects.BlobPrototype);
@@ -226,7 +229,7 @@ internal sealed class BlobObjects(
 
         try
         {
-            return reader.Read(handle);
+            return reader.Read(handle, runTree);
         }
         catch (BlobUnreadableException unreadable)
         {

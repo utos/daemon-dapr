@@ -1,3 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <ItemGroup>
+        <ProjectReference Include="../Common.SeedWork/Common.SeedWork.csproj"/>
+        <ProjectReference Include="../Common.Workflow/Common.Workflow.csproj"/>
+    </ItemGroup>
+
 </Project>
