@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "[await 5, await null, typeof Promise]",
+  "scope": { "input": {} },
+  "expect": { "value": [5, null, "undefined"] }
+}

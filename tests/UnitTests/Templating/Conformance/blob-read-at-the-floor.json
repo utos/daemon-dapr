@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "let s = 'x'; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; s += s; const b = new Blob([s]); [b.size, (await b.bytes()).length]",
+  "scope": { "input": {} },
+  "expect": { "value": [1048576, 1048576] }
+}

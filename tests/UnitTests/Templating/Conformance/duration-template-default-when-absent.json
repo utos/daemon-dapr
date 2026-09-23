@@ -1,0 +1,6 @@
+{
+  "form": "duration",
+  "expression": "input.retryAfter ?? \"30s\"",
+  "scope": { "input": {} },
+  "expect": { "value": "30s" }
+}

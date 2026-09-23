@@ -38,16 +38,21 @@ internal static class EngineLockdown
         ["Function"] = ["call", "apply", "bind", "length", "name"],
     };
 
-    // The Node globals — Buffer, crypto, URL, URLSearchParams — are host objects whose members
-    // are exactly what NodeGlobals put there, so they are kept whole and only frozen; Date keeps
-    // its standard prototype, with its constructor and `now` replaced before this runs.
+    // The Node globals — Buffer, crypto, URL, URLSearchParams, Blob, File — are host objects whose
+    // members are exactly what NodeGlobals and BlobObjects put there, so they are kept whole and
+    // only frozen; Date keeps its standard prototype, with its constructor and `now` replaced
+    // before this runs.
+    //
+    // Blob and File have to survive this sweep for a reason beyond construction: `value instanceof
+    // Blob` is how the spec says a blob is recognised, so deleting the global would not merely
+    // remove a constructor, it would make the recognition test throw.
     private static readonly string[] Globals =
     [
         "undefined", "NaN", "Infinity",
         "Array", "String", "Number", "Boolean", "Object", "Math", "JSON", "Set", "Map", "Symbol",
         "parseInt", "parseFloat", "isNaN", "isFinite",
         "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI",
-        "Buffer", "crypto", "Date", "URL", "URLSearchParams",
+        "Buffer", "crypto", "Date", "URL", "URLSearchParams", "Blob", "File",
     ];
 
     // `random` is Math's, replaced by the seed-derived sequence before this list is applied.

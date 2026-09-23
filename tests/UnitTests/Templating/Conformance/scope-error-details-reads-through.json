@@ -1,6 +1,6 @@
 {
   "form": "value",
   "expression": "[error.details.orderId, error.details.lines.length, error.code]",
-  "scope": { "output": null, "error": { "code": "ORDER_REJECTED", "message": "rejected by the warehouse", "details": { "orderId": "o-17", "lines": [ { "sku": "a" }, { "sku": "b" } ] } }, "response": { "status": null, "headers": null, "bodyText": null } },
+  "scope": { "output": null, "error": { "code": "ORDER_REJECTED", "message": "rejected by the warehouse", "details": { "orderId": "o-17", "lines": [ { "sku": "a" }, { "sku": "b" } ] } }, "response": { "status": null, "headers": null, "body": null } },
   "expect": { "value": ["o-17", 2, "ORDER_REJECTED"] }
 }

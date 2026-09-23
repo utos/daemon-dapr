@@ -1,0 +1,24 @@
+{
+  "form": "text",
+  "expression": "input.photo",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "photo": {
+              "blobValue": {
+                "data": "iVBORw0KGgo=",
+                "size": "8",
+                "mediaType": "image/png"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "error": "UTOS-E103"
+  }
+}

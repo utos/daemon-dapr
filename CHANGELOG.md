@@ -39,6 +39,32 @@ still refused with `Unimplemented` — so this release is not yet a daemon that 
   must not inherit objects from the last one, and retention is a rule the daemon has to enforce
   rather than something a wiped volume can hide
 
+- **The expression language is spec 0.20's.** `Blob` and `File` are host objects with `size`,
+  `type`, `slice`, `bytes()` and `text()`; `await` works at a program's top level; a blob in scope
+  is the one host object that may leave an expression, because it *is* a value. The materialization
+  limit (`UTOS-E111`) is checked before anything is read, which a blob's always-known size makes
+  possible, so a 2 GiB blob costs a refusal rather than a read
+- **The evaluation conformance corpus is vendored at `v0.20.2`**, where it had been at `v0.0.17` —
+  three spec versions behind. `EvaluationConformanceTests` says it is "the test that says the
+  daemon is a conformant evaluator rather than one that happens to agree today", and against a
+  three-version-old corpus it said considerably less than that. All 71 cases now pass; 31 of them
+  were failing when the corpus was updated
+
+### Fixed
+
+- **`await` did not parse.** Both of the engine's parse sites used a default parser, so a program
+  containing `await` failed with `UTOS-E060` — a parse error, on an expression the spec says
+  parses. The shared validator has admitted `await` since 0.20, so a document passed load-time
+  validation and then failed at run time, which is the worst shape a rule can have. The parser is
+  now configured in one place that both sites use
+- **`Buffer.from(x) instanceof Buffer` threw.** `Buffer` is deliberately not callable — `Buffer()`
+  is deprecated in Node and absent from the spec's surface — but `instanceof` requires a callable
+  right-hand side, and spec 0.20 admitted the operator. `Symbol.hasInstance` answers the question
+  without making `Buffer()` available
+- **`response["body" + "Text"]` read as `undefined`.** `UTOS-E070` catches every spelling a parser
+  can see, and a computed one is not among them. A document that used to read a body would have
+  silently started seeing nothing; reading a retired member now throws
+
 ### Notes
 
 Three defects in the driver were found only by running it against a real S3 server, and each would

@@ -1,0 +1,6 @@
+{
+  "form": "value",
+  "expression": "const Even = { [Symbol.hasInstance]: n => n % 2 === 0 }; [2 instanceof Even, 3 instanceof Even]",
+  "scope": { "input": {} },
+  "expect": { "value": [true, false] }
+}

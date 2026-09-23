@@ -1,0 +1,28 @@
+{
+  "form": "value",
+  "expression": "[input.doc.name, input.doc.lastModified]",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "doc": {
+              "blobValue": {
+                "data": "eA==",
+                "size": "1",
+                "mediaType": "text/plain",
+                "name": "notes.txt"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "value": [
+      "notes.txt",
+      0
+    ]
+  }
+}

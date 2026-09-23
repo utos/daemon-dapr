@@ -1,0 +1,42 @@
+{
+  "form": "value",
+  "expression": "[response.body.size, response.body.type, response.body instanceof Blob, \"x\" instanceof Blob, ({ size: 1, type: \"\" }) instanceof Blob]",
+  "scopeWire": {
+    "fields": {
+      "response": {
+        "mapValue": {
+          "fields": {
+            "status": {
+              "numberValue": 200
+            },
+            "headers": {
+              "mapValue": {
+                "fields": {
+                  "content-type": {
+                    "stringValue": "image/png"
+                  }
+                }
+              }
+            },
+            "body": {
+              "blobValue": {
+                "data": "iVBORw0KGgo=",
+                "size": "8",
+                "mediaType": "image/png"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "value": [
+      8,
+      "image/png",
+      true,
+      false,
+      false
+    ]
+  }
+}

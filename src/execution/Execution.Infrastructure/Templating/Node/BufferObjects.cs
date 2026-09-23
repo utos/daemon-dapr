@@ -3,7 +3,9 @@ using System.Text;
 using Jint;
 using Jint.Native;
 using Jint.Native.Object;
+using Jint.Native.Symbol;
 using Jint.Runtime;
+using Jint.Runtime.Descriptors;
 using Jint.Runtime.Interop;
 
 namespace Execution.Infrastructure.Templating.Node;
@@ -82,6 +84,15 @@ internal static class BufferObjects
         var buffer = new JsObject(engine);
         buffer.Set("prototype", prototype);
         prototype.Set("constructor", buffer);
+
+        // `buf instanceof Buffer` is true, without making Buffer callable. `instanceof` normally
+        // requires a callable right-hand side, and spec 0.20 admitted the operator — so an object
+        // that deliberately cannot be called still has to answer the question. Symbol.hasInstance
+        // is exactly the hook for that, and it keeps `Buffer()` unavailable as intended.
+        buffer.FastSetProperty(GlobalSymbolRegistry.HasInstance, new PropertyDescriptor(
+            new ClrFunction(engine, "[Symbol.hasInstance]",
+                (_, args) => args.Length > 0 && args[0] is BufferInstance ? JsBoolean.True : JsBoolean.False),
+            writable: false, enumerable: false, configurable: false));
 
         Method(engine, buffer, "from", (_, args) =>
         {

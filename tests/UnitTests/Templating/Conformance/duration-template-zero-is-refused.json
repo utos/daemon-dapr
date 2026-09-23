@@ -1,0 +1,6 @@
+{
+  "form": "duration",
+  "expression": "\"0s\"",
+  "scope": { "input": {} },
+  "expect": { "error": "UTOS-E106" }
+}

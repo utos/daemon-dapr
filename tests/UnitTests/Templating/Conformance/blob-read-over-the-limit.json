@@ -1,0 +1,27 @@
+{
+  "form": "value",
+  "expression": "await input.file.text()",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "file": {
+              "blobValue": {
+                "data": "YWJjZGVmZ2g=",
+                "size": "8",
+                "mediaType": "text/plain"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "limits": {
+    "materialization": 4
+  },
+  "expect": {
+    "error": "UTOS-E111"
+  }
+}

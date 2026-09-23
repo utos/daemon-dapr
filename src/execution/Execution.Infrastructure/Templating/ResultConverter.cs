@@ -64,6 +64,14 @@ internal static class ResultConverter
             }
         }
 
+        // The one host object that leaves. A Blob *is* a value — `binary-data.md` § The types —
+        // so it travels as the handle behind it, and a caller, a sub-workflow or a run's result
+        // receives the same bytes without them ever being copied through this converter. Every
+        // other host object is refused below, which is the difference between a value and a view:
+        // a Buffer is bytes in memory now and cannot leave, a Blob is the promise of bytes and can.
+        if (value is Node.BlobInstance blob)
+            return blob.Handle;
+
         if (value is ObjectInstance obj)
         {
             var prototype = obj.Prototype;

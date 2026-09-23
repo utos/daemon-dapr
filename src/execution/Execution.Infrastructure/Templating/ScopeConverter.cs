@@ -5,6 +5,9 @@ using Execution.Infrastructure.Templating.Node;
 using Jint;
 using Jint.Native;
 using Jint.Native.Object;
+using Jint.Runtime.Descriptors;
+using Jint.Runtime.Descriptors.Specialized;
+using Jint.Runtime.Interop;
 
 namespace Execution.Infrastructure.Templating;
 
@@ -21,19 +24,63 @@ internal static class ScopeConverter
     private const long MaxSafeInteger = 9_007_199_254_740_992;
 
     /// <param name="bufferPrototype">What a <c>byte[]</c> in scope — <c>response.body</c> — becomes.</param>
-    public static void Inject(Engine engine, TemplateScope scope, ObjectInstance bufferPrototype)
+    /// <param name="blobs">What a <c>WorkflowBlob</c> in scope becomes: a <c>Blob</c> or a <c>File</c>.</param>
+    public static void Inject(
+        Engine engine, TemplateScope scope, ObjectInstance bufferPrototype, Node.BlobObjects blobs)
     {
         var freeze = engine.Evaluate("Object.freeze");
-        var context = new Context(engine, freeze, bufferPrototype);
+        var context = new Context(engine, freeze, bufferPrototype, blobs);
         foreach (var (name, value) in scope.Values)
         {
-            engine.SetValue(name, ToJs(context, value, name));
+            var converted = ToJs(context, value, name);
+
+            if (Retired.TryGetValue(name, out var members) && converted is ObjectInstance root)
+                RefuseRetired(engine, root, name, members);
+
+            engine.SetValue(name, converted);
             engine.Execute("Object.defineProperty(globalThis, " + JsonSerializer.Serialize(name)
                            + ", { writable: false, configurable: false });");
         }
     }
 
-    private sealed record Context(Engine Engine, JsValue Freeze, ObjectInstance BufferPrototype);
+    /// <summary>
+    /// Members a scope name no longer has, by the name that used to carry them.
+    /// <para>
+    /// <c>response.bodyText</c> was eagerly decoded text, which cannot exist for a body larger than
+    /// memory; spec 0.20 retired it when <c>response.body</c> became a <c>Blob</c>.
+    /// </para>
+    /// </summary>
+    private static readonly Dictionary<string, string[]> Retired = new(StringComparer.Ordinal)
+    {
+        ["response"] = ["bodyText"],
+    };
+
+    /// <summary>
+    /// Makes reading a retired member throw rather than read <c>undefined</c>.
+    /// <para>
+    /// <c>UTOS-E070</c> catches the spellings a parser can see, and catches nearly all of them —
+    /// but <c>response["body" + "Text"]</c> is not one, and no static rule can be. Left alone it
+    /// would read as <c>undefined</c>, which is the failure this exists to prevent: a document
+    /// that used to read a body would silently start seeing nothing, and an author would hunt an
+    /// empty string rather than be told the member is gone.
+    /// </para>
+    /// </summary>
+    private static void RefuseRetired(
+        Engine engine, ObjectInstance root, string name, IEnumerable<string> members)
+    {
+        foreach (var member in members)
+        {
+            var getter = new ClrFunction(engine, "get " + member, (_, _) =>
+                throw new TemplateException(EvaluationCodes.ScriptError,
+                    $"`{name}.{member}` was removed in spec 0.20. Read the body with "
+                    + $"`await {name}.body.text()`."));
+
+            root.FastSetProperty(member, new GetSetPropertyDescriptor(
+                getter, set: null, enumerable: false, configurable: false));
+        }
+    }
+
+    private sealed record Context(Engine Engine, JsValue Freeze, ObjectInstance BufferPrototype, Node.BlobObjects Blobs);
 
     private static JsValue ToJs(Context context, object? value, string path)
     {
@@ -72,6 +119,11 @@ internal static class ScopeConverter
 
             // An HTTP response body stays a JsonElement until it crosses a Dapr boundary
             // (HttpActivityHandler.ParseJsonResponse), so one can still reach a scope.
+            // A blob is a value like any other, and becomes the host object an expression reads
+            // it through. Before IEnumerable for the reason byte[] is: it is not a sequence here.
+            case WorkflowBlob blob:
+                return context.Blobs.Create(blob);
+
             case JsonElement json:
                 return FromJson(engine, json, freeze, path);
 

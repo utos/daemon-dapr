@@ -1,0 +1,42 @@
+{
+  "form": "value",
+  "expression": "const b = await response.body.bytes(); [Buffer.isBuffer(b), b.length, b.readUInt8(0), b.slice(1, 4).toString(\"latin1\"), b.toString(\"hex\")]",
+  "scopeWire": {
+    "fields": {
+      "response": {
+        "mapValue": {
+          "fields": {
+            "status": {
+              "numberValue": 200
+            },
+            "headers": {
+              "mapValue": {
+                "fields": {
+                  "content-type": {
+                    "stringValue": "image/png"
+                  }
+                }
+              }
+            },
+            "body": {
+              "blobValue": {
+                "data": "iVBORw0KGgo=",
+                "size": "8",
+                "mediaType": "image/png"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "value": [
+      true,
+      8,
+      137,
+      "PNG",
+      "89504e470d0a1a0a"
+    ]
+  }
+}

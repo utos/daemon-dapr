@@ -1,0 +1,43 @@
+{
+  "form": "value",
+  "expression": "await input.files.reduce(async (acc, f) => [...await acc, await f.text()], [])",
+  "scopeWire": {
+    "fields": {
+      "input": {
+        "mapValue": {
+          "fields": {
+            "files": {
+              "listValue": {
+                "values": [
+                  {
+                    "blobValue": {
+                      "data": "YQ==",
+                      "size": "1",
+                      "mediaType": "text/plain"
+                    }
+                  },
+                  {
+                    "blobValue": {
+                      "id": "b_1",
+                      "size": "1",
+                      "mediaType": "text/plain"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "store": {
+    "b_1": "Yg=="
+  },
+  "expect": {
+    "value": [
+      "a",
+      "b"
+    ]
+  }
+}
