@@ -14,22 +14,32 @@ namespace UnitTests.Architecture;
 /// </summary>
 public class ModuleBoundaryTests
 {
-    private static readonly string[] Modules = ["definition", "execution", "observability"];
+    private static readonly string[] Modules = ["blobs", "definition", "execution", "observability"];
+
+    /// <summary>Directories under <c>src/</c> that are shared rather than a bounded context.</summary>
+    private static readonly string[] NotModules = ["common", "api", "tools"];
 
     /// <summary>
     /// Guards the test below against passing because it found nothing to check — a wrong
     /// <see cref="SrcRoot"/> would make it green forever while asserting exactly nothing.
+    /// <para>
+    /// Read from the <em>directory layout</em> rather than by filtering paths through
+    /// <see cref="Modules"/>, which is what it used to do. That version could only ever notice a
+    /// module that had been removed: <c>ModuleOf</c> returns a name from the list or null, so a
+    /// module the list did not mention was invisible, and adding one left it outside the boundary
+    /// check below with nothing failing. A new module now has to be declared here before the suite
+    /// is green, which is the point — the check is worthless on the modules it does not know about.
+    /// </para>
     /// </summary>
     [Fact]
     public void Every_module_is_actually_inspected()
     {
-        var found = Directory.EnumerateFiles(SrcRoot, "*.csproj", SearchOption.AllDirectories)
-            .Select(ModuleOf)
-            .Where(module => module is not null)
-            .Distinct()
+        var found = Directory.EnumerateDirectories(SrcRoot)
+            .Select(directory => Path.GetFileName(directory)!)
+            .Where(name => !NotModules.Contains(name, StringComparer.OrdinalIgnoreCase))
             .ToList();
 
-        Assert.Equal(Modules.Order(), found.Order()!);
+        Assert.Equal(Modules.Order(), found.Order());
     }
 
     [Fact]

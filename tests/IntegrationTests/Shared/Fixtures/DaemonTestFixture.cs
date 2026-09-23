@@ -41,6 +41,16 @@ public class DaemonTestFixture : IAsyncLifetime
     public string MockBaseUrl => WireMockServer.Urls[0];
 
     /// <summary>
+    /// The run's database, for a test that reads or writes the daemon's own tables directly.
+    /// <para>
+    /// Allocated per run, so it cannot be a constant. Used by tests whose subject is a repository
+    /// rather than the gRPC surface — where going through the daemon would test the transport as
+    /// well and say less about the thing under test.
+    /// </para>
+    /// </summary>
+    public string DatabaseConnectionString { get; private set; } = null!;
+
+    /// <summary>
     /// The runtime the daemon requires, asserted before anything starts.
     /// <para>
     /// Below this, an <c>on_emitted</c> handler dispatched after a continue-as-new collides with
@@ -83,6 +93,10 @@ public class DaemonTestFixture : IAsyncLifetime
 
         await resourceNotificationService.WaitForResourceAsync(ServiceName.App.MainApi, KnownResourceStates.Running)
             .WaitAsync(TimeSpan.FromSeconds(60));
+
+        DatabaseConnectionString = await App.GetConnectionStringAsync(ServiceName.Database.Utos)
+            ?? throw new InvalidOperationException(
+                $"'{ServiceName.Database.Utos}' has no connection string.");
 
         // Setup gRPC clients
         var httpClient = App.CreateHttpClient(ServiceName.App.MainApi);

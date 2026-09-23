@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <ProjectReference Include="../../common/Common.Blobs/Common.Blobs.csproj"/>
+        <ProjectReference Include="../../common/Common.SeedWork/Common.SeedWork.csproj"/>
+    </ItemGroup>
+
+</Project>
