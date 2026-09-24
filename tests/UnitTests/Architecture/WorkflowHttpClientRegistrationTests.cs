@@ -26,7 +26,29 @@ public class WorkflowHttpClientRegistrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.AddWorkflowHttpClient();
 
+        // The handler needs blob access, which the *blobs* module provides — modules do not
+        // reference each other, so the execution module registers the consumer and not the
+        // implementation. Stubbed here because what is under test is the HTTP client's wiring; that
+        // the real one is registered is `AddBlobsModule`'s business.
+        builder.Services.AddSingleton<Common.Blobs.IBlobAccess, NoBlobs>();
+
         return builder.Services;
+    }
+
+    private sealed class NoBlobs : Common.Blobs.IBlobAccess
+    {
+        public long InlineThreshold => long.MaxValue;
+
+        public bool CanStore => false;
+
+        public Task<Common.Workflow.WorkflowBlob> ProduceAsync(
+            Stream content, string mediaType, string? name,
+            Common.Blobs.BlobUsage provenance, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<byte[]> ReadAsync(
+            Common.Workflow.WorkflowBlob blob, ExecutionId runTree, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     [Fact]

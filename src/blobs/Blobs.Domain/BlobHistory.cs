@@ -79,17 +79,3 @@ public sealed record BlobHistoryEntry(
             Executions = newExecution ? Executions + 1 : Executions,
         };
 }
-
-/// <summary>
-/// What an activity was doing when it touched a blob, for the history row it writes.
-/// <para>
-/// Carried as data rather than as references. A durable blob outlives its run, and deleting the
-/// execution must not erase the provenance that made the blob worth keeping.
-/// </para>
-/// </summary>
-public sealed record BlobUsage(
-    ExecutionId Execution,
-    ExecutionId RootExecution,
-    string Workflow,
-    string? WorkflowDigest = null,
-    string? Activity = null);

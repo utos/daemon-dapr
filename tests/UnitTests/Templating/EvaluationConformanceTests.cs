@@ -182,7 +182,7 @@ public class EvaluationConformanceTests
             return blob.Data.ToByteArray();
 
         Assert.NotNull(store);
-        return store!.Read(blob.ToDomain());
+        return store!.Read(blob.ToDomain(), default);
     }
 
     /// <summary>
@@ -202,7 +202,7 @@ public class EvaluationConformanceTests
 
     private sealed class CorpusStore(IReadOnlyDictionary<string, byte[]> objects) : IBlobReader
     {
-        public byte[] Read(Common.Workflow.WorkflowBlob blob)
+        public byte[] Read(Common.Workflow.WorkflowBlob blob, Common.SeedWork.ExecutionId runTree)
         {
             if (blob.Id is null || !objects.TryGetValue(blob.Id, out var bytes))
                 throw new BlobUnreadableException($"No stored object '{blob.Id}'.");

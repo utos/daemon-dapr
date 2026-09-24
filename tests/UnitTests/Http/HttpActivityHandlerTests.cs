@@ -1,3 +1,5 @@
+using Common.Blobs;
+using Common.Workflow;
 using System.Net;
 using System.Text;
 using Common.SeedWork;
@@ -9,6 +11,167 @@ namespace UnitTests.Http;
 
 public class HttpActivityHandlerTests
 {
+    [Theory]
+    [InlineData("application/json")]
+    [InlineData("application/problem+json")]      // RFC 7807, how a great many APIs report an error
+    [InlineData("application/vnd.api+json")]      // JSON:API
+    [InlineData("APPLICATION/JSON")]              // media types are case-insensitive
+    public async Task A_json_body_reaches_output_whatever_spells_json(string mediaType)
+    {
+        // `output` is the parsed body when the media type's essence is application/json or ends in
+        // +json (binary-data.md § Reading a response). The `+json` half was missing, so a workflow
+        // reading `output.detail` from a problem+json error saw null and had to re-parse the body
+        // itself — which is the work `output` exists to spare it.
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"detail":"nope"}""", Encoding.UTF8, mediaType),
+        };
+
+        var (handler, _) = Build(response);
+
+        var result = await handler.ExecuteAsync(Request());
+
+        // A JsonElement, which is the shape that preserves the body's own number tokens across the
+        // Dapr hop — see the note on ParseJsonResponse.
+        var output = Assert.IsType<System.Text.Json.JsonElement>(result.Output);
+        Assert.Equal("nope", output.GetProperty("detail").GetString());
+    }
+
+    [Theory]
+    [InlineData("text/plain")]
+    [InlineData("application/xml")]
+    [InlineData("application/jsonl")]             // ends in `json` but not `+json`
+    public async Task A_body_that_is_not_json_leaves_output_null(string mediaType)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"detail":"nope"}""", Encoding.UTF8, mediaType),
+        };
+
+        var (handler, _) = Build(response);
+
+        Assert.Null((await handler.ExecuteAsync(Request())).Output);
+    }
+
+    [Fact]
+    public async Task A_response_past_the_maximum_body_is_refused_by_name()
+    {
+        // UTOS-F101. Read from the stream and stopped, rather than buffered and then measured —
+        // otherwise a response the daemon has already decided to refuse gets to decide how much
+        // memory it takes on the way.
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[4096]),
+        };
+
+        var (handler, _) = Build(response, maxBody: 1024);
+
+        var failure = await Assert.ThrowsAsync<ResponseTooLargeException>(
+            () => handler.ExecuteAsync(Request()));
+
+        Assert.Equal(1024, failure.Limit);
+        Assert.Equal("UTOS-F101", ResponseTooLargeException.Code);
+    }
+
+    [Fact]
+    public async Task A_response_at_the_maximum_body_is_read()
+    {
+        // The boundary is inclusive: a body that ends exactly at the limit is not past it.
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[1024]),
+        };
+
+        var (handler, _) = Build(response, maxBody: 1024);
+
+        Assert.Equal(1024, (await handler.ExecuteAsync(Request())).Body!.Size);
+    }
+
+    [Fact]
+    public async Task A_small_body_is_carried_inline()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("hello", Encoding.UTF8, "text/plain"),
+        };
+
+        var (handler, _) = Build(response, inlineThreshold: 1024);
+
+        var body = (await handler.ExecuteAsync(Request())).Body!;
+
+        Assert.True(body.IsInline);
+        Assert.Equal("hello", Encoding.UTF8.GetString(body.Data!));
+        Assert.Equal("text/plain", body.MediaType);
+        Assert.Equal(5, body.Size);
+    }
+
+    [Fact]
+    public async Task A_body_over_the_threshold_becomes_a_handle_and_the_bytes_go_to_the_store()
+    {
+        // The point of the whole change: above the threshold the value is a handle of a few dozen
+        // bytes, not the payload. An inline body is copied at every hop and written to orchestration
+        // history on every transition, which is durable growth rather than a memory cost.
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(Encoding.UTF8.GetBytes(new string('x', 4096)))
+            {
+                Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf") },
+            },
+        };
+
+        var stub = new StubHandler(response);
+        var blobs = new FakeBlobs(threshold: 1024, canStore: true);
+        var handler = new HttpActivityHandler(
+            new HttpClient(stub),
+            NullLogger<HttpActivityHandler>.Instance,
+            new Microsoft.Extensions.Options.OptionsWrapper<HttpActivityOptions>(new HttpActivityOptions()),
+            blobs);
+
+        var body = (await handler.ExecuteAsync(Request())).Body!;
+
+        Assert.False(body.IsInline);
+        Assert.Null(body.Data);
+        Assert.NotNull(body.Id);
+        Assert.Equal(4096, body.Size);
+        Assert.Equal("application/pdf", body.MediaType);
+
+        // The bytes reached the store, exactly once and whole.
+        Assert.Equal(4096, Assert.Single(blobs.Stored).Length);
+    }
+
+    [Fact]
+    public async Task A_body_over_the_threshold_with_no_store_is_refused_by_name()
+    {
+        // UTOS-F102. Its own code, and not a read failure: nothing is wrong with the request or the
+        // blob, the daemon simply has nowhere to put bytes — an operator's problem, not an author's.
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[4096]),
+        };
+
+        var (handler, _) = Build(response, inlineThreshold: 1024, canStore: false);
+
+        var failure = await Assert.ThrowsAsync<BlobStoreUnavailableException>(
+            () => handler.ExecuteAsync(Request()));
+
+        Assert.Equal("UTOS-F102", BlobStoreUnavailableException.Code);
+        Assert.Contains("no blob store is configured", failure.Message);
+    }
+
+    [Fact]
+    public async Task A_body_exactly_at_the_threshold_stays_inline()
+    {
+        // At or below is inline, so the boundary is not a spill.
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[1024]),
+        };
+
+        var (handler, _) = Build(response, inlineThreshold: 1024);
+
+        Assert.True((await handler.ExecuteAsync(Request())).Body!.IsInline);
+    }
+
     /// <summary>
     /// Captures the outgoing request and returns a canned response, so the handler can be
     /// exercised without a socket.
@@ -30,13 +193,54 @@ public class HttpActivityHandlerTests
         }
     }
 
-    private static (HttpActivityHandler Handler, StubHandler Stub) Build(HttpResponseMessage response)
+    private static (HttpActivityHandler Handler, StubHandler Stub) Build(
+        HttpResponseMessage response,
+        long? maxBody = null,
+        long inlineThreshold = long.MaxValue,
+        bool canStore = true)
     {
         var stub = new StubHandler(response);
+
+        var options = new HttpActivityOptions();
+        if (maxBody is { } limit) options.MaxResponseBodyBytes = limit;
+
         var handler = new HttpActivityHandler(
-            new HttpClient(stub), NullLogger<HttpActivityHandler>.Instance);
+            new HttpClient(stub),
+            NullLogger<HttpActivityHandler>.Instance,
+            new Microsoft.Extensions.Options.OptionsWrapper<HttpActivityOptions>(options),
+            new FakeBlobs(inlineThreshold, canStore));
 
         return (handler, stub);
+    }
+
+    /// <summary>
+    /// Blob access with no store behind it: it records what it was asked to store and hands back a
+    /// handle, which is all the handler's decision needs. What a real store does with the bytes is
+    /// <c>S3ObjectStoreTests</c>' subject, and the round trip through a real one is the integration
+    /// suite's.
+    /// </summary>
+    private sealed class FakeBlobs(long threshold, bool canStore) : IBlobAccess
+    {
+        public long InlineThreshold => threshold;
+
+        public bool CanStore => canStore;
+
+        public List<byte[]> Stored { get; } = [];
+
+        public Task<WorkflowBlob> ProduceAsync(
+            Stream content, string mediaType, string? name, BlobUsage provenance, CancellationToken ct)
+        {
+            var buffer = new MemoryStream();
+            content.CopyTo(buffer);
+            var bytes = buffer.ToArray();
+            Stored.Add(bytes);
+
+            return Task.FromResult(
+                WorkflowBlob.Stored($"b_{Stored.Count}", bytes.Length, mediaType, name: name));
+        }
+
+        public Task<byte[]> ReadAsync(WorkflowBlob blob, ExecutionId runTree, CancellationToken ct) =>
+            Task.FromResult(blob.Data ?? []);
     }
 
     private static ActivityHandlerInput Request(
@@ -130,7 +334,10 @@ public class HttpActivityHandlerTests
         Assert.False(result.Success);
         Assert.Equal(429, result.StatusCode);
         Assert.Equal("120", result.Headers["Retry-After"]);
-        Assert.Equal("slow down", result.BodyText);
+        // The bounded diagnostic, not the body: an author reads the body with `await
+        // response.body.text()`, and this is only what a failure message says.
+        Assert.Equal("slow down", result.BodySummary);
+        Assert.Equal("slow down", Encoding.UTF8.GetString(result.Body!.Data!));
     }
 
     [Fact]
@@ -172,7 +379,7 @@ public class HttpActivityHandlerTests
 
         Assert.True(result.Success);
         Assert.Null(result.Output);
-        Assert.Equal("<html/>", result.BodyText);
+        Assert.Equal("<html/>", Encoding.UTF8.GetString(result.Body!.Data!));
     }
 
     [Fact]

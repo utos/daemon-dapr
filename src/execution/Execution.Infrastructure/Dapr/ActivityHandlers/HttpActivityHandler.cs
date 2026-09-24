@@ -2,13 +2,17 @@ using System.Text;
 using System.Text.Json;
 using Common.Workflow;
 using Microsoft.Extensions.Logging;
+using Common.Blobs;
+using Microsoft.Extensions.Options;
 using Execution.Domain.Services;
 
 namespace Execution.Infrastructure.Dapr.ActivityHandlers;
 
 public class HttpActivityHandler(
     HttpClient httpClient,
-    ILogger<HttpActivityHandler> logger)
+    ILogger<HttpActivityHandler> logger,
+    IOptions<HttpActivityOptions> options,
+    IBlobAccess blobs)
     : IActivityHandler
 {
     public ActivityKind Kind => ActivityKind.Http;
@@ -55,8 +59,9 @@ public class HttpActivityHandler(
         // expression sees as `response.body`, using the charset the server declared (UTF-8 when it
         // declared none or one .NET does not know) — which is what ReadAsStringAsync did, minus
         // its own second look at the content.
-        var responseBytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var responseBytes = await ReadBounded(response, options.Value.MaxResponseBodyBytes, ct);
         var responseContent = DecodeText(responseBytes, response.Content.Headers.ContentType?.CharSet);
+        var bodyBlob = await ToBlob(responseBytes, response, input, ct);
         var duration = (DateTimeOffset.UtcNow - startTime).TotalMilliseconds;
 
         var statusCode = (int)response.StatusCode;
@@ -77,22 +82,120 @@ public class HttpActivityHandler(
         // A non-2xx is reported, not thrown. Throwing here would flatten to a message string at the
         // Dapr boundary and lose the status and headers that on_failure rules branch on, so the
         // executor decides what the status means.
-        // Parse response body as output
+        // `output` is the parsed JSON body when the media type's essence is `application/json` or
+        // ends in `+json`, and null otherwise (api/docs/binary-data.md § Reading a response).
+        //
+        // The `+json` half was missing: `application/problem+json` and `application/vnd.api+json`
+        // are how a great many APIs answer, and their bodies were reaching `output` as null while
+        // the body itself was plainly JSON. An author could only work around it by re-parsing the
+        // body text, which is exactly what `output` exists to spare them.
         var contentType = response.Content.Headers.ContentType?.MediaType;
-        var parsedBody = contentType switch
-        {
-            "application/json" => ParseJsonResponse(responseContent),
-            _ => null
-        };
+        var parsedBody = IsJson(contentType) ? ParseJsonResponse(responseContent) : null;
 
         return new ActivityHandlerResult(
             statusCode,
             response.IsSuccessStatusCode,
             parsedBody,
             CollectHeaders(response),
-            responseContent,
-            responseBytes);
+            bodyBlob,
+            // Bounded here rather than carried whole: a failure message needs a hint of what the
+            // server said, not the body.
+            Truncate(responseContent));
     }
+
+    private const int SummaryLength = 200;
+
+    private static string? Truncate(string text) =>
+        string.IsNullOrEmpty(text) ? null
+        : text.Length <= SummaryLength ? text
+        : text[..SummaryLength] + "…";
+
+    /// <summary>
+    /// The body as a <c>Blob</c>: inline when it is small, stored when it is not
+    /// (<c>api/docs/binary-data.md</c> § Reading a response).
+    /// <para>
+    /// The decision is invisible to authors — nothing in an expression reveals which backing a blob
+    /// has — so it is purely the daemon's, and it is made on the count of bytes actually read rather
+    /// than on <c>content-length</c>, which is missing on a chunked response and sometimes wrong.
+    /// </para>
+    /// <para>
+    /// Above the threshold and with no store configured, the activity fails with <c>UTOS-F102</c>:
+    /// the bytes have nowhere to go. That is an operator's problem rather than an author's, which is
+    /// why it is its own code and not a read failure.
+    /// </para>
+    /// </summary>
+    private async Task<WorkflowBlob> ToBlob(
+        byte[] bytes, HttpResponseMessage response, ActivityHandlerInput input, CancellationToken ct)
+    {
+        // The response's content type, serialized as a media type — type and subtype lowercased,
+        // parameters kept — or '' when the header is absent or unparsable. Always a Blob and never a
+        // File, whatever content-disposition says.
+        var mediaType = response.Content.Headers.ContentType?.MediaType?.ToLowerInvariant() ?? string.Empty;
+
+        if (bytes.Length <= blobs.InlineThreshold)
+            return WorkflowBlob.Inline(bytes, mediaType);
+
+        if (!blobs.CanStore)
+            throw new BlobStoreUnavailableException(
+                $"The response body is {bytes.Length} bytes, above the inline threshold of "
+                + $"{blobs.InlineThreshold}, and no blob store is configured.");
+
+        return await blobs.ProduceAsync(
+            new MemoryStream(bytes, writable: false),
+            mediaType,
+            name: null,
+            new BlobUsage(
+                input.ExecutionId,
+                input.RootExecutionId,
+                input.Workflow ?? string.Empty,
+                input.WorkflowDigest,
+                input.ActivityName),
+            ct);
+    }
+
+    /// <summary>
+    /// The body, up to <paramref name="limit"/> bytes. A response that exceeds it is abandoned and
+    /// the activity fails with <c>UTOS-F101</c>.
+    /// <para>
+    /// Read from the stream rather than with <c>ReadAsByteArrayAsync</c>, because the point is to
+    /// stop reading. Buffering the whole body and then measuring it would let a response the
+    /// daemon has already decided to refuse decide how much memory it takes first.
+    /// </para>
+    /// <para>
+    /// <c>content-length</c> is a hint only — missing on a chunked response and sometimes wrong —
+    /// so the count of bytes actually read is what decides, not what the server claimed.
+    /// </para>
+    /// </summary>
+    private static async Task<byte[]> ReadBounded(
+        HttpResponseMessage response, long limit, CancellationToken ct)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+
+        while (true)
+        {
+            var read = await stream.ReadAsync(chunk, ct);
+            if (read == 0) break;
+
+            if (buffer.Length + read > limit)
+                throw new ResponseTooLargeException(limit);
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Whether a media type's essence is JSON: <c>application/json</c>, or any type whose subtype
+    /// ends in <c>+json</c> — the structured-syntax suffix of RFC 6839, which is how
+    /// <c>application/problem+json</c> and <c>application/vnd.api+json</c> say they are JSON.
+    /// </summary>
+    private static bool IsJson(string? mediaType) =>
+        mediaType is not null
+        && (mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+            || mediaType.EndsWith("+json", StringComparison.OrdinalIgnoreCase));
 
     private static string DecodeText(byte[] bytes, string? charset)
     {

@@ -17,7 +17,7 @@ public class ResponseContextTests
         return new HttpResponseContext(
             status,
             headers.ToDictionary(h => h.Name, h => h.Value, StringComparer.OrdinalIgnoreCase),
-            "{}");
+            Common.Workflow.WorkflowBlob.Inline(System.Text.Encoding.UTF8.GetBytes("{}"), "application/json"));
     }
 
     private TransitionDecision Advance(HttpResponseContext? response, params Common.Workflow.TransitionRule[] rules)
@@ -87,9 +87,17 @@ public class ResponseContextTests
     {
         var scoped = HttpResponseContext.ToScopeValue(null);
 
+        // Every key `response` has is present even when there was no response at all, so
+        // `response.status === 429` is false rather than a ReferenceError raised while a failure is
+        // already being handled.
         Assert.Null(scoped["status"]);
-        Assert.Null(scoped["bodyText"]);
+        Assert.Null(scoped["body"]);
         Assert.NotNull(scoped["headers"]);
+
+        // `bodyText` is *absent*, not null. It was retired in spec 0.20, and the scope converter
+        // installs a getter that throws for it — a null here would read as an empty body, which is
+        // the silent wrong answer the retirement exists to prevent.
+        Assert.False(scoped.ContainsKey("bodyText"));
     }
 
     [Fact]

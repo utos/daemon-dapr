@@ -1,3 +1,4 @@
+using Common.Blobs;
 using Common.SeedWork;
 
 namespace Blobs.Domain;

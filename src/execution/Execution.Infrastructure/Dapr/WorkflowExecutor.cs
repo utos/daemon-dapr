@@ -385,9 +385,20 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             // The three fields every report of this failure carries. Authored by a rule's `error`
             // action — here or in a child this run was handling — they are the author's; raised by
             // the daemon, the code is the generic one and there are no details.
+            // The binary-data codes are the daemon's own but are not generic: an author's onFailure
+            // rule is meant to be able to tell "the body was too big" and "there is nowhere to put
+            // bytes" apart from every other reason an activity failed, which is the whole purpose of
+            // UTOS-F1##. Reported by name here rather than flattened to EXECUTION_FAILED.
+            //
+            // Matched on the message because a Dapr activity's exception arrives at the orchestrator
+            // flattened to one: the type is gone by the time this runs. That is the same constraint
+            // HttpActivityFailedException exists to work around, and the reason these two codes are
+            // recognised rather than reconstructed.
             var (failureCode, failureDetails) = ex is WorkflowFailedException authored
                 ? (authored.Code, authored.Details)
-                : (WorkflowErrorCode.ExecutionFailed, null);
+                : Blobs.CodeFor(ex) is { } blobCode
+                    ? (blobCode, (Dictionary<string, object>?)null)
+                    : (WorkflowErrorCode.ExecutionFailed, null);
 
             logger.LogError(
                 "Workflow execution failed [{FailureCode}]: {ErrorMessage} (execution {WorkflowExecutionId})",
@@ -565,7 +576,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             // survive the Dapr boundary. Turning that into a failure is this side's decision.
             if (!result.Success)
                 throw new HttpActivityFailedException(
-                    run.ActivityName, result.StatusCode, result.Headers, result.BodyText, result.Body);
+                    run.ActivityName, result.StatusCode, result.Headers, result.BodySummary, result.Body);
 
             logger.LogInformation(
                 "Activity '{WorkflowActivity}' completed in {DurationMs}ms (execution {WorkflowExecutionId})",
@@ -573,7 +584,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
 
             return ActivityOutcome.Completed(
                 result.Output,
-                new HttpResponseContext(result.StatusCode, result.Headers, result.BodyText, result.Body));
+                new HttpResponseContext(result.StatusCode, result.Headers, result.Body));
         }
         catch (Exception activityEx)
         {

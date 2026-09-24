@@ -88,6 +88,10 @@ public static class ExecutionInfrastructureExtensions
         // The expression engine (api/docs/template-expressions.md) and the limits it runs under.
         builder.Services.Configure<TemplateEngineOptions>(
             builder.Configuration.GetSection(TemplateEngineOptions.SectionName));
+        // How a stored blob's bytes reach an expression. Registered here and resolved as nullable by
+        // the engine, so a daemon with no blob store still evaluates every expression that does not
+        // read one.
+        builder.Services.AddSingleton<IBlobReader, BlobAccessReader>();
         builder.Services.AddSingleton<ITemplateEngine, JintTemplateEngine>();
 
         // Applies a workflow's declared schemas to the data crossing a boundary. A singleton
@@ -176,6 +180,12 @@ public static class ExecutionInfrastructureExtensions
         // handler separately (AddScoped<IActivityHandler, …> plus AddHttpClient<Handler>) built
         // it from the default unnamed HttpClient and left every bit of configuration below
         // attached to a named client nothing ever asked for — silently inert.
+        // What bounds a response body. Bound from configuration so a deployment can raise or lower
+        // it; the default is what keeps a runaway endpoint from deciding how much memory the daemon
+        // uses, since every body under it becomes an inline blob.
+        builder.Services.Configure<HttpActivityOptions>(
+            builder.Configuration.GetSection(HttpActivityOptions.SectionName));
+
         var workflowHttp = builder.Services.AddHttpClient<IActivityHandler, HttpActivityHandler>();
 
         // Drop the standard pipeline inherited from ConfigureHttpClientDefaults. Its retry

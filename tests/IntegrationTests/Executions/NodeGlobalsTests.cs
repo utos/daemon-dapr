@@ -20,8 +20,14 @@ public class NodeGlobalsTests(DaemonTestFixture fixture)
     [Fact]
     public async Task A_binary_response_body_is_a_buffer_in_scope()
     {
-        // A PNG signature with a content type nothing parses. `output` is null for it; the bytes
-        // are on `response.body`, and leave the expression as the text the author chose.
+        // A PNG signature with a content type nothing parses. `output` is null for it; the bytes are
+        // on `response.body`, and leave the expression as the text the author chose.
+        //
+        // Since spec 0.20 `response.body` is a Blob, so the bytes are read from it rather than being
+        // it: `size` and `type` come off the handle, and `await bytes()` materializes a Buffer that
+        // every Buffer member then works on. `response.body.toString('hex')` — which this test used
+        // to be written as — is now UTOS-E120 by design, because a blob has no implicit text and the
+        // old spelling would otherwise have returned the literal '[object Blob]'.
         byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
         fixture.WireMockServer
@@ -32,10 +38,11 @@ public class NodeGlobalsTests(DaemonTestFixture fixture)
                 .WithBody(png));
 
         var result = new Struct();
-        result.Fields.Add("hex", Value.ForString("{{ response.body.toString('hex') }}"));
-        result.Fields.Add("length", Value.ForString("{{ response.body.length }}"));
-        result.Fields.Add("isPng", Value.ForString("{{ response.body.readUInt8(0) === 0x89 && response.body.slice(1, 4).toString('latin1') === 'PNG' }}"));
-        result.Fields.Add("digest", Value.ForString("{{ crypto.createHash('sha256').update(response.body).digest('base64url') }}"));
+        result.Fields.Add("hex", Value.ForString("{{ (await response.body.bytes()).toString('hex') }}"));
+        result.Fields.Add("length", Value.ForString("{{ response.body.size }}"));
+        result.Fields.Add("type", Value.ForString("{{ response.body.type }}"));
+        result.Fields.Add("isPng", Value.ForString("{{ const b = await response.body.bytes(); b.readUInt8(0) === 0x89 && b.slice(1, 4).toString('latin1') === 'PNG' }}"));
+        result.Fields.Add("digest", Value.ForString("{{ crypto.createHash('sha256').update(await response.body.bytes()).digest('base64url') }}"));
 
         var request = new TestWorkflowBuilder("binary-body-workflow", fixture.MockBaseUrl)
             .HttpGet("fetch", "/binary-body")
@@ -51,6 +58,7 @@ public class NodeGlobalsTests(DaemonTestFixture fixture)
         Assert.Equal(ExecutionStatus.Completed, execution.Summary.Status);
         Assert.Equal("89504e470d0a1a0a", execution.Result.Fields["hex"].StringValue);
         Assert.Equal(8, execution.Result.Fields["length"].NumberValue);
+        Assert.Equal("image/png", execution.Result.Fields["type"].StringValue);
         Assert.True(execution.Result.Fields["isPng"].BoolValue);
         Assert.Equal(
             Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(png)).TrimEnd('=').Replace('+', '-').Replace('/', '_'),
