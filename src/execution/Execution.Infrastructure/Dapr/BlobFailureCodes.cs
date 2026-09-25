@@ -30,6 +30,7 @@ internal static class Blobs
         ResponseTooLargeException => ResponseTooLargeException.Code,
         BlobStoreUnavailableException => BlobStoreUnavailableException.Code,
         BlobUnreadableException => BlobUnreadableException.Code,
+        BlobsNotAdmittedException => BlobsNotAdmittedException.Code,
 
         // Flattened by the Dapr boundary: the type is gone and the message is what is left. Matched
         // on the code itself, which each exception's own message does not carry — so it is matched
@@ -38,6 +39,12 @@ internal static class Blobs
             => ResponseTooLargeException.Code,
         _ when ex.Message.Contains("no blob store is configured", StringComparison.Ordinal)
             => BlobStoreUnavailableException.Code,
+
+        // The exception this one *does* lead its message with the code, because it is the only one
+        // raised where a sentence would not have survived: a spawn's refusal is written by the blobs
+        // module and read by an `onFailure` rule on the other side of two boundaries.
+        _ when ex.Message.Contains(BlobsNotAdmittedException.Code, StringComparison.Ordinal)
+            => BlobsNotAdmittedException.Code,
 
         _ => null,
     };

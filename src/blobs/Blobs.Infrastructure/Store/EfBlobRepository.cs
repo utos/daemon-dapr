@@ -69,6 +69,22 @@ public sealed class EfBlobRepository(BlobsDbContext context) : IBlobRepository
                 t => t.BlobId == id.Value && t.RootExecutionId == rootExecution.Value,
                 cancellationToken);
 
+    public async Task<IReadOnlySet<BlobId>> MembersOfRunTreeAsync(
+        IReadOnlyCollection<BlobId> ids, ExecutionId rootExecution, CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0) return new HashSet<BlobId>();
+
+        var values = ids.Select(id => id.Value).Distinct().ToArray();
+
+        var members = await context.BlobRunTrees
+            .AsNoTracking()
+            .Where(t => t.RootExecutionId == rootExecution.Value && values.Contains(t.BlobId))
+            .Select(t => t.BlobId)
+            .ToListAsync(cancellationToken);
+
+        return members.Select(value => new BlobId(value)).ToHashSet();
+    }
+
     public async Task AttachToRunTreeAsync(
         BlobId id, ExecutionId rootExecution, CancellationToken cancellationToken)
     {

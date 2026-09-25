@@ -27,6 +27,11 @@ public record StartExecutionCommand(
     // Caller-supplied execution id. Set by the detached sub-workflow path, which mints a
     // replay-safe id in the orchestrator so scheduling is idempotent across Dapr replays.
     // Null for the gRPC path, which lets the aggregate mint its own.
-    ExecutionId? ExecutionId = null) : ICommand<ScheduleExecutionResult>;
+    ExecutionId? ExecutionId = null,
+    // The run tree a `workflow.spawn` is starting this run from, and the whole of what distinguishes
+    // the two ways a blob enters a run from outside. Set, the input's blobs must already belong to
+    // that tree and need not be durable; null, this is a client's schedule and each blob must be
+    // durable instead. Either way the accepted ones are attached to the tree this run roots.
+    ExecutionId? SpawningTree = null) : ICommand<ScheduleExecutionResult>;
 
 public record ScheduleExecutionResult(ExecutionId Id, ExecutionStatus Status);

@@ -38,6 +38,15 @@ public interface IBlobRepository
         BlobId id, ExecutionId rootExecution, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Which of <paramref name="ids"/> belong to the run tree rooted at
+    /// <paramref name="rootExecution"/> — <see cref="BelongsToRunTreeAsync"/> for a whole input at
+    /// once, so that admitting a <c>workflow.spawn</c>'s handles is one query rather than one per
+    /// handle.
+    /// </summary>
+    Task<IReadOnlySet<BlobId>> MembersOfRunTreeAsync(
+        IReadOnlyCollection<BlobId> ids, ExecutionId rootExecution, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Records that a blob belongs to a run tree — because it was produced there, attached by a
     /// client at schedule, or carried into a new tree by a <c>workflow.spawn</c>. Attaching one that
     /// is already a member changes nothing.
