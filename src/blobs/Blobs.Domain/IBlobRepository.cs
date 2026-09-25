@@ -59,4 +59,66 @@ public interface IBlobRepository
 
     Task<IReadOnlyList<BlobHistoryEntry>> HistoryAsync(
         BlobId id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Records that the run tree rooted at <paramref name="rootExecution"/> reached a terminal state,
+    /// against every blob attached to it. This is the accurate signal the sweep runs on; without it
+    /// the sweep has only its age backstop, and an intermediate lingers for weeks.
+    /// <para>
+    /// One statement over the tree's rows rather than a row of its own per execution. The alternative
+    /// was a table of endings joined at sweep time, which is a second table growing with terminated
+    /// executions and outliving the blobs it describes. This writes where the question is asked.
+    /// </para>
+    /// <para>
+    /// A blob attached <em>after</em> the ending was recorded keeps a null ending, and so is treated
+    /// as belonging to a tree that has not finished — conservative, which is the only safe direction,
+    /// and unreachable in practice because attaching happens inside the run.
+    /// </para>
+    /// </summary>
+    /// <returns>How many attachments were marked, which is zero for a tree that touched no blob.</returns>
+    Task<int> RecordRunTreeEndedAsync(
+        ExecutionId rootExecution,
+        RunTreeOutcome outcome,
+        DateTimeOffset at,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Blobs the daemon may now remove, oldest first, at most <paramref name="limit"/> of them.
+    /// <para>
+    /// A query rather than a predicate the caller applies, because the alternative is loading every
+    /// blob the daemon has ever held to discard almost all of them. The rule is
+    /// <see cref="BlobRetentionPolicy"/>'s and is documented there; that it is expressed twice — once
+    /// as that record and once as this statement — is the cost of it being one round trip.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<StoredBlob>> FindReclaimableAsync(
+        BlobRetentionPolicy policy,
+        DateTimeOffset now,
+        int limit,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Every blob attached to one run tree, each with whether some <em>other</em> tree it belongs to
+    /// has yet to end. <c>DeleteExecution</c> skips those rather than deleting them: a durable upload
+    /// shared with a live run must survive the deletion of this one.
+    /// </summary>
+    Task<IReadOnlyList<RunTreeBlob>> FindRunTreeBlobsAsync(
+        ExecutionId rootExecution, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Forgets that a blob ever belonged to this run tree, for every blob that did. Called when the
+    /// execution record itself goes, so that the join table does not accumulate rows naming
+    /// executions nothing can look up. A blob attached to other trees keeps those.
+    /// </summary>
+    Task DetachRunTreeAsync(ExecutionId rootExecution, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// A blob as <c>DeleteExecution</c> has to see it: the record, plus the one fact that decides whether
+/// this call may touch it.
+/// </summary>
+/// <param name="ReachableElsewhere">
+/// Another run tree this blob belongs to has not ended. The spec's word is "skipped": a blob a
+/// non-terminal execution can still reference is not deleted, whatever the caller asked for.
+/// </param>
+public sealed record RunTreeBlob(StoredBlob Blob, bool ReachableElsewhere);

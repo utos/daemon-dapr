@@ -256,7 +256,8 @@ public class ExecutionGrpcService(IMediator mediator)
 
         try
         {
-            await mediator.Send(new DeleteExecutionCommand(executionId), context.CancellationToken);
+            await mediator.Send(
+                new DeleteExecutionCommand(executionId, request.DeleteBlobs), context.CancellationToken);
             return new DeleteExecutionResponse();
         }
         catch (ExecutionNotFoundException ex)

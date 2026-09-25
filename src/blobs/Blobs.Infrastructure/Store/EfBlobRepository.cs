@@ -189,6 +189,105 @@ public sealed class EfBlobRepository(BlobsDbContext context) : IBlobRepository
     }
 
 
+    public Task<int> RecordRunTreeEndedAsync(
+        ExecutionId rootExecution,
+        RunTreeOutcome outcome,
+        DateTimeOffset at,
+        CancellationToken cancellationToken)
+    {
+        var name = outcome.ToString();
+
+        // One UPDATE, no entities loaded. This runs inside the execution module's event subscription,
+        // on the same await chain: a listener that blocks stalls the subscription, so the small thing
+        // is the only thing it may do.
+        //
+        // Conditional on the ending being unset so that a replayed or re-delivered lifecycle event
+        // cannot move a recorded ending forward — the failed-run window is measured from it, and a
+        // re-delivery would silently restart the clock.
+        return context.BlobRunTrees
+            .Where(t => t.RootExecutionId == rootExecution.Value && t.TreeEndedAt == null)
+            .ExecuteUpdateAsync(
+                row => row
+                    .SetProperty(t => t.TreeEndedAt, at)
+                    .SetProperty(t => t.TreeOutcome, name),
+                cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<StoredBlob>> FindReclaimableAsync(
+        BlobRetentionPolicy policy,
+        DateTimeOffset now,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var youngest = now - policy.GracePeriod;
+        var abandoned = now - policy.AbandonedUploadWindow;
+        var failedBefore = now - policy.FailedRunWindow;
+        var interruptedBefore = now - policy.InterruptedRunWindow;
+
+        var pending = BlobState.Pending.ToString();
+        var ready = BlobState.Ready.ToString();
+        var intermediate = BlobRetention.Intermediate.ToString();
+        var completed = RunTreeOutcome.Completed.ToString();
+
+        var rows = await context.Blobs
+            .AsNoTracking()
+            // Never something this new: producing a blob is three writes, and between the first two
+            // a real blob has no attachment and is indistinguishable from one nothing can reach.
+            .Where(b => b.CreatedAt < youngest)
+            .Where(b =>
+                // An upload created and never completed. Durable by class — somebody asked for it —
+                // but there is nothing to keep, and the class exists to stop the daemon deleting
+                // *bytes* a client is relying on.
+                (b.State == pending && b.CreatedAt < abandoned)
+
+                // Or an intermediate that no live tree can reach and no window still covers. Durable
+                // blobs are absent from this clause entirely: they are removed only on request.
+                || (b.State == ready
+                    && b.Retention == intermediate
+                    && !context.BlobRunTrees.Any(t =>
+                        t.BlobId == b.Id
+                        && (
+                            // A tree that has not ended can still read it — including on a retry,
+                            // which re-runs an activity from its recorded input. This is the spec's
+                            // one hard requirement, and the backstop is what stops it being forever.
+                            (t.TreeEndedAt == null && t.AttachedAt >= interruptedBefore)
+
+                            // A failed or cancelled tree's intermediates are the evidence. Kept until
+                            // the window passes, and a completed tree's are not kept at all.
+                            || (t.TreeOutcome != completed && t.TreeEndedAt >= failedBefore)))))
+            .OrderBy(b => b.CreatedAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(ToDomain).ToList();
+    }
+
+    public async Task<IReadOnlyList<RunTreeBlob>> FindRunTreeBlobsAsync(
+        ExecutionId rootExecution, CancellationToken cancellationToken)
+    {
+        var root = rootExecution.Value;
+
+        var rows = await (
+            from attachment in context.BlobRunTrees.AsNoTracking()
+            where attachment.RootExecutionId == root
+            join blob in context.Blobs.AsNoTracking() on attachment.BlobId equals blob.Id
+            select new
+            {
+                Blob = blob,
+                ReachableElsewhere = context.BlobRunTrees.Any(other =>
+                    other.BlobId == blob.Id
+                    && other.RootExecutionId != root
+                    && other.TreeEndedAt == null),
+            }).ToListAsync(cancellationToken);
+
+        return rows.Select(row => new RunTreeBlob(ToDomain(row.Blob), row.ReachableElsewhere)).ToList();
+    }
+
+    public Task DetachRunTreeAsync(ExecutionId rootExecution, CancellationToken cancellationToken) =>
+        context.BlobRunTrees
+            .Where(t => t.RootExecutionId == rootExecution.Value)
+            .ExecuteDeleteAsync(cancellationToken);
+
     private static StoredBlob ToDomain(BlobEntity row) =>
         new(new BlobId(row.Id),
             new ObjectKey(row.ObjectKey),

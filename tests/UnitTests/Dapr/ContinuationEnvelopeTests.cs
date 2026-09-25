@@ -124,10 +124,10 @@ public class ContinuationEnvelopeTests
     }
 
     /// <summary>
-    /// The guard that outlives this change. Every property is either supplied by the segment or
-    /// deliberately carried; a new one belongs to exactly one of those sets, and the author has to
-    /// say which. Left unclassified, it silently takes the "carried" path — which is correct for a
-    /// constant and a rewind bug for anything that moves.
+    /// The guard that outlives this change. Every property is supplied by the segment, deliberately
+    /// carried, or derived from the others; a new one belongs to exactly one of those sets, and the
+    /// author has to say which. Left unclassified, it silently takes the "carried" path — which is
+    /// correct for a constant and a rewind bug for anything that moves.
     /// </summary>
     [Fact]
     public void Every_property_is_classified_as_either_segment_state_or_carried()
@@ -152,6 +152,15 @@ public class ContinuationEnvelopeTests
             nameof(WorkflowExecutorInput.RootExecutionId)
         ];
 
+        // Computed from the three above and never stored, so there is nothing to rewind. They still
+        // have to be named: an author who adds state and forgets it is the case this guard is for, and
+        // a list that quietly tolerated get-only properties would let one through as "derived".
+        string[] derived =
+        [
+            nameof(WorkflowExecutorInput.RunTree),
+            nameof(WorkflowExecutorInput.IsRunTreeRoot)
+        ];
+
         var declared = typeof(WorkflowExecutorInput)
             .GetProperties()
             .Select(property => property.Name)
@@ -159,7 +168,46 @@ public class ContinuationEnvelopeTests
             .Order()
             .ToArray();
 
-        Assert.Equal(suppliedBySegment.Concat(carriedUnchanged).Order().ToArray(), declared);
+        Assert.Equal(
+            suppliedBySegment.Concat(carriedUnchanged).Concat(derived).Order().ToArray(), declared);
+
+        // Derived means derived: a settable one would be state wearing the wrong label.
+        Assert.All(derived, name =>
+            Assert.Null(typeof(WorkflowExecutorInput).GetProperty(name)!.SetMethod));
+    }
+
+    [Theory]
+    // A root: nothing above it, so the tree is itself and the output stream it writes is a client's.
+    [InlineData(null, null, true)]
+    // A `workflow.call` child, one level down. Its result goes to its caller, not out of the run.
+    [InlineData("parent", "parent", false)]
+    // A grandchild. ParentExecutionId alone reached one level, which is why RootExecutionId exists.
+    [InlineData("parent", "root", false)]
+    // A run already in flight when RootExecutionId was introduced, which is what the fallback is for.
+    [InlineData("parent", null, false)]
+    public void The_run_tree_is_the_root_and_only_the_root_promotes(
+        string? parent, string? root, bool expectedRoot)
+    {
+        var input = Original() with
+        {
+            ParentExecutionId = parent is null ? null : ParentId,
+            RootExecutionId = root switch
+            {
+                "root" => RootId,
+                "parent" => ParentId,
+                _ => null,
+            },
+        };
+
+        var expectedTree = (parent, root) switch
+        {
+            (null, _) => Id,
+            (_, "root") => RootId,
+            _ => ParentId,
+        };
+
+        Assert.Equal(expectedTree, input.RunTree);
+        Assert.Equal(expectedRoot, input.IsRunTreeRoot);
     }
 
     /// <summary>

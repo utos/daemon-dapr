@@ -56,6 +56,19 @@ public sealed class BlobRunTreeEntity
     public Guid RootExecutionId { get; set; }
 
     public DateTimeOffset AttachedAt { get; set; }
+
+    /// <summary>
+    /// When the run tree reached a terminal state, or null while it has not. The sweep's whole
+    /// question: a blob with any null here belongs to a tree that could still read it, and the spec's
+    /// one hard requirement is that it stays.
+    /// </summary>
+    public DateTimeOffset? TreeEndedAt { get; set; }
+
+    /// <summary>
+    /// How it ended, as a string for the reason every other enum here is one. Null exactly when
+    /// <see cref="TreeEndedAt"/> is.
+    /// </summary>
+    public string? TreeOutcome { get; set; }
 }
 
 /// <summary>

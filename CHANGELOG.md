@@ -20,11 +20,11 @@ that moves bytes.
 HTTP response body is a `Blob`, stored in object storage when it crosses the inline threshold, and
 `await response.body.text()` reads it through the store with the run-tree access check applied.
 
-Still not a daemon that implements the whole of `§ Blobs`: there is no `BlobService`, a client cannot
-attach a blob at `ScheduleExecution` (that is still refused with `Unimplemented`), nothing is promoted
-to durable when it reaches a root execution's output stream, and nothing is ever swept. So a blob a
-run produces is readable for as long as the run tree lives and is then orphaned — which is why this
-is `[Unreleased]` rather than a dated version.
+Still not a daemon that implements the whole of `§ Blobs`: there is no `BlobService`, and a client
+cannot attach a blob at `ScheduleExecution` — that is still refused with `Unimplemented`. So a
+workflow can produce blobs, carry them, return them and have them kept or reclaimed, but a person
+cannot yet put one in or fetch one out by id, which is why this is `[Unreleased]` rather than a dated
+version.
 
 ### Added
 
@@ -86,6 +86,36 @@ is `[Unreleased]` rather than a dated version.
   let a document forge a handle. So any map key that could be mistaken for the reserved one is escaped
   on the way out and unescaped on the way in. A value with no such key is byte-for-byte what it was
   before blobs existed, so nothing an earlier daemon wrote reads differently
+
+- **A blob that reaches a root execution's output stream becomes durable** (§ Out of a run). That line
+  is not about where a blob came from: a run that fetches five things and returns one made four that
+  nobody asked for, and those four are what fill a bucket without anyone noticing. Promotion is
+  irreversible and copies no bytes, which is why the two classes are a field on one record rather than
+  two places to keep objects — keeping them apart would make this a server-side copy of something that
+  may be gigabytes. It happens *after* the entry is appended: a crash the other way round would leave a
+  durable blob no output mentions, which is the one outcome nothing can ever find again
+- **The retention sweep** (§ When intermediates go), so an intermediate is no longer orphaned once its
+  run tree ends. A completed tree's intermediates go at the next pass; a failed or cancelled tree's are
+  kept for a window, because they are exactly what an operator wants to look at and deleting them at
+  the moment of failure is how the evidence is lost; abandoned uploads go on their own window; and an
+  age backstop catches what no ending ever covered — a crash, a parked lifecycle event, an execution
+  deleted without notice. Durable blobs are absent from every one of those rules, which is the spec's
+  second requirement and is absolute
+- The sweep runs on a timer and not on the terminating run's own path. What a run's ending does is
+  record itself, in one `UPDATE` over the tree's attachments; a listener on that subscription must not
+  block, and putting an object store there would put it in the path of every run that finishes. "An
+  intermediate can go at once" is a permission in the spec, never an obligation — the requirement is
+  only ever the other direction
+- **`DeleteExecution` honours `delete_blobs`.** The tree's intermediates go either way; with the flag
+  so do the durable blobs the run *produced*, and never a client's upload, which may have started other
+  runs. A blob a non-terminal execution can still reference is skipped, not deleted. Blobs are
+  reclaimed after the execution record rather than before it, so a failure leaves blobs whose tree has
+  ended and whose attachments say so — exactly what the sweep collects
+- **A cancelled run now reaches a lifecycle listener at all.** `ExecutionLifecycleNotifier` read the
+  two events its own module calls terminal and announced a cancellation to nobody, so retention would
+  never have learned a cancelled tree had finished. `OnCancelledAsync` is the one method on that
+  contract with a default body, and deliberately: what a cancelled run's terminal *watch* frame should
+  say is an open question with a wire shape attached, and this is not the change that should answer it
 
 ### Fixed
 

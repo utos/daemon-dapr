@@ -61,6 +61,25 @@ public interface IBlobAccess
     /// </summary>
     /// <exception cref="BlobUnreadableException">Any reason the bytes did not arrive — <c>UTOS-F103</c>.</exception>
     Task<byte[]> ReadAsync(WorkflowBlob blob, ExecutionId runTree, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// These blobs reached a root execution's output stream, so somebody asked for them: they become
+    /// <b>durable</b> and the daemon will not remove them on its own again.
+    /// <para>
+    /// Promotion is irreversible and copies no bytes. A blob's class cannot be known when it is
+    /// written, because nothing knows yet whether it will be returned — which is exactly why the two
+    /// classes are a field on one record rather than two places to keep objects. Keeping them apart
+    /// would make this a server-side copy of something that may be gigabytes.
+    /// </para>
+    /// <para>
+    /// Inline blobs and blobs already durable are no-ops. So is a handle naming anything outside
+    /// <paramref name="runTree"/> — a value can only carry out what the tree could read, and a
+    /// forged id must not be able to pin somebody else's object in storage.
+    /// </para>
+    /// </summary>
+    /// <returns>How many blobs this call moved from intermediate to durable.</returns>
+    Task<int> PromoteAsync(
+        IReadOnlyCollection<WorkflowBlob> blobs, ExecutionId runTree, CancellationToken cancellationToken);
 }
 
 /// <summary>

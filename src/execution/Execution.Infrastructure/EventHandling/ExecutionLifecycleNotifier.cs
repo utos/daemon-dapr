@@ -28,10 +28,16 @@ public class ExecutionLifecycleNotifier(IEnumerable<IExecutionLifecycleListener>
                 foreach (var listener in listeners)
                     await listener.OnFailedAsync(e.ExecutionId, e.DateOccurred, e.Reason, e.Code, cancellationToken);
                 break;
+
+            case WorkflowExecutionCancelledEvent e:
+                foreach (var listener in listeners)
+                    await listener.OnCancelledAsync(e.ExecutionId, e.DateOccurred, e.Reason, cancellationToken);
+                break;
         }
     }
 
     public bool CanHandle(Type eventType)
         => eventType == typeof(WorkflowExecutionCompletedEvent)
-        || eventType == typeof(WorkflowExecutionFailedEvent);
+        || eventType == typeof(WorkflowExecutionFailedEvent)
+        || eventType == typeof(WorkflowExecutionCancelledEvent);
 }

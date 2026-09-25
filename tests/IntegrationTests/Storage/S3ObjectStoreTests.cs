@@ -216,50 +216,16 @@ public class S3ObjectStoreTests(DaemonTestFixture fixture)
     }
 
     private static ObjectKey Key() => new("test/" + Guid.NewGuid().ToString("n"));
-
     /// <summary>
     /// The driver, pointed at the run's MinIO by the same connection string the daemon reads.
     /// <para>
-    /// The bucket is ensured here rather than assumed from the daemon's startup. These are tests of
-    /// the driver, and borrowing another process's provisioning made every one of them fail for a
-    /// reason none of them was about — see <c>The_daemon_creates_its_bucket_on_the_way_up</c>,
-    /// which is where that particular fact belongs.
+    /// The bucket is ensured in <see cref="TestBlobStore"/> rather than assumed from the daemon's
+    /// startup. These are tests of the driver, and borrowing another process's provisioning made every
+    /// one of them fail for a reason none of them was about — see
+    /// <c>The_daemon_creates_its_bucket_on_the_way_up</c>, which is where that particular fact belongs.
     /// </para>
     /// </summary>
-    private IObjectStore Store()
-    {
-        var options = Options();
-        var client = S3ObjectStoreExtensions.CreateClient(options);
+    private IObjectStore Store() => TestBlobStore.For(fixture);
 
-        try
-        {
-            client.PutBucketAsync(
-                new Amazon.S3.Model.PutBucketRequest { BucketName = options.Bucket },
-                CancellationToken.None).GetAwaiter().GetResult();
-        }
-        catch (Amazon.S3.AmazonS3Exception ex) when (
-            ex.ErrorCode is "BucketAlreadyOwnedByYou" or "BucketAlreadyExists")
-        {
-            // Already there, which is the usual case.
-        }
-
-        return new S3ObjectStore(client, new OptionsWrapper<S3ObjectStoreOptions>(options));
-    }
-
-    /// <summary>The store's address, from the same connection string the daemon is given.</summary>
-    private S3ObjectStoreOptions Options()
-    {
-        var connectionString = fixture.App.Services
-            .GetRequiredService<Aspire.Hosting.ApplicationModel.DistributedApplicationModel>()
-            .Resources
-            .OfType<Aspire.Hosting.ApplicationModel.IResourceWithConnectionString>()
-            .Single(r => r.Name == ServiceName.Storage.Blobs)
-            .GetConnectionStringAsync(CancellationToken.None)
-            .GetAwaiter().GetResult()
-            ?? throw new InvalidOperationException("The blob store has no connection string.");
-
-        var options = new S3ObjectStoreOptions();
-        options.ApplyConnectionString(connectionString);
-        return options;
-    }
+    private S3ObjectStoreOptions Options() => TestBlobStore.OptionsFor(fixture);
 }

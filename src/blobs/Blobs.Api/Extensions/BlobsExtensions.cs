@@ -1,4 +1,5 @@
 using Common.Blobs;
+using Common.ExecutionLifecycle;
 using Blobs.Domain;
 using Blobs.Infrastructure.Data;
 using Blobs.Infrastructure.Store;
@@ -31,6 +32,14 @@ public static class BlobsExtensions
         // implementation, and consumed through the contract in `common/` because the two modules do
         // not reference each other.
         builder.Services.AddScoped<IBlobAccess, BlobAccess>();
+        builder.Services.AddScoped<IBlobReclamation, BlobReclaimer>();
+
+        // How this module learns a run tree finished, which is what makes the sweep accurate rather
+        // than merely eventual. Registered as the shared contract, so the execution module announces
+        // the ending without knowing anyone is listening.
+        builder.Services.AddScoped<IExecutionLifecycleListener, RunTreeEndingListener>();
+
+        builder.Services.AddHostedService<BlobSweepService>();
 
         return builder;
     }
