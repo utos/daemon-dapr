@@ -128,8 +128,10 @@ public sealed record EvaluateTransitionInput(
     [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
     object? ActivityOutput,
     ActivityOutcomeKind Outcome = ActivityOutcomeKind.Succeeded,
-    // Plain ints, strings, a string map and bytes — no converter needed, unlike ActivityOutput,
-    // which carries arbitrary workflow values.
+    // Plain ints, strings, a string map, and a blob — none of which needs a converter here, unlike
+    // ActivityOutput, which carries arbitrary workflow values. The blob's shape comes from the
+    // converter on WorkflowBlob itself, which is what keeps this body and one inside a run value
+    // written the same way.
     HttpResponseContext? Response = null,
     WorkflowErrorContext? Error = null);
 

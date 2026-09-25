@@ -77,6 +77,16 @@ is `[Unreleased]` rather than a dated version.
   throwing getter fires rather than a document silently reading an empty body. A bounded 200-character
   summary survives for the failure *message* only, and never enters a scope
 
+- **A blob travels wherever a value travels** (§ Moving blobs): across a transition in the next
+  activity's `input`, into and out of a sub-workflow, and out of the run in its result, where a client
+  reads it as a `blob_value` and never has to reconstruct a handle. This needed an internal encoding,
+  which the spec asks for in as many words — every hop a value takes here is JSON, and JSON has no
+  kind for a blob. It is a one-property object under `$utos:blob`, and *unambiguous* is the whole
+  difficulty: a workflow may legitimately produce that exact key, and reading it back as a blob would
+  let a document forge a handle. So any map key that could be mistaken for the reserved one is escaped
+  on the way out and unescaped on the way in. A value with no such key is byte-for-byte what it was
+  before blobs existed, so nothing an earlier daemon wrote reads differently
+
 ### Fixed
 
 - **`await` did not parse.** Both of the engine's parse sites used a default parser, so a program
@@ -91,6 +101,12 @@ is `[Unreleased]` rather than a dated version.
 - **`response["body" + "Text"]` read as `undefined`.** `UTOS-E070` catches every spelling a parser
   can see, and a computed one is not among them. A document that used to read a body would have
   silently started seeing nothing; reading a retired member now throws
+- **A blob inside a run value stopped being a blob at the first hop.** `response.body` worked because
+  a response is a declared field and its blob was typed, so nothing failed and nothing looked wrong;
+  the same blob put into a transition's `input` arrived as an ordinary map of the handle's fields, and
+  the first sign of it was an expression calling `text()` on something with no such method. Every
+  carrier already routed through the two value converters, so the encoding above is all that was
+  missing — but only `response.body` was ever exercised, which is why nothing noticed
 
 ### Notes
 
