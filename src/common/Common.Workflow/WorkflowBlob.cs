@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using Common.Workflow.Serialization;
+
 namespace Common.Workflow;
 
 /// <summary>
@@ -29,6 +32,13 @@ namespace Common.Workflow;
 /// extension: the producer declares it, and <c>application/octet-stream</c> is the honest answer
 /// where nothing better is known.
 /// </param>
+/// <remarks>
+/// The converter is not decoration. A blob reaches persisted state both as a declared field — a
+/// response's body — and as an <c>object</c>-typed leaf of a run value, and the two have to be the
+/// same bytes on disk, or a value written down one path would not read back down the other. Naming
+/// the shape on the type is what makes that true without every carrier having to agree.
+/// </remarks>
+[JsonConverter(typeof(WorkflowBlobJsonConverter))]
 public sealed record WorkflowBlob(
     string? Id = null,
     byte[]? Data = null,

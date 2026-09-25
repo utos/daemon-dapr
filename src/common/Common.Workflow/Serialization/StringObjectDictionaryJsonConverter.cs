@@ -28,12 +28,22 @@ public sealed class StringObjectDictionaryJsonConverter : JsonConverter<Dictiona
     public override Dictionary<string, object>? Read(
         ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        return JsonSerializer.Deserialize<Dictionary<string, object>>(ref reader, WorkflowJson.Options);
+        if (reader.TokenType == JsonTokenType.Null) return null;
+
+        // Read key by key rather than handing the object to System.Text.Json, which would write and
+        // read *these* keys itself and so skip the escaping of `$utos:…` that makes the blob
+        // encoding unambiguous. Nested values still go through the other converter.
+        var map = ObjectDictionaryJsonConverter.ReadMap(ref reader);
+
+        return map.ToDictionary(entry => entry.Key, entry => entry.Value!);
     }
 
     public override void Write(
         Utf8JsonWriter writer, Dictionary<string, object> value, JsonSerializerOptions options)
     {
-        JsonSerializer.Serialize(writer, value, WorkflowJson.Options);
+        // Cast rather than copied: nullability is erased at run time, so this dictionary already
+        // *is* the interface the writer wants, and this is on the path of every activity input.
+        ObjectDictionaryJsonConverter.WriteMap(
+            writer, (IDictionary<string, object?>)value, WorkflowJson.Options);
     }
 }
