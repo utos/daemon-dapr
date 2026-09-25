@@ -20,11 +20,10 @@ that moves bytes.
 HTTP response body is a `Blob`, stored in object storage when it crosses the inline threshold, and
 `await response.body.text()` reads it through the store with the run-tree access check applied.
 
-Still not a daemon that implements the whole of `§ Blobs`: there is no `BlobService`, and a client
-cannot attach a blob at `ScheduleExecution` — that is still refused with `Unimplemented`. So a
-workflow can produce blobs, carry them, return them and have them kept or reclaimed, but a person
-cannot yet put one in or fetch one out by id, which is why this is `[Unreleased]` rather than a dated
-version.
+Still not a daemon that implements the whole of `§ Blobs`: there is no `BlobService`, so a client
+cannot upload bytes or download them by id. A blob can now go all the way round — into a run, through
+it, out of it, and back into the next — but only a blob small enough to send inline or one a run
+produced, which is why this is `[Unreleased]` rather than a dated version.
 
 ### Added
 
@@ -116,6 +115,31 @@ version.
   never have learned a cancelled tree had finished. `OnCancelledAsync` is the one method on that
   contract with a default body, and deliberately: what a cancelled run's terminal *watch* frame should
   say is an open question with a wire shape attached, and this is not the change that should answer it
+
+- **A client can put a blob into a run** (§ Into a run), which was refused with `Unimplemented` until
+  now. Stored, by passing back a handle an earlier run returned — which is the loop closing, and what a
+  person actually does with binary data: fetch it once, then run something over it. Or inline, for small
+  bytes with no round trip, which works on a daemon with no store at all. Every blob in the input is
+  checked before anything is recorded, and each accepted one is **attached** to the new run tree and
+  recorded in its history
+- **`UTOS-F104`**, with one `google.rpc.BadRequest` field violation per failing blob: `field` is the
+  blob's JSON Pointer and `reason` is the spec's token — `not_found`, `not_ready`, `deleted`,
+  `intermediate`, `out_of_range`, `malformed`, `too_large`. The distinctions are the point: a client
+  told `intermediate` knows to carry the blob out of the run that made it, and one told `too_large`
+  knows to upload it instead. All three stages of a schedule now report in that one shape, which the
+  spec asks for by name so a client handles them alike
+- **`workflow.spawn` attaches its blobs to the tree it starts**, and this is the one place durability is
+  *not* required: an intermediate the spawning tree produced is a value the parent legitimately holds,
+  and handing it to a run the parent starts is passing a value on rather than reaching for somebody
+  else's object. A handle naming anything the spawning tree does not hold is refused as `not_found` and
+  not as anything more specific, so a document cannot learn which ids exist by spawning runs at them
+- The check lives in `StartExecutionHandler` rather than at the gRPC edge, because both paths reach that
+  command and only one of them has a gRPC edge. A check written at the transport would have left every
+  spawned run holding handles nobody verified
+- **MinIO in the compose deployment**, with a data volume — unlike the development store in the Aspire
+  model, which deliberately has none. A store is optional in the spec and present here because a daemon
+  without one refuses anything over its inline threshold (`UTOS-F102`), which is a surprising way to
+  meet binary data for the first time
 
 ### Fixed
 

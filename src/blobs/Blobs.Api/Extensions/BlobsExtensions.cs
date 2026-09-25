@@ -33,6 +33,7 @@ public static class BlobsExtensions
         // not reference each other.
         builder.Services.AddScoped<IBlobAccess, BlobAccess>();
         builder.Services.AddScoped<IBlobReclamation, BlobReclaimer>();
+        builder.Services.AddScoped<IBlobAdmission, BlobAdmitter>();
 
         // How this module learns a run tree finished, which is what makes the sweep accurate rather
         // than merely eventual. Registered as the shared contract, so the execution module announces

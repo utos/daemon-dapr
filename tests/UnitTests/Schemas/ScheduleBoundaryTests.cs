@@ -30,7 +30,7 @@ public class ScheduleBoundaryTests
         var command = Command(store, input: new Dictionary<string, object> { ["wrong"] = "x" });
 
         var error = await Assert.ThrowsAsync<SchemaValidationFailedException>(() =>
-            new StartExecutionHandler(store, new JsonSchemaValidator())
+            new StartExecutionHandler(store, new JsonSchemaValidator(), new AdmitsEverything())
                 .Handle(command, CancellationToken.None).AsTask());
 
         Assert.Equal(SchemaValidation.RunInput, error.Code);
@@ -46,7 +46,7 @@ public class ScheduleBoundaryTests
             env: new Dictionary<string, string>());
 
         var error = await Assert.ThrowsAsync<SchemaValidationFailedException>(() =>
-            new StartExecutionHandler(store, new JsonSchemaValidator())
+            new StartExecutionHandler(store, new JsonSchemaValidator(), new AdmitsEverything())
                 .Handle(command, CancellationToken.None).AsTask());
 
         Assert.Equal(SchemaValidation.RunEnv, error.Code);
@@ -61,7 +61,7 @@ public class ScheduleBoundaryTests
             input: new Dictionary<string, object> { ["orderId"] = "A-1" },
             env: new Dictionary<string, string> { ["API_BASE"] = "https://example.test" });
 
-        await new StartExecutionHandler(store, new JsonSchemaValidator())
+        await new StartExecutionHandler(store, new JsonSchemaValidator(), new AdmitsEverything())
             .Handle(command, CancellationToken.None);
 
         var created = Assert.IsType<WorkflowExecutionCreatedEvent>(
@@ -157,5 +157,22 @@ public class ScheduleBoundaryTests
             TId aggregateId, long? fromVersion = null, CancellationToken cancellationToken = default)
             where T : AggregateRoot<TId>, new() where TId : notnull =>
             throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// Blob admission is not what these tests are about, and a run with no blobs in its input
+    /// reaches it anyway — so it has to be answerable. That admitting is a no-op for a blobless
+    /// input is asserted where admission lives, not here.
+    /// </summary>
+    private sealed class AdmitsEverything : Common.Blobs.IBlobAdmission
+    {
+        public Task<IReadOnlyList<Common.Blobs.BlobAdmissionFailure>> AdmitFromClientAsync(
+            object? input, Common.Blobs.BlobUsage arrival, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<Common.Blobs.BlobAdmissionFailure>>([]);
+
+        public Task<IReadOnlyList<Common.Blobs.BlobAdmissionFailure>> AdmitFromSpawnAsync(
+            object? input, Common.Blobs.BlobUsage arrival, ExecutionId spawningTree,
+            CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<Common.Blobs.BlobAdmissionFailure>>([]);
     }
 }

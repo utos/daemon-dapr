@@ -8,8 +8,14 @@
 #   postgres      the one database: Dapr's actor state (the `dapr-statestore` config below is
 #                 the Dapr component), the read models, the event streams and the output streams;
 #                 the daemon migrates its own tables on start
+#   blobs         MinIO, the object store binary data goes in. Only bytes: which blobs exist, who
+#                 may read them and when they can go is the daemon's record, in postgres
 #
 # Set DAEMON_IMAGE to run a locally built image, and POSTGRES_PASSWORD to change the default.
+#
+# The object store is optional in the spec and present here, because a daemon without one refuses
+# anything over its inline threshold (`UTOS-F102`) and that is a surprising way to meet binary data
+# for the first time. Remove the `blobs` service and the two `Blobs__*` settings to run without it.
 
 name: utos
 
@@ -22,8 +28,18 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__utos: "Host=postgres;Port=5432;Username=utos;Password=${POSTGRES_PASSWORD:-utos};Database=utos"
+      # The object store. Same shape the Aspire model hands over, so the driver reads one form
+      # everywhere; `Endpoint` empty would mean real S3 at `Blobs__Region` instead.
+      ConnectionStrings__blobs: "Endpoint=http://blobs:9000;AccessKey=${BLOBS_ACCESS_KEY:-utos};SecretKey=${BLOBS_SECRET_KEY:-utos-secret}"
+      Blobs__Bucket: "${BLOBS_BUCKET:-utos-blobs}"
+      # On here because this compose file *is* the store's provisioning. A deployment that creates its
+      # bucket elsewhere should leave it off, so that a typo in the name fails loudly instead of
+      # quietly filling a new bucket.
+      Blobs__CreateBucketIfMissing: "true"
     depends_on:
       postgres:
+        condition: service_healthy
+      blobs:
         condition: service_healthy
       placement:
         condition: service_started
@@ -84,9 +100,33 @@ services:
       timeout: 3s
       retries: 20
 
+  blobs:
+    # quay.io, not the Docker Hub default: `docker.io/minio/minio` answers an anonymous pull with
+    # "access denied" at every tag, while `quay.io/minio/minio` at the same tag pulls. Docker Hub
+    # itself is fine — every other container here comes from it.
+    image: quay.io/minio/minio:${MINIO_VERSION:-RELEASE.2025-09-07T16-13-09Z}
+    command: ["server", "/data", "--console-address", ":9001"]
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: "${BLOBS_ACCESS_KEY:-utos}"
+      MINIO_ROOT_PASSWORD: "${BLOBS_SECRET_KEY:-utos-secret}"
+    volumes:
+      # A volume, unlike the development store in the Aspire model, which deliberately has none: a
+      # test run must not inherit objects from the last one, and a deployment must not lose a durable
+      # blob because a container restarted.
+      - blobs-data:/data
+    healthcheck:
+      # Waited for, because the daemon creates its bucket during startup and a store that is not
+      # answering yet turns that into a failure the daemon cannot retry.
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
 volumes:
   scheduler-data:
   postgres-data:
+  blobs-data:
 
 configs:
   # The actor state store Dapr Workflow keeps orchestration state in: the daemon's own database,

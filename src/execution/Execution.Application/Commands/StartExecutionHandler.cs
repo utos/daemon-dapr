@@ -1,3 +1,4 @@
+using Common.Blobs;
 using Common.SeedWork;
 using Common.Workflow;
 using Mediator;
@@ -6,19 +7,55 @@ using Execution.Domain.Schemas;
 
 namespace Execution.Application.Commands;
 
-public class StartExecutionHandler(IEventStoreRepository eventStore, ISchemaValidator schemaValidator)
+public class StartExecutionHandler(
+    IEventStoreRepository eventStore, ISchemaValidator schemaValidator, IBlobAdmission blobs)
     : ICommandHandler<StartExecutionCommand, ScheduleExecutionResult>
 {
     public async ValueTask<ScheduleExecutionResult> Handle(
         StartExecutionCommand command, CancellationToken ct)
     {
+        // Minted here rather than by the aggregate, because a blob has to be attached to the run tree
+        // it is entering and the tree is named by this id. Attached *before* the run is recorded: the
+        // other order leaves a window in which the run exists and cannot read its own input, which
+        // fails later as UTOS-F103 and reads like an access bug. This order leaves, at worst,
+        // attachments naming a tree that was never created — which the retention sweep's age backstop
+        // collects.
+        var executionId = command.ExecutionId ?? ExecutionId.New();
+
+        await AdmitBlobsAsync(command, executionId, ct);
+
         var (input, env) = Check(command);
 
         var workflowExecution = new WorkflowExecution(
-            command.Bundle, input, command.StartActivity, env, command.ExecutionId,
-            command.Digest);
+            command.Bundle, input, command.StartActivity, env, executionId, command.Digest);
         await eventStore.SaveAsync<WorkflowExecution, ExecutionId>(workflowExecution);
         return new ScheduleExecutionResult(workflowExecution.Id, workflowExecution.Status);
+    }
+
+    /// <summary>
+    /// Stage two of the three a schedule passes (<c>workflow-values.md</c> § Well-formed values): the
+    /// values were checked well-formed at the transport edge, the schemas run below, and every blob is
+    /// checked here — before either, so that a schema never sees a handle the run could not resolve.
+    /// <para>
+    /// Both the client path and <c>workflow.spawn</c> reach this method, because both reach this
+    /// command. That is why the check is here rather than at the gRPC edge: a spawn has no gRPC edge,
+    /// and a check written there would have left the spawned run holding handles nobody verified.
+    /// </para>
+    /// </summary>
+    private async Task AdmitBlobsAsync(
+        StartExecutionCommand command, ExecutionId executionId, CancellationToken ct)
+    {
+        // A root execution is its own run tree, and every run this command starts is a root — a
+        // `workflow.call` child is a Dapr child orchestration and never comes through here.
+        var arrival = new BlobUsage(
+            executionId, executionId, command.Workflow.ToString(), command.Digest);
+
+        var failures = command.SpawningTree is { } spawningTree
+            ? await blobs.AdmitFromSpawnAsync(command.Input, arrival, spawningTree, ct)
+            : await blobs.AdmitFromClientAsync(command.Input, arrival, ct);
+
+        if (failures.Count > 0)
+            throw new BlobsNotAdmittedException(failures);
     }
 
     /// <summary>

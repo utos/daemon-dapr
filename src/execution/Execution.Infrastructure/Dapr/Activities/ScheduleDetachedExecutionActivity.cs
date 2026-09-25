@@ -81,7 +81,13 @@ public class ScheduleDetachedExecutionActivity(
                 input.Input ?? new Dictionary<string, object>(),
                 input.SubStartActivity,
                 parentContext.Env,
-                input.ChildExecutionId));
+                input.ChildExecutionId,
+                // A spawn starts a *new* run tree, so any blob in its input has to be attached to the
+                // tree this run roots — and must already belong to the spawning one. Naming that tree
+                // here is what tells the handler this is a spawn and not a client's schedule: the two
+                // admit blobs by different rules, and the difference is whether the blob has to be
+                // durable or has to be the parent's.
+                parentContext.RootExecutionId ?? parentContext.ExecutionId));
         }
         catch (ConcurrencyException)
         {
