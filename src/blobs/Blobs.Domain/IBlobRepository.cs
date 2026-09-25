@@ -70,6 +70,41 @@ public interface IBlobRepository
         BlobId id, CancellationToken cancellationToken);
 
     /// <summary>
+    /// One blob as <c>BlobInfo</c> needs it — the record plus its history's two aggregates. Separate
+    /// from <see cref="FindAsync"/>, which the read path uses on every blob an expression touches and
+    /// must not pay for a join it does not read.
+    /// </summary>
+    Task<BlobSummary?> SummaryAsync(BlobId id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Blobs matching <paramref name="query"/>, newest first, at most <paramref name="pageSize"/> of
+    /// them, continuing after <paramref name="pageToken"/> when it is not empty.
+    /// </summary>
+    Task<BlobPage> ListAsync(
+        BlobQuery query,
+        int pageSize,
+        string pageToken,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Whether any execution that could still reference this blob has yet to finish — the whole of
+    /// <c>DeleteBlob</c>'s refusal and of what <c>PruneBlobs</c> skips.
+    /// <para>
+    /// "Could still reference" is any run tree it belongs to whose ending has not been recorded. A run
+    /// failing because an operator removed a blob it was about to read is worse than a refusal, and the
+    /// operator can see the refusal while the author of the run cannot see the failure.
+    /// </para>
+    /// </summary>
+    Task<bool> IsHeldByALiveRunAsync(BlobId id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Which of <paramref name="ids"/> a live run tree still holds, for a prune that has to decide
+    /// about a page of blobs rather than about one.
+    /// </summary>
+    Task<IReadOnlySet<BlobId>> HeldByALiveRunAsync(
+        IReadOnlyCollection<BlobId> ids, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Records that the run tree rooted at <paramref name="rootExecution"/> reached a terminal state,
     /// against every blob attached to it. This is the accurate signal the sweep runs on; without it
     /// the sweep has only its age backstop, and an intermediate lingers for weeks.

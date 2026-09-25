@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- No Utos.*, no Grpc.*: the wire format stops at Blobs.Api. -->
+    <ItemGroup>
+        <PackageReference Include="Mediator.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.Options" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../Blobs.Domain/Blobs.Domain.csproj"/>
+        <!-- The object store port, for the signed locations a client downloads from. Not a driver. -->
+        <ProjectReference Include="../../common/Common.Blobs/Common.Blobs.csproj"/>
+    </ItemGroup>
+
+</Project>

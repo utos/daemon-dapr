@@ -20,10 +20,10 @@ that moves bytes.
 HTTP response body is a `Blob`, stored in object storage when it crosses the inline threshold, and
 `await response.body.text()` reads it through the store with the run-tree access check applied.
 
-Still not a daemon that implements the whole of `§ Blobs`: there is no `BlobService`, so a client
-cannot upload bytes or download them by id. A blob can now go all the way round — into a run, through
-it, out of it, and back into the next — but only a blob small enough to send inline or one a run
-produced, which is why this is `[Unreleased]` rather than a dated version.
+Still not a daemon that implements the whole of `§ Blobs`: `BlobService` can inspect and remove blobs
+but not yet *upload* one, so the only blobs that exist are the ones a run produced or a client sent
+inline. A file on somebody's disk larger than the inline threshold has no way in, which is why this is
+`[Unreleased]` rather than a dated version.
 
 ### Added
 
@@ -141,6 +141,27 @@ produced, which is why this is `[Unreleased]` rather than a dated version.
   without one refuses anything over its inline threshold (`UTOS-F102`), which is a surprising way to
   meet binary data for the first time
 
+- **`BlobService`, the inspect-and-remove half** (§ The BlobService): `GetBlob`, `ListBlobs`,
+  `GetBlobHistory`, `DeleteBlob` and `PruneBlobs`. **No call carries bytes.** A client downloads from
+  the store itself at a short-lived location the daemon asks the store to sign, so the daemon is in the
+  data path only for I/O a workflow asked for — which is what keeps a gigabyte out of its memory and
+  lets it hold credentials a client never sees. A daemon with no store answers every call
+  `FAILED_PRECONDITION`, including the read-only ones: an empty listing would let a client conclude its
+  blobs were gone rather than that this daemon never had any
+- `DeleteBlob` is **refused** while any run tree the blob belongs to has yet to end
+  (`FAILED_PRECONDITION`), rather than deleting bytes a live run is about to read. An operator who is
+  refused can see why and wait; a run whose bytes vanish mid-flight fails for a reason its author
+  cannot see anywhere in their document. `PruneBlobs` skips the same blobs and counts them separately,
+  and refuses an unfiltered request outright — a mistyped flag should do nothing, not empty the bucket
+- **The record grew to what `BlobInfo` answers**: the producer (execution, run tree, workflow and the
+  digest of the bundle that ran, as plain data so deleting the execution does not erase why the blob
+  exists), and the completion and deletion times. `digest` stays absent, which the proto permits and
+  this daemon means: it streams a response body to the store without teeing it through a hash, so there
+  is nothing honest to put there — and never the store's entity tag, which is not a content hash for a
+  multipart object
+- The module gained an **application layer**, which it did not have and now needs: a transport that
+  resolved ids against the records and decided what may be removed would be doing a handler's work
+
 ### Fixed
 
 - **`await` did not parse.** Both of the engine's parse sites used a default parser, so a program
@@ -161,6 +182,19 @@ produced, which is why this is `[Unreleased]` rather than a dated version.
   the first sign of it was an expression calling `text()` on something with no such method. Every
   carrier already routed through the two value converters, so the encoding above is all that was
   missing — but only `response.body` was ever exercised, which is why nothing noticed
+- **A blob could not come out of a sub-workflow**, which § Moving blobs requires. Every value crossing a
+  Dapr boundary here is a record whose untyped field carries `ObjectDictionaryJsonConverter`; an
+  orchestration's *return type* was the one place that could not, because `object?` is not a record with
+  a property to annotate. So a child's result came back with no converter applied, and a parent calling
+  `text()` on what its callee returned got a `TypeError`. It now returns a one-field wrapper, which
+  fixes `workflow.call`, a promise branch and a rule's `workflow.call` effect together
+- **A blob a sub-workflow produced was attached to the child's own id, not the run tree's.** The
+  executor passed neither the tree nor the workflow to the activity — four parameters added when the
+  HTTP activity learned to store bodies, with the one call site never updated — so the activity fell
+  back to the executing execution. The parent then failed the access check on a handle it had just been
+  given, as `UTOS-F103`, which reads like an access bug. It also left every produced blob with no
+  producer and no activity recorded, which is what made the gap visible: `GetBlob` had a field to answer
+  and nothing to answer it with
 
 ### Notes
 

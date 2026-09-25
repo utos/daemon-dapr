@@ -51,12 +51,17 @@ public sealed class EfBlobRepository(BlobsDbContext context) : IBlobRepository
         var row = await context.Blobs.FirstOrDefaultAsync(b => b.Id == blob.Id.Value, cancellationToken)
                   ?? throw new InvalidOperationException($"No blob '{blob.Id}'.");
 
+        // Everything the record's own transitions can change. Not the key, the origin, the creation
+        // time or the producer: those are written once and a change to any of them would mean this is a
+        // different blob.
         row.State = blob.State.ToString();
         row.Retention = blob.Retention.ToString();
         row.MediaType = blob.MediaType;
         row.Size = blob.Size;
         row.Name = blob.Name;
         row.LastModified = blob.LastModified;
+        row.CompletedAt = blob.CompletedAt;
+        row.DeletedAt = blob.DeletedAt;
 
         await context.SaveChangesAsync(cancellationToken);
     }
@@ -304,6 +309,150 @@ public sealed class EfBlobRepository(BlobsDbContext context) : IBlobRepository
             .Where(t => t.RootExecutionId == rootExecution.Value)
             .ExecuteDeleteAsync(cancellationToken);
 
+    public async Task<BlobSummary?> SummaryAsync(BlobId id, CancellationToken cancellationToken)
+    {
+        var found = await WithUsage(context.Blobs.AsNoTracking().Where(b => b.Id == id.Value))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return found is null ? null : ToSummary(found);
+    }
+
+    public async Task<BlobPage> ListAsync(
+        BlobQuery query, int pageSize, string pageToken, CancellationToken cancellationToken)
+    {
+        var size = Math.Clamp(pageSize <= 0 ? DefaultPageSize : pageSize, 1, MaxPageSize);
+
+        var rows = await WithUsage(Filtered(query, pageToken))
+            // Descending id, which is descending creation: an id is time-ordered at the front, so
+            // "newest first" needs no second column and a cursor is one comparison rather than an
+            // offset that shifts when a blob is created mid-listing.
+            .OrderByDescending(found => found.Blob.Id)
+            // One more than asked for, so the last page is known to be the last without a second
+            // query — and the extra row is dropped rather than returned.
+            .Take(size + 1)
+            .ToListAsync(cancellationToken);
+
+        var page = rows.Take(size).Select(ToSummary).ToList();
+
+        return new BlobPage(
+            page, rows.Count > size ? page[^1].Blob.Id.Value : string.Empty);
+    }
+
+    public Task<bool> IsHeldByALiveRunAsync(BlobId id, CancellationToken cancellationToken) =>
+        context.BlobRunTrees
+            .AsNoTracking()
+            .AnyAsync(t => t.BlobId == id.Value && t.TreeEndedAt == null, cancellationToken);
+
+    public async Task<IReadOnlySet<BlobId>> HeldByALiveRunAsync(
+        IReadOnlyCollection<BlobId> ids, CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0) return new HashSet<BlobId>();
+
+        var values = ids.Select(id => id.Value).Distinct().ToArray();
+
+        var held = await context.BlobRunTrees
+            .AsNoTracking()
+            .Where(t => values.Contains(t.BlobId) && t.TreeEndedAt == null)
+            .Select(t => t.BlobId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return held.Select(value => new BlobId(value)).ToHashSet();
+    }
+
+    /// <summary>
+    /// The filter, as one <c>WHERE</c>. <paramref name="pageToken"/> is the id the previous page ended
+    /// on, and the ordering is descending, so continuing means "strictly less than".
+    /// </summary>
+    private IQueryable<BlobEntity> Filtered(BlobQuery query, string pageToken)
+    {
+        var blobs = context.Blobs.AsNoTracking();
+
+        if (!string.IsNullOrEmpty(pageToken))
+            blobs = blobs.Where(b => string.Compare(b.Id, pageToken) < 0);
+
+        if (query.Retention is { } retention)
+        {
+            var name = retention.ToString();
+            blobs = blobs.Where(b => b.Retention == name);
+        }
+
+        if (query.Origin is { } origin)
+        {
+            var name = origin.ToString();
+            blobs = blobs.Where(b => b.Origin == name);
+        }
+
+        if (query.State is { } state)
+        {
+            var name = state.ToString();
+            blobs = blobs.Where(b => b.State == name);
+        }
+
+        if (query.CreatedBefore is { } createdBefore)
+            blobs = blobs.Where(b => b.CreatedAt < createdBefore);
+
+        if (query.RootExecution is { } root)
+        {
+            // Through the attachments, because a blob belongs to any number of trees — which is the
+            // whole reason membership is a table and not a column.
+            var tree = root.Value;
+            blobs = blobs.Where(b =>
+                context.BlobRunTrees.Any(t => t.BlobId == b.Id && t.RootExecutionId == tree));
+        }
+
+        if (query.LastUsedBefore is { } lastUsedBefore)
+        {
+            // "…or that have none at all" is the half that makes this usable for what an operator wants
+            // it for. Without it every blob nothing ever touched would be silently exempt — which is
+            // exactly the set a prune is looking for.
+            blobs = blobs.Where(b =>
+                !context.BlobHistory.Any(e => e.BlobId == b.Id)
+                || context.BlobHistory.Where(e => e.BlobId == b.Id).Max(e => e.LastAt) < lastUsedBefore);
+        }
+
+        return blobs;
+    }
+
+    /// <summary>
+    /// The record with its history's two aggregates, as one query. Correlated subqueries rather than a
+    /// group-join: there are two scalars and the alternative reads the whole timeline of every blob in
+    /// the page to compute them.
+    /// </summary>
+    private IQueryable<BlobWithUsage> WithUsage(IQueryable<BlobEntity> blobs) =>
+        blobs.Select(blob => new BlobWithUsage
+        {
+            Blob = blob,
+            LastUsedAt = context.BlobHistory
+                .Where(e => e.BlobId == blob.Id)
+                .Max(e => (DateTimeOffset?)e.LastAt),
+            // Attached and read only. `produced`, `uploaded` and `downloaded` are how the blob came to
+            // be or left, not uses of it, and counting them would make every blob's usage at least one.
+            UsageCount = context.BlobHistory
+                .Count(e => e.BlobId == blob.Id && (e.Kind == AttachedKind || e.Kind == ReadKind)),
+        });
+
+    private static readonly string AttachedKind = BlobEventKind.Attached.ToString();
+
+    private static readonly string ReadKind = BlobEventKind.Read.ToString();
+
+    private const int DefaultPageSize = 50;
+
+    private const int MaxPageSize = 500;
+
+    /// <summary>The projection shape, named so the query above reads as what it returns.</summary>
+    private sealed class BlobWithUsage
+    {
+        public BlobEntity Blob { get; init; } = null!;
+
+        public DateTimeOffset? LastUsedAt { get; init; }
+
+        public int UsageCount { get; init; }
+    }
+
+    private static BlobSummary ToSummary(BlobWithUsage found) =>
+        new(ToDomain(found.Blob), found.LastUsedAt, found.UsageCount);
+
     private static StoredBlob ToDomain(BlobEntity row) =>
         new(new BlobId(row.Id),
             new ObjectKey(row.ObjectKey),
@@ -314,7 +463,24 @@ public sealed class EfBlobRepository(BlobsDbContext context) : IBlobRepository
             row.Size,
             row.CreatedAt,
             row.Name,
-            row.LastModified);
+            row.LastModified,
+            ToProducer(row),
+            row.CompletedAt,
+            row.DeletedAt);
+
+    /// <summary>
+    /// The producer, or null. Keyed off the execution id rather than off <c>Origin</c>, so a row whose
+    /// columns disagree with its origin reads as what it actually holds instead of throwing.
+    /// </summary>
+    private static BlobProducer? ToProducer(BlobEntity row) =>
+        row.ProducerExecutionId is { } execution
+            ? new BlobProducer(
+                new ExecutionId(execution),
+                new ExecutionId(row.ProducerRootExecutionId ?? execution),
+                row.ProducerWorkflow ?? string.Empty,
+                row.ProducerWorkflowDigest,
+                row.ProducerActivity)
+            : null;
 
     private static BlobEntity ToEntity(StoredBlob blob) =>
         new()
@@ -329,5 +495,12 @@ public sealed class EfBlobRepository(BlobsDbContext context) : IBlobRepository
             Name = blob.Name,
             LastModified = blob.LastModified,
             CreatedAt = blob.CreatedAt,
+            CompletedAt = blob.CompletedAt,
+            DeletedAt = blob.DeletedAt,
+            ProducerExecutionId = blob.Producer?.Execution.Value,
+            ProducerRootExecutionId = blob.Producer?.RootExecution.Value,
+            ProducerWorkflow = blob.Producer?.Workflow,
+            ProducerWorkflowDigest = blob.Producer?.WorkflowDigest,
+            ProducerActivity = blob.Producer?.Activity,
         };
 }

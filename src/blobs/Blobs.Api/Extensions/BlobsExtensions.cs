@@ -1,7 +1,9 @@
+using Blobs.Application;
 using Common.Blobs;
 using Common.ExecutionLifecycle;
 using Blobs.Domain;
 using Blobs.Infrastructure.Data;
+using Blobs.Api.Services;
 using Blobs.Infrastructure.Store;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -11,8 +13,8 @@ using Microsoft.Extensions.Hosting;
 namespace Blobs.Api.Extensions;
 
 /// <summary>
-/// The blobs module's composition point. Holds no gRPC service yet — <c>BlobService</c> follows —
-/// but the module is composed from here rather than from <c>Blobs.Infrastructure</c> because
+/// The blobs module's composition point: its database, its ports, its background sweep and
+/// <c>BlobService</c>. Composed from here rather than from <c>Blobs.Infrastructure</c> because
 /// <c>API.Main</c> composes <c>*.Api</c> projects only, and a shortcut now would be an edge to
 /// unpick later.
 /// </summary>
@@ -51,6 +53,8 @@ public static class BlobsExtensions
     /// </summary>
     public static WebApplication UseBlobsModule(this WebApplication app)
     {
+        app.MapGrpcService<BlobGrpcService>();
+
         using var scope = app.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<BlobsDbContext>().Database.Migrate();
 

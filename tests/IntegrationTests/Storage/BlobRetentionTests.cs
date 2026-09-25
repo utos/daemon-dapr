@@ -185,7 +185,7 @@ public class BlobRetentionTests(DaemonTestFixture fixture)
 
         await repository.RecordRunTreeEndedAsync(
             tree, RunTreeOutcome.Completed, Now, CancellationToken.None);
-        await repository.UpdateAsync(blob.Removed(), CancellationToken.None);
+        await repository.UpdateAsync(blob.Removed(Now), CancellationToken.None);
 
         Assert.DoesNotContain(blob.Id, await Reclaimable(repository, PastTheGrace));
     }

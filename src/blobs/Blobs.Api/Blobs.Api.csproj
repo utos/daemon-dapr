@@ -8,4 +8,19 @@
         <ProjectReference Include="../Blobs.Infrastructure/Blobs.Infrastructure.csproj"/>
     </ItemGroup>
 
+    <!-- The wire format stops here: this is the only project in the module that sees Utos.* or
+         Grpc.*, which is what the layering rules are for. -->
+    <ItemGroup>
+        <PackageReference Include="Utos.Workflow" />
+        <PackageReference Include="Utos.Daemon.Server" />
+        <PackageReference Include="Grpc.AspNetCore" />
+        <PackageReference Include="Mediator.Abstractions" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The proto mapping is asserted below the gRPC surface, so it needs no Docker: the enums
+             exist on both sides with different members, and nothing but a test notices a wrong one. -->
+        <InternalsVisibleTo Include="UnitTests" />
+    </ItemGroup>
+
 </Project>

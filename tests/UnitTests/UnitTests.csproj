@@ -32,6 +32,8 @@
         <!-- The blobs module's own logic: retention, the sweep loop, promotion. No database is
              touched — what needs one is in the integration suite. -->
         <ProjectReference Include="../../src/blobs/Blobs.Infrastructure/Blobs.Infrastructure.csproj"/>
+        <!-- The proto mapping, which is where the two sides' enums have to agree. -->
+        <ProjectReference Include="../../src/blobs/Blobs.Api/Blobs.Api.csproj"/>
         <ProjectReference Include="../../src/common/Common.Workflow.Proto/Common.Workflow.Proto.csproj"/>
         <ProjectReference Include="../../src/common/Common.Constants/Common.Constants.csproj"/>
     </ItemGroup>

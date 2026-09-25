@@ -37,6 +37,7 @@ public class DaemonTestFixture : IAsyncLifetime
     public ExecutionService.ExecutionServiceClient DaemonClient { get; private set; } = null!;
     public DefinitionService.DefinitionServiceClient DefinitionClient { get; private set; } = null!;
     public ObservabilityService.ObservabilityServiceClient ObservabilityClient { get; private set; } = null!;
+    public BlobService.BlobServiceClient BlobClient { get; private set; } = null!;
     public WireMockServer WireMockServer { get; private set; } = null!;
     public string MockBaseUrl => WireMockServer.Urls[0];
 
@@ -110,6 +111,7 @@ public class DaemonTestFixture : IAsyncLifetime
         DaemonClient = new ExecutionService.ExecutionServiceClient(invoker);
         DefinitionClient = new DefinitionService.DefinitionServiceClient(invoker);
         ObservabilityClient = new ObservabilityService.ObservabilityServiceClient(invoker);
+        BlobClient = new BlobService.BlobServiceClient(invoker);
 
         // Setup WireMock
         WireMockServer = WireMockServer.Start();

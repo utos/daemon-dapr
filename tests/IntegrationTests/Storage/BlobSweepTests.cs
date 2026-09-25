@@ -1,4 +1,5 @@
 using System.Text;
+using Blobs.Application;
 using Blobs.Domain;
 using Blobs.Infrastructure.Data;
 using Blobs.Infrastructure.Store;

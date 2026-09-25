@@ -98,13 +98,19 @@ public readonly record struct ByteRange(long Offset, long Length);
 /// sending the URL without them is rejected — so a client replays exactly what it was given.
 /// </para>
 /// </summary>
+/// <param name="Method">
+/// The HTTP method the location was signed for — <c>PUT</c> for an upload, <c>GET</c> for a download.
+/// Part of the signature and not a hint: a store signs the method along with the URL, so replaying the
+/// URL with a different one is refused.
+/// </param>
 public sealed record SignedLocation(
     string Url,
+    string Method,
     IReadOnlyDictionary<string, string> Headers,
     DateTimeOffset ExpiresAt)
 {
-    public static SignedLocation At(string url, DateTimeOffset expiresAt) =>
-        new(url, new Dictionary<string, string>(), expiresAt);
+    public static SignedLocation At(string url, string method, DateTimeOffset expiresAt) =>
+        new(url, method, new Dictionary<string, string>(), expiresAt);
 }
 
 /// <summary>

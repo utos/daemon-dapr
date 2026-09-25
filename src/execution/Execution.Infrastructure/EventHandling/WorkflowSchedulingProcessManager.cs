@@ -80,7 +80,11 @@ public class WorkflowSchedulingProcessManager(
                 executionId,
                 bundle.EntryPoint,
                 startActivity,
-                ContinueAsNewAfterTransitions: limits.Value.ContinueAsNewAfterTransitions);
+                ContinueAsNewAfterTransitions: limits.Value.ContinueAsNewAfterTransitions,
+                // Read off the created event rather than recomputed: the digest is what the reference
+                // resolved to at schedule time, and a blob this run produces records it so that an
+                // operator can tell which bundle made the bytes.
+                WorkflowDigest: @event.Digest);
 
             try
             {

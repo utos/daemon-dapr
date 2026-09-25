@@ -78,6 +78,58 @@ public class TravellingBlobTests(DaemonTestFixture fixture)
     }
 
     [Fact]
+    public async Task A_blob_a_sub_workflow_produced_is_readable_by_the_caller_it_returns_to()
+    {
+        // § Moving blobs: "Out of a sub-workflow — the callee's result carries it to the caller's
+        // output." What makes that possible is which run tree the blob was attached to when the child
+        // produced it: the *tree's* root, not the child's own id.
+        //
+        // The executor used to pass neither, so the activity fell back to the executing execution — so a
+        // blob a sub-workflow produced belonged to the child alone, and the parent reading the handle it
+        // was handed failed the access check as UTOS-F103. Nothing else notices, because the only value
+        // that crosses that boundary and needs resolving is a blob.
+        const string marker = "-=END=-";
+        var body = new string('c', 400 * 1024) + marker;
+
+        fixture.WireMockServer
+            .Given(Request.Create().WithPath("/child-produces").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "text/plain")
+                .WithBody(body));
+
+        var request = new TestWorkflowBuilder("parent-reads-child-blob", fixture.MockBaseUrl)
+            .WorkflowCall("fetch-in-child", "blob-child", "fetch")
+            // The child's result is the parent's `output`, so this reads bytes the parent never fetched.
+            .OnResult(new Struct
+            {
+                Fields =
+                {
+                    ["tail"] = Value.ForString("{{ (await output.photo.text()).slice(-7) }}"),
+                    ["size"] = Value.ForString("{{ output.photo.size }}"),
+                },
+            })
+            .AddDependentWorkflow("blob-child", child =>
+                child.HttpGet("fetch", "/child-produces")
+                    .OnResult(new Struct
+                    {
+                        Fields = { ["photo"] = Value.ForString("{{ response.body }}") },
+                    }))
+            .Build("fetch-in-child");
+
+        var scheduled = await fixture.ScheduleAsync(request);
+        await fixture.WatchToCompletionAsync(scheduled.Id, TimeSpan.FromSeconds(120));
+
+        var details = await fixture.DaemonClient.GetExecutionAsync(
+            new GetExecutionRequest { ExecutionId = scheduled.Id });
+
+        Assert.Null(details.Summary.Error);
+        Assert.Equal(ExecutionStatus.Completed, details.Summary.Status);
+        Assert.Equal(marker, details.Result.Fields["tail"].StringValue);
+        Assert.Equal(body.Length, (long)details.Result.Fields["size"].NumberValue);
+    }
+
+    [Fact]
     public async Task A_blob_in_a_run_s_result_reaches_the_client_as_a_handle()
     {
         // § Out of a run: the result carries a blob as it is, and a client reads its bytes by

@@ -1,3 +1,4 @@
+using Blobs.Application;
 using Blobs.Domain;
 using Common.Blobs;
 using Common.SeedWork;
@@ -130,7 +131,7 @@ public sealed class BlobReclaimer(
             return new BlobReclamationReport(0, 0, 1);
         }
 
-        await repository.UpdateAsync(blob.Removed(), cancellationToken);
+        await repository.UpdateAsync(blob.Removed(DateTimeOffset.UtcNow), cancellationToken);
 
         return new BlobReclamationReport(1, 0, 0);
     }
