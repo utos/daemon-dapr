@@ -241,6 +241,12 @@ public class HttpActivityHandlerTests
 
         public Task<byte[]> ReadAsync(WorkflowBlob blob, ExecutionId runTree, CancellationToken ct) =>
             Task.FromResult(blob.Data ?? []);
+
+        // Nothing the handler does promotes anything: whether a body it stored is ever asked for is
+        // decided where the value leaves the run, not where it enters it.
+        public Task<int> PromoteAsync(
+            IReadOnlyCollection<WorkflowBlob> blobs, ExecutionId runTree, CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 
     private static ActivityHandlerInput Request(

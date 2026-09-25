@@ -14,6 +14,8 @@
         <ProjectReference Include="../../common/Common.Constants/Common.Constants.csproj"/>
         <!-- The contract for resolving a reference, not the module that answers it. -->
         <ProjectReference Include="../../common/Common.Workflow.Resolution/Common.Workflow.Resolution.csproj"/>
+        <!-- Reclaiming a deleted run tree's blobs: the contract, not the module that owns them. -->
+        <ProjectReference Include="../../common/Common.Blobs/Common.Blobs.csproj"/>
     </ItemGroup>
 
 </Project>

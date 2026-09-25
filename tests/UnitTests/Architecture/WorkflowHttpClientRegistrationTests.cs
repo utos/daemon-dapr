@@ -49,6 +49,11 @@ public class WorkflowHttpClientRegistrationTests
         public Task<byte[]> ReadAsync(
             Common.Workflow.WorkflowBlob blob, ExecutionId runTree, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<int> PromoteAsync(
+            IReadOnlyCollection<Common.Workflow.WorkflowBlob> blobs, ExecutionId runTree,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     [Fact]

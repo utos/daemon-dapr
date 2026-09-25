@@ -47,10 +47,17 @@ public sealed class BlobsDbContext(DbContextOptions<BlobsDbContext> options) : D
             b.HasKey(e => new { e.BlobId, e.RootExecutionId });
 
             b.Property(e => e.BlobId).HasMaxLength(64);
+            b.Property(e => e.TreeOutcome).HasMaxLength(32);
 
             // The other direction: everything a run tree brought in, for DeleteExecution and for
-            // the sweep that runs when a tree ends.
+            // recording that the tree ended, which is one statement over exactly these rows.
             b.HasIndex(e => e.RootExecutionId);
+
+            // The sweep asks the opposite question — does this blob have an attachment that is not
+            // finished — and answers it per candidate blob. Without the ending in the index that is a
+            // heap fetch for every row of every candidate, on the one table that grows with every
+            // blob a run touches.
+            b.HasIndex(e => new { e.BlobId, e.TreeEndedAt });
         });
 
         modelBuilder.Entity<BlobHistoryEntity>(b =>

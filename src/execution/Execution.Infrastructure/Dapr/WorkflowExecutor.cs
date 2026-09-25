@@ -60,6 +60,36 @@ public record WorkflowExecutorInput(
     ExecutionId? RootExecutionId = null)
 {
     /// <summary>
+    /// The run tree this execution belongs to, named by its root. Every execution in a call tree
+    /// answers the same id, however deep it nests, which is what makes it the id a watch stream is
+    /// keyed by and the id a blob's access check is against.
+    /// <para>
+    /// <see cref="ParentExecutionId"/> remains the fallback for a run already in flight when
+    /// <see cref="RootExecutionId"/> was introduced; on its own it reached one level, so a
+    /// grandchild answered its direct parent.
+    /// </para>
+    /// <para>
+    /// Ignored on the wire, as the property below is. This record is orchestration history, and a
+    /// derived value written into it would be a second copy of a fact the fields beside it already
+    /// carry — read back by nothing, and able to disagree with them after a deploy.
+    /// </para>
+    /// </summary>
+    [JsonIgnore]
+    public ExecutionId RunTree => RootExecutionId ?? ParentExecutionId ?? ExecutionId;
+
+    /// <summary>
+    /// Whether this execution is the root of its run tree — including a <c>workflow.spawn</c>, which
+    /// starts a new tree and is a root of its own.
+    /// <para>
+    /// What it decides is promotion: a blob that reaches a <em>root</em> execution's output stream
+    /// becomes durable, because what a run hands to a client is what somebody asked for, while what
+    /// a child hands its caller is still in flight.
+    /// </para>
+    /// </summary>
+    [JsonIgnore]
+    public bool IsRunTreeRoot => RunTree == ExecutionId;
+
+    /// <summary>
     /// The envelope for the next segment of this execution — everything that must survive a
     /// <c>ContinueAsNew</c>.
     /// <para>
@@ -138,7 +168,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         // watches carries the whole run, however deep it nests. ParentExecutionId alone reached one
         // level: a grandchild's lines routed to its direct parent — a stream nobody watches. It
         // remains the fallback for a run already in flight when RootExecutionId was introduced.
-        var logExecutionId = input.RootExecutionId ?? input.ParentExecutionId ?? input.ExecutionId;
+        var logExecutionId = input.RunTree;
 
         if (!isChild && !isContinuation)
             await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
@@ -284,7 +314,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 if (transition.EmittedValue != null)
                 {
                     await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
-                        new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Value,
+                        new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Value, input.IsRunTreeRoot,
                             transition.EmittedValue));
 
                     // Gating, depth one. Hand the value to the privileged consumer and do not
@@ -363,7 +393,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             // finish is waiting on that event, and must find the stream already closed when it
             // reads it.
             await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
-                new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Result, workflowOutput));
+                new AppendOutputEntryInput(
+                    input.ExecutionId, OutputEntryKind.Result, input.IsRunTreeRoot, workflowOutput));
 
             // The terminal message ends the subscription. A consumer waits on this channel and
             // nothing else, so a child that finished without saying so would leave its caller
@@ -430,7 +461,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             await AbandonSubscriptionsAsync(context, logger, subscriptions, logExecutionId);
 
             await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
-                new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Error,
+                new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Error, input.IsRunTreeRoot,
                     ErrorCode: failureCode, ErrorMessage: ex.Message, ErrorDetails: failureDetails));
 
             if (!isChild)
@@ -836,7 +867,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             }
 
             await context.CallActivityAsync(nameof(AppendOutputEntryActivity),
-                new AppendOutputEntryInput(input.ExecutionId, OutputEntryKind.Value, message.Value));
+                new AppendOutputEntryInput(
+                    input.ExecutionId, OutputEntryKind.Value, input.IsRunTreeRoot, message.Value));
 
             if (input.OutputEventName != null)
             {

@@ -27,4 +27,23 @@ public interface IExecutionLifecycleListener
     Task OnFailedAsync(
         ExecutionId executionId, DateTime occurredAt, string reason, string? code = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// The run was stopped on purpose. A third ending rather than a failure with a reason, because
+    /// the two are not the same fact and a listener that treats them alike should say so by writing
+    /// one line.
+    /// </summary>
+    /// <remarks>
+    /// The one method here with a default body, and deliberately: what a <em>cancelled</em> run's
+    /// terminal watch frame should say is an open question with a wire shape attached
+    /// (<c>ExecutionOutcome</c> has only <c>Completed</c> and <c>Failed</c>), and answering it is not
+    /// retention's business. So the observability listener keeps the behaviour it had, which is to
+    /// leave the log stream open on a cancel — a gap that predates this method and is not made worse
+    /// by it. Retention cannot afford the same silence: a cancelled tree whose ending nothing records
+    /// keeps its intermediate blobs until the sweep's age backstop finds them weeks later.
+    /// </remarks>
+    /// <param name="reason">Why, when anyone said. Null is an ordinary thing for a caller to mean.</param>
+    Task OnCancelledAsync(
+        ExecutionId executionId, DateTime occurredAt, string? reason, CancellationToken ct = default) =>
+        Task.CompletedTask;
 }

@@ -135,9 +135,18 @@ namespace Blobs.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("AttachedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("TreeEndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TreeOutcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.HasKey("BlobId", "RootExecutionId");
 
                     b.HasIndex("RootExecutionId");
+
+                    b.HasIndex("BlobId", "TreeEndedAt");
 
                     b.ToTable("BlobRunTrees", (string)null);
                 });
