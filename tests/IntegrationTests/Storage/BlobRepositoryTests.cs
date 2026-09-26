@@ -56,7 +56,8 @@ public class BlobRepositoryTests(DaemonTestFixture fixture)
         var blob = Pending();
         await repository.AddAsync(blob, CancellationToken.None);
 
-        await repository.UpdateAsync(blob.Completed(9182), CancellationToken.None);
+        await repository.UpdateAsync(
+            blob.Completed(9182, DateTimeOffset.UnixEpoch), CancellationToken.None);
 
         var found = await repository.FindAsync(blob.Id, CancellationToken.None);
 

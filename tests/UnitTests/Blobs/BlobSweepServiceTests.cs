@@ -1,3 +1,4 @@
+using Blobs.Application;
 using Blobs.Infrastructure.Store;
 using Common.Blobs;
 using Common.SeedWork;

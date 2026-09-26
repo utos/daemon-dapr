@@ -136,7 +136,7 @@ public sealed class S3ObjectStore(IAmazonS3 client, IOptions<S3ObjectStoreOption
             : new Dictionary<string, string> { ["content-type"] = mediaType };
 
         return Task.FromResult(
-            new SignedLocation(url, headers, DateTimeOffset.UtcNow.Add(expiry)));
+            new SignedLocation(url, "PUT", headers, DateTimeOffset.UtcNow.Add(expiry)));
     }
 
     public Task<SignedLocation> SignDownloadAsync(
@@ -161,7 +161,7 @@ public sealed class S3ObjectStore(IAmazonS3 client, IOptions<S3ObjectStoreOption
             : new Dictionary<string, string>();
 
         return Task.FromResult(
-            new SignedLocation(url, headers, DateTimeOffset.UtcNow.Add(expiry)));
+            new SignedLocation(url, "GET", headers, DateTimeOffset.UtcNow.Add(expiry)));
     }
 
     /// <summary>

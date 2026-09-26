@@ -35,6 +35,25 @@ public sealed class BlobEntity
     public DateTimeOffset? LastModified { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>When the bytes arrived — a client's <c>CompleteBlob</c>, or a run's write.</summary>
+    public DateTimeOffset? CompletedAt { get; set; }
+
+    /// <summary>Set with <see cref="State"/> <c>Deleted</c> and not otherwise.</summary>
+    public DateTimeOffset? DeletedAt { get; set; }
+
+    // What produced it, flattened rather than owned. Five nullable columns beat a second table for
+    // something read on every lookup and written once, and beat an owned entity for something whose
+    // absence is meaningful: all five are null exactly when `Origin` is `Uploaded`.
+    public Guid? ProducerExecutionId { get; set; }
+
+    public Guid? ProducerRootExecutionId { get; set; }
+
+    public string? ProducerWorkflow { get; set; }
+
+    public string? ProducerWorkflowDigest { get; set; }
+
+    public string? ProducerActivity { get; set; }
 }
 
 /// <summary>

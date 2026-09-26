@@ -1,3 +1,4 @@
+using Blobs.Application;
 using Common.Blobs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

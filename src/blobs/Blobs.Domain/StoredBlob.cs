@@ -1,4 +1,5 @@
 using Common.Blobs;
+using Common.SeedWork;
 
 namespace Blobs.Domain;
 
@@ -88,6 +89,19 @@ public enum BlobOrigin
 /// upload is single or multipart; the real length is read back at <c>CompleteBlob</c>.
 /// </param>
 /// <param name="Name">Present exactly when the blob is a <c>File</c> rather than a plain <c>Blob</c>.</param>
+/// <param name="Producer">
+/// What made it, when a run did — <c>BlobInfo.producer</c>. Held on the blob rather than read back out
+/// of its history, because <c>GetBlob</c> answers it and scanning a timeline to fill one field of a
+/// lookup is the wrong shape. Plain data, so deleting the execution does not erase why the blob exists.
+/// </param>
+/// <param name="CompletedAt">
+/// When the bytes arrived: a client's <c>CompleteBlob</c>, or the write for a blob a run produced —
+/// which is <see cref="CreatedAt"/> for one of those, since nothing exists until the bytes do.
+/// </param>
+/// <param name="DeletedAt">
+/// When the bytes went. Set with <see cref="BlobState.Deleted"/> and not otherwise, so a record that
+/// says <c>DELETED</c> can always say when.
+/// </param>
 public sealed record StoredBlob(
     BlobId Id,
     ObjectKey Key,
@@ -98,7 +112,10 @@ public sealed record StoredBlob(
     long Size,
     DateTimeOffset CreatedAt,
     string? Name = null,
-    DateTimeOffset? LastModified = null)
+    DateTimeOffset? LastModified = null,
+    BlobProducer? Producer = null,
+    DateTimeOffset? CompletedAt = null,
+    DateTimeOffset? DeletedAt = null)
 {
     /// <summary>A blob whose bytes a run may read, subject to the run tree it belongs to.</summary>
     public bool IsReadable => State == BlobState.Ready;
@@ -111,12 +128,13 @@ public sealed record StoredBlob(
     /// there is no separate promotion step for one.
     /// </para>
     /// </summary>
-    public StoredBlob Completed(long size, string? mediaType = null) =>
+    public StoredBlob Completed(long size, DateTimeOffset at, string? mediaType = null) =>
         this with
         {
             State = BlobState.Ready,
             Size = size,
             MediaType = string.IsNullOrEmpty(mediaType) ? MediaType : mediaType,
+            CompletedAt = at,
         };
 
     /// <summary>
@@ -135,5 +153,26 @@ public sealed record StoredBlob(
     /// The bytes are gone. The record stays, so an id the daemon issued keeps answering for as long
     /// as any execution record mentions it.
     /// </summary>
-    public StoredBlob Removed() => this with { State = BlobState.Deleted };
+    public StoredBlob Removed(DateTimeOffset at) =>
+        this with { State = BlobState.Deleted, DeletedAt = at };
+}
+
+/// <summary>
+/// What made a blob, when an execution did — <c>utos.daemon.v1.BlobProducer</c>.
+/// <para>
+/// The same five facts <c>BlobUsage</c> carries, and deliberately a separate type: that one is a
+/// cross-module <em>argument</em>, describing what a caller was doing, while this is a field of a
+/// record that will outlive the run. A durable blob's producer has to still read correctly after the
+/// execution is deleted, which is why nothing here is a reference to anything.
+/// </para>
+/// </summary>
+public sealed record BlobProducer(
+    ExecutionId Execution,
+    ExecutionId RootExecution,
+    string Workflow,
+    string? WorkflowDigest = null,
+    string? Activity = null)
+{
+    public static BlobProducer From(BlobUsage usage) =>
+        new(usage.Execution, usage.RootExecution, usage.Workflow, usage.WorkflowDigest, usage.Activity);
 }

@@ -38,7 +38,8 @@ public class ContinuationEnvelopeTests
             ContinueAsNewAfterTransitions: 7,
             Subscriptions: new Dictionary<string, ExecutionId>(),
             OutputEventName: "child-output:upstream",
-            RootExecutionId: RootId);
+            RootExecutionId: RootId,
+            WorkflowDigest: "sha256:beef");
 
     private static ExecutionCursor Cursor() =>
         ExecutionCursor.Start(["first", "handle"], loopDetected: true).Enter("handle").Cursor;
@@ -119,6 +120,9 @@ public class ContinuationEnvelopeTests
         // The root is identity too. A continuation that lost it would send the rest of a long
         // child's lines back to its direct parent's stream, mid-run.
         Assert.Equal(RootId, continued.RootExecutionId);
+        // And so is the bundle this run was pinned to. A continuation that lost it would leave every
+        // blob produced after the first segment unable to say which bundle made it.
+        Assert.Equal("sha256:beef", continued.WorkflowDigest);
         Assert.Equal(7, continued.ContinueAsNewAfterTransitions);
         Assert.Equal(Started, continued.StartedAt);
     }
@@ -149,7 +153,8 @@ public class ContinuationEnvelopeTests
             nameof(WorkflowExecutorInput.ParentExecutionId),
             nameof(WorkflowExecutorInput.ContinueAsNewAfterTransitions),
             nameof(WorkflowExecutorInput.OutputEventName),
-            nameof(WorkflowExecutorInput.RootExecutionId)
+            nameof(WorkflowExecutorInput.RootExecutionId),
+            nameof(WorkflowExecutorInput.WorkflowDigest)
         ];
 
         // Computed from the three above and never stored, so there is nothing to rewind. They still

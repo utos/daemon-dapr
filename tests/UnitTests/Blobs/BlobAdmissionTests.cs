@@ -1,4 +1,5 @@
 using System.Text;
+using Blobs.Application;
 using Blobs.Domain;
 using Blobs.Infrastructure.Store;
 using Common.Blobs;
@@ -433,6 +434,20 @@ public class BlobAdmissionTests
             throw new NotSupportedException();
 
         public Task DetachRunTreeAsync(ExecutionId rootExecution, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<BlobSummary?> SummaryAsync(BlobId id, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<BlobPage> ListAsync(
+            BlobQuery query, int pageSize, string pageToken, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<bool> IsHeldByALiveRunAsync(BlobId id, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlySet<BlobId>> HeldByALiveRunAsync(
+            IReadOnlyCollection<BlobId> ids, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
 }

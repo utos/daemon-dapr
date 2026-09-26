@@ -57,7 +57,12 @@ public record WorkflowExecutorInput(
     // The run whose watch stream this execution logs into: the root of the call tree, carried
     // down unchanged. ParentExecutionId cannot do this job — it names the direct caller, which is
     // right for handing emitted values back and wrong for a grandchild's log lines.
-    ExecutionId? RootExecutionId = null)
+    ExecutionId? RootExecutionId = null,
+    // The content digest of the snapshotted bundle, carried so that a blob this run produces records
+    // which bundle made it. A name and version stop identifying what ran once a bundle is rebuilt;
+    // the digest does not. Carried down to a child unchanged, because a sub-workflow lives in its
+    // parent's bundle and so has the same digest.
+    string? WorkflowDigest = null)
 {
     /// <summary>
     /// The run tree this execution belongs to, named by its root. Every execution in a call tree
@@ -125,6 +130,26 @@ public record WorkflowExecutorInput(
 }
 
 /// <summary>
+/// What an execution returns, as its caller receives it.
+/// <para>
+/// A wrapper around one value, and it exists for the annotation on it. Everything else that crosses a
+/// Dapr boundary here is a record whose untyped value carries
+/// <see cref="ObjectDictionaryJsonConverter"/>; an orchestration's <em>return type</em> was the one
+/// place that could not, because <c>object?</c> is not a record with a property to annotate. So a
+/// child's result came back with no converter applied — which for a blob meant it arrived as an
+/// ordinary map, and the parent calling <c>text()</c> on what its callee returned got a
+/// <c>TypeError</c>.
+/// </para>
+/// <para>
+/// It is what <c>workflow.call</c>, a promise branch and a rule's <c>workflow.call</c> effect all
+/// return, so one wrapper closes all three.
+/// </para>
+/// </summary>
+public sealed record WorkflowExecutorOutput(
+    [property: JsonConverter(typeof(ObjectDictionaryJsonConverter))]
+    object? Value = null);
+
+/// <summary>
 /// What an activity produced, and whether that was the end of it. An emission is a value a
 /// sub-workflow handed over mid-run, which routes through <c>on_emitted</c>; everything else is a
 /// finished activity, routing through <c>on_success</c>. The two are indistinguishable by value
@@ -151,9 +176,10 @@ public readonly record struct ActivityOutcome(
 /// the part that genuinely needs a durable orchestration runtime: recording each side effect
 /// so it is performed once, waiting without holding a thread, and surviving a restart.
 /// </summary>
-public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
+public class WorkflowExecutor : Workflow<WorkflowExecutorInput, WorkflowExecutorOutput>
 {
-    public override async Task<object?> RunAsync(WorkflowContext context, WorkflowExecutorInput input)
+    public override async Task<WorkflowExecutorOutput> RunAsync(
+        WorkflowContext context, WorkflowExecutorInput input)
     {
         var isChild = input.ParentExecutionId != null;
         // A child's lines carry which workflow wrote them. The root's do not: it is the run being
@@ -227,7 +253,8 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                             startTime, subscriptions),
                         preserveUnprocessedEvents: true);
 
-                    return null;
+                    // Nothing to return: the next segment answers the caller.
+                    return new WorkflowExecutorOutput();
                 }
 
                 var run = (WorkflowStep.Run)step;
@@ -409,7 +436,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 await context.CallActivityAsync(nameof(WriteLifecycleEventActivity),
                     new WriteLifecycleEventInput(input.ExecutionId, ExecutionLifecycleTransition.Completed, null));
 
-            return workflowOutput;
+            return new WorkflowExecutorOutput(workflowOutput);
         }
         catch (Exception ex)
         {
@@ -599,7 +626,15 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 new ExecuteActivityInput(input.ExecutionId, logExecutionId,
                     resolved.Kind,
                     resolved.Url, resolved.HttpMethod, resolved.Body, resolved.Headers,
-                    LogSource: input.ParentExecutionId is null ? null : input.WorkflowKey));
+                    LogSource: input.ParentExecutionId is null ? null : input.WorkflowKey,
+                    // Where a blob this activity stores belongs, and what to record as having made it.
+                    // The run *tree*, not this execution: a blob produced inside a sub-workflow that
+                    // was attached to the child's own id could not be read by the parent it is handed
+                    // back to, which fails as UTOS-F103 and reads like an access bug.
+                    RootExecutionId: input.RunTree,
+                    Workflow: input.WorkflowKey,
+                    WorkflowDigest: input.WorkflowDigest,
+                    ActivityName: run.ActivityName));
 
             var activityDuration = (context.CurrentUtcDateTime - activityStartTime).TotalMilliseconds;
 
@@ -716,13 +751,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         // sub-workflow invoked twice from a parent loop is two separate executions, not a
         // back-edge. Its dispatch stack starts empty for the same reason: the caller's handlers
         // are the caller's, and a child running out of rules ends the child.
-        var childTask = context.CallChildWorkflowAsync<object?>(
+        var childTask = context.CallChildWorkflowAsync<WorkflowExecutorOutput>(
             nameof(WorkflowExecutor),
             new WorkflowExecutorInput(childExecutionId, resolved.SubWorkflowKey!,
                 resolved.SubStartActivity!, input.ExecutionId,
                 ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions,
                 OutputEventName: outputEventName,
-                RootExecutionId: logExecutionId),
+                RootExecutionId: logExecutionId,
+                WorkflowDigest: input.WorkflowDigest),
             new ChildWorkflowTaskOptions(childExecutionId.ToString()));
 
         if (consumes)
@@ -737,7 +773,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
                 context, logger, run, logExecutionId, subscriptions, childExecutionId);
         }
 
-        object? childOutput;
+        WorkflowExecutorOutput childOutput;
         try
         {
             childOutput = await childTask;
@@ -760,7 +796,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         await context.CallActivityAsync(nameof(DeleteOutputStreamActivity),
             new DeleteOutputStreamInput(childExecutionId));
 
-        return ActivityOutcome.Completed(childOutput);
+        return ActivityOutcome.Completed(childOutput.Value);
     }
 
     /// <summary>
@@ -829,13 +865,14 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         // Deliberately not awaited, for the same reason the producer's task is not: the handler
         // reports through events, and this method may be re-entered after a continue-as-new that
         // no task survives.
-        _ = context.CallChildWorkflowAsync<object?>(
+        _ = context.CallChildWorkflowAsync<WorkflowExecutorOutput>(
             nameof(WorkflowExecutor),
             new WorkflowExecutorInput(handlerExecutionId, dispatch.Workflow,
                 dispatch.StartActivity, input.ExecutionId,
                 ContinueAsNewAfterTransitions: input.ContinueAsNewAfterTransitions,
                 OutputEventName: handlerEventName,
-                RootExecutionId: logExecutionId),
+                RootExecutionId: logExecutionId,
+                WorkflowDigest: input.WorkflowDigest),
             new ChildWorkflowTaskOptions(handlerExecutionId.ToString()));
 
         while (true)
@@ -1052,13 +1089,13 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         // 4. Fan out — launch all branches as child workflows. The ids are kept alongside the
         //    tasks because settling has to be able to *name* the branches it did not wait for,
         //    and a task is not an address.
-        var branchTasks = new Dictionary<string, Task<object?>>(StringComparer.Ordinal);
+        var branchTasks = new Dictionary<string, Task<WorkflowExecutorOutput>>(StringComparer.Ordinal);
         var branchExecutionIds = new Dictionary<string, ExecutionId>(StringComparer.Ordinal);
         foreach (var (branch, branchExecutionId) in branches)
         {
             branchExecutionIds[branch.BranchName] = branchExecutionId;
 
-            branchTasks[branch.BranchName] = context.CallChildWorkflowAsync<object?>(
+            branchTasks[branch.BranchName] = context.CallChildWorkflowAsync<WorkflowExecutorOutput>(
                 nameof(WorkflowExecutor),
                 new WorkflowExecutorInput(branchExecutionId, branch.WorkflowKey,
                     branch.StartActivity, input.ExecutionId,
@@ -1097,13 +1134,13 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
         ExecutionId logExecutionId,
         PromiseMode mode,
         int requiredCount,
-        Dictionary<string, Task<object?>> branchTasks,
+        Dictionary<string, Task<WorkflowExecutorOutput>> branchTasks,
         IReadOnlyDictionary<string, ExecutionId> branchExecutionIds)
     {
         var resolver = new PromiseResolver(mode, requiredCount, branchTasks.Count);
         var progress = resolver.Start();
 
-        var remaining = new Dictionary<string, Task<object?>>(branchTasks, StringComparer.Ordinal);
+        var remaining = new Dictionary<string, Task<WorkflowExecutorOutput>>(branchTasks, StringComparer.Ordinal);
 
         while (progress is PromiseProgress.Pending && remaining.Count > 0)
         {
@@ -1112,7 +1149,7 @@ public class WorkflowExecutor : Workflow<WorkflowExecutorInput, object?>
             remaining.Remove(settled.Key);
 
             var outcome = completed.IsCompletedSuccessfully
-                ? new BranchOutcome(true, completed.Result)
+                ? new BranchOutcome(true, completed.Result.Value)
                 : new BranchOutcome(false, null);
 
             progress = resolver.Observe(settled.Key, outcome);

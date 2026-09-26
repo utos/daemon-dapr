@@ -30,6 +30,9 @@ public sealed class BlobsDbContext(DbContextOptions<BlobsDbContext> options) : D
             b.Property(e => e.Origin).IsRequired().HasMaxLength(32);
             b.Property(e => e.MediaType).IsRequired().HasMaxLength(256);
             b.Property(e => e.Name).HasMaxLength(512);
+            b.Property(e => e.ProducerWorkflow).HasMaxLength(512);
+            b.Property(e => e.ProducerWorkflowDigest).HasMaxLength(128);
+            b.Property(e => e.ProducerActivity).HasMaxLength(256);
 
             // The retention sweep's query: everything intermediate, oldest first. Without this it
             // is a scan of every blob the daemon has ever held, which is the one table guaranteed
