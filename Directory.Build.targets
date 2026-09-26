@@ -1,0 +1,40 @@
+<Project>
+  <!--
+    Inside the Utos monorepo the SDK's source sits beside this component, so every Utos.* package
+    reference becomes a reference to that source: a change to the SDK — or to the protos it is
+    generated from — is visible here on the next build, with nothing published in between.
+
+    Outside it (a mirror checked out on its own) the source is absent and the packages pinned in
+    Directory.Packages.props are used, as before. Set UseUtosSdkSource=false to build against the
+    packages inside the monorepo too, e.g. while this component still implements an older spec.
+  -->
+  <PropertyGroup>
+    <UtosSdkSource>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '../../sdk/dotnet/src'))</UtosSdkSource>
+    <UseUtosSdkSource Condition="'$(UseUtosSdkSource)' == '' and Exists('$(UtosSdkSource)')">true</UseUtosSdkSource>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseUtosSdkSource)' == 'true' and '@(PackageReference->AnyHaveMetadataValue('Identity', 'Utos.Workflow'))' == 'true'">
+    <PackageReference Remove="Utos.Workflow" />
+    <ProjectReference Include="$(UtosSdkSource)Utos.Workflow/Utos.Workflow.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseUtosSdkSource)' == 'true' and '@(PackageReference->AnyHaveMetadataValue('Identity', 'Utos.Workflow.Source'))' == 'true'">
+    <PackageReference Remove="Utos.Workflow.Source" />
+    <ProjectReference Include="$(UtosSdkSource)Utos.Workflow.Source/Utos.Workflow.Source.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseUtosSdkSource)' == 'true' and '@(PackageReference->AnyHaveMetadataValue('Identity', 'Utos.Workflow.Validation'))' == 'true'">
+    <PackageReference Remove="Utos.Workflow.Validation" />
+    <ProjectReference Include="$(UtosSdkSource)Utos.Workflow.Validation/Utos.Workflow.Validation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseUtosSdkSource)' == 'true' and '@(PackageReference->AnyHaveMetadataValue('Identity', 'Utos.Daemon.Client'))' == 'true'">
+    <PackageReference Remove="Utos.Daemon.Client" />
+    <ProjectReference Include="$(UtosSdkSource)Utos.Daemon.Client/Utos.Daemon.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseUtosSdkSource)' == 'true' and '@(PackageReference->AnyHaveMetadataValue('Identity', 'Utos.Daemon.Server'))' == 'true'">
+    <PackageReference Remove="Utos.Daemon.Server" />
+    <ProjectReference Include="$(UtosSdkSource)Utos.Daemon.Server/Utos.Daemon.Server.csproj" />
+  </ItemGroup>
+</Project>
