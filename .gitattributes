@@ -1,0 +1,11 @@
+# Text is stored and checked out as LF on every platform, whatever a client's core.autocrlf says.
+# Components carry their own copy so that a mirror checked out on its own behaves the same.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.snk binary
+*.nupkg binary
