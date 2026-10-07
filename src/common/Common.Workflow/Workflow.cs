@@ -67,6 +67,12 @@ public sealed record WorkflowSpec(
 /// A fully-resolved set of workflows plus the one execution starts from. Every dependency a
 /// workflow references is present in <see cref="Workflows"/>, keyed by its identity string —
 /// the daemon never resolves anything itself.
+/// <para>
+/// Persisted as JSON in three places, which change together: the event
+/// (<c>WorkflowExecutionCreatedEvent.Bundle</c>), the execution context (<c>BundleJson</c>) and
+/// the read model (<c>WorkflowDefinitionJson</c>). A change to this type's shape, or to any type
+/// it contains, has to stay readable in all three for rows written before it.
+/// </para>
 /// </summary>
 public sealed record WorkflowBundle(
     string EntryPoint,
