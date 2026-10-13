@@ -11,7 +11,7 @@ version, and its minor is the spec: `0.20.x` in any of them means *implements
 spec 0.20*. A release gives its version only to the components that changed, so
 the numbers below may skip; a component with nothing new does not release.
 
-## [Unreleased]
+## [0.20.3] - 2026-10-13
 
 Implements spec `0.20`. The spec re-cut what a transition rule is, changed what a timer's
 duration is written as, made run-time values a type of their own, and gave workflows binary data.
@@ -25,10 +25,10 @@ moved to one version line with the spec. Its changes are part of this release.
 HTTP response body is a `Blob`, stored in object storage when it crosses the inline threshold, and
 `await response.body.text()` reads it through the store with the run-tree access check applied.
 
-Still not a daemon that implements the whole of `§ Blobs`: `BlobService` can inspect and remove blobs
-but not yet *upload* one, so the only blobs that exist are the ones a run produced or a client sent
-inline. A file on somebody's disk larger than the inline threshold has no way in, which is why this is
-`[Unreleased]` rather than a dated version.
+Not the whole of `§ Blobs`: `BlobService` can inspect and remove blobs but not *upload* one, so the
+only blobs that exist are the ones a run produced or a client sent inline. A file on somebody's disk
+larger than the inline threshold has no way in. How a file gets into a run is being reconsidered,
+so the upload half may not come in this form.
 
 ### Changed
 
@@ -214,7 +214,7 @@ inline. A file on somebody's disk larger than the inline threshold has no way in
 - **Image and repository renamed:** the image is `ghcr.io/utos/daemon-dapr`, and the repository
   `utos/daemon-dapr`. `ghcr.io/utos/dapr-daemon` gets no new versions; the repository's old name
   redirects
-- **Not implemented yet:** uploading a blob through `BlobService` (`CreateBlob`, `SignUploadParts`,
+- **Not implemented:** uploading a blob through `BlobService` (`CreateBlob`, `SignUploadParts`,
   `CompleteBlob`), as above
 
 ### Fixed
