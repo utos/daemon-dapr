@@ -1,7 +1,7 @@
 # The utos daemon and everything it runs on. `docker compose up -d` from this directory brings
 # up a daemon reachable at http://localhost:5164 — the address `utos context create` takes.
 #
-#   daemon        the utos daemon (ghcr.io/utos/dapr-daemon)
+#   daemon        the utos daemon (ghcr.io/utos/daemon-dapr)
 #   daemon-dapr   its Dapr sidecar, sharing the daemon's network namespace so both see localhost
 #   placement     Dapr's actor placement service, which Dapr Workflow is built on
 #   scheduler     Dapr's scheduler service, which workflow timers and reminders are built on
@@ -21,7 +21,7 @@ name: utos
 
 services:
   daemon:
-    image: ${DAEMON_IMAGE:-ghcr.io/utos/dapr-daemon:latest}
+    image: ${DAEMON_IMAGE:-ghcr.io/utos/daemon-dapr:latest}
     restart: unless-stopped
     ports:
       - "5164:5164"

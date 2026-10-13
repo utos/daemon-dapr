@@ -16,7 +16,7 @@ utos run ./hello.yaml --follow
 
 | Service | Image | Role |
 |---|---|---|
-| `daemon` | `ghcr.io/utos/dapr-daemon` | The daemon; gRPC on `5164`, published to the host |
+| `daemon` | `ghcr.io/utos/daemon-dapr` | The daemon; gRPC on `5164`, published to the host |
 | `daemon-dapr` | `daprio/daprd` | The Dapr sidecar, in the daemon's network namespace so both see `localhost` |
 | `placement` | `daprio/placement` | Actor placement, which Dapr Workflow is built on |
 | `scheduler` | `daprio/scheduler` | Timers and reminders, which workflow delays are built on |
@@ -60,9 +60,9 @@ docker build -f deploy/Dockerfile -t utos-daemon:local --build-arg VERSION=0.0.0
 ```
 
 Framework-dependent on `mcr.microsoft.com/dotnet/aspnet:10.0`; the build stage restores from the
-manifests first so a source change does not re-download packages. The release workflow
-(`.github/workflows/release.yml`) builds the same file and pushes it to GHCR as
-`ghcr.io/utos/dapr-daemon:<version>` and `:latest`.
+manifests first so a source change does not re-download packages. Each release builds the
+same file and pushes it to GHCR as
+`ghcr.io/utos/daemon-dapr:<version>` and `:latest`.
 
 ## Development
 
