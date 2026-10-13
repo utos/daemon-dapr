@@ -5,8 +5,9 @@
     generated from — is visible here on the next build, with nothing published in between.
 
     Outside it (a mirror checked out on its own) the source is absent and the packages pinned in
-    Directory.Packages.props are used, as before. Set UseUtosSdkSource=false to build against the
-    packages inside the monorepo too, e.g. while this component still implements an older spec.
+    Directory.Packages.props are used, as before. UseUtosSdkSource=false builds against the packages
+    inside the monorepo too, for a local experiment only: scripts/check-version.sh refuses it, since
+    a component built against an older SDK implements an older spec.
   -->
   <PropertyGroup>
     <UtosSdkSource>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '../../sdk/dotnet/src'))</UtosSdkSource>
