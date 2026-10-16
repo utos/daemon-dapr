@@ -113,6 +113,8 @@ public class DaemonTestFixture : IAsyncLifetime
         ObservabilityClient = new ObservabilityService.ObservabilityServiceClient(invoker);
         BlobClient = new BlobService.BlobServiceClient(invoker);
 
+        await WaitUntilDaemonAnswersAsync(TimeSpan.FromSeconds(60));
+
         // Setup WireMock
         WireMockServer = WireMockServer.Start();
 
@@ -218,6 +220,35 @@ public class DaemonTestFixture : IAsyncLifetime
             new WatchExecutionRequest { ExecutionId = executionId });
 
         await call.CollectUntilCompletion(timeout ?? TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>
+    /// Waits until the daemon answers a call, which is when it has finished starting.
+    /// <para>
+    /// <see cref="KnownResourceStates.Running"/> only says the process was launched; the daemon then
+    /// still migrates its databases and starts its hosted services before Kestrel listens. A test
+    /// class that never calls the daemon is over within a second, so without this the run's
+    /// teardown stopped a daemon still starting — the database going away under its migrations, or
+    /// the stop cancelling its start-up — and it aborted, leaving a core dump in its directory.
+    /// </para>
+    /// </summary>
+    private async Task WaitUntilDaemonAnswersAsync(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+
+        while (true)
+        {
+            try
+            {
+                await DefinitionClient.ListWorkflowsAsync(
+                    new ListWorkflowsRequest(), deadline: DateTime.UtcNow.AddSeconds(5));
+                return;
+            }
+            catch (Grpc.Core.RpcException) when (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250));
+            }
+        }
     }
 
     public async Task DisposeAsync()

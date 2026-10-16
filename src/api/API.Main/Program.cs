@@ -40,4 +40,15 @@ app.UseExecutionModule();
 app.UseDefinitionModule();
 app.UseObservabilityModule();
 
-app.Run();
+try
+{
+    app.Run();
+}
+catch (OperationCanceledException) when (app.Lifetime.ApplicationStopping.IsCancellationRequested)
+{
+    // Told to stop while still starting: the host cancels whatever start-up work is in flight —
+    // the bucket being created, Kestrel binding — and Run() rethrows that cancellation. It is the
+    // stop that was asked for, not a failure — Ctrl+C on a daemon still coming up, or an
+    // orchestrator stopping it early — and left unhandled it aborts the process, which leaves a
+    // core dump behind.
+}
