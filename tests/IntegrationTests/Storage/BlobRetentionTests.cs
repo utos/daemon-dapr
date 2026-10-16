@@ -164,7 +164,7 @@ public class BlobRetentionTests(DaemonTestFixture fixture)
         var repository = Repository();
         var (blob, first) = await IntermediateAsync(repository);
         var second = ExecutionId.New();
-        await repository.AttachToRunTreeAsync(blob.Id, second, CancellationToken.None);
+        await repository.AttachToRunTreeAsync(blob.Id, second, Now, CancellationToken.None);
 
         await repository.RecordRunTreeEndedAsync(
             first, RunTreeOutcome.Completed, Now, CancellationToken.None);
@@ -225,7 +225,7 @@ public class BlobRetentionTests(DaemonTestFixture fixture)
     {
         var repository = Repository();
         var (shared, tree) = await IntermediateAsync(repository);
-        await repository.AttachToRunTreeAsync(shared.Id, ExecutionId.New(), CancellationToken.None);
+        await repository.AttachToRunTreeAsync(shared.Id, ExecutionId.New(), Now, CancellationToken.None);
 
         var only = await AttachAsync(
             repository, Blob(BlobState.Ready, BlobRetention.Intermediate, BlobOrigin.Produced), tree);
@@ -242,7 +242,7 @@ public class BlobRetentionTests(DaemonTestFixture fixture)
         var repository = Repository();
         var (blob, tree) = await IntermediateAsync(repository);
         var other = ExecutionId.New();
-        await repository.AttachToRunTreeAsync(blob.Id, other, CancellationToken.None);
+        await repository.AttachToRunTreeAsync(blob.Id, other, Now, CancellationToken.None);
 
         await repository.RecordRunTreeEndedAsync(
             other, RunTreeOutcome.Completed, Now, CancellationToken.None);
@@ -258,7 +258,7 @@ public class BlobRetentionTests(DaemonTestFixture fixture)
         var repository = Repository();
         var (blob, tree) = await IntermediateAsync(repository);
         var other = ExecutionId.New();
-        await repository.AttachToRunTreeAsync(blob.Id, other, CancellationToken.None);
+        await repository.AttachToRunTreeAsync(blob.Id, other, Now, CancellationToken.None);
 
         await repository.DetachRunTreeAsync(tree, CancellationToken.None);
 
@@ -288,7 +288,7 @@ public class BlobRetentionTests(DaemonTestFixture fixture)
         IBlobRepository repository, StoredBlob blob, ExecutionId tree)
     {
         await repository.AddAsync(blob, CancellationToken.None);
-        await repository.AttachToRunTreeAsync(blob.Id, tree, CancellationToken.None);
+        await repository.AttachToRunTreeAsync(blob.Id, tree, Now, CancellationToken.None);
 
         return blob;
     }

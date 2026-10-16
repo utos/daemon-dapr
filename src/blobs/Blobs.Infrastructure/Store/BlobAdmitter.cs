@@ -80,7 +80,7 @@ public sealed class BlobAdmitter(IBlobRepository repository, IOptions<BlobOption
 
         foreach (var id in attach.Distinct())
         {
-            await repository.AttachToRunTreeAsync(id, arrival.RootExecution, cancellationToken);
+            await repository.AttachToRunTreeAsync(id, arrival.RootExecution, now, cancellationToken);
             await repository.RecordEventAsync(
                 id, BlobEventKind.Attached, now, arrival, cancellationToken);
         }

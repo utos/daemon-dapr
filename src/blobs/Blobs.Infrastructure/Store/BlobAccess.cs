@@ -66,7 +66,7 @@ public sealed class BlobAccess(
             CompletedAt: now);
 
         await repository.AddAsync(record, cancellationToken);
-        await repository.AttachToRunTreeAsync(id, provenance.RootExecution, cancellationToken);
+        await repository.AttachToRunTreeAsync(id, provenance.RootExecution, now, cancellationToken);
         await repository.RecordEventAsync(id, BlobEventKind.Produced, now, provenance, cancellationToken);
 
         // The size the store reports, not what anyone predicted: a response body has no trustworthy

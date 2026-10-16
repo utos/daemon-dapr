@@ -96,7 +96,7 @@ public class BlobRepositoryTests(DaemonTestFixture fixture)
         var mine = new ExecutionId(Guid.NewGuid());
         var theirs = new ExecutionId(Guid.NewGuid());
 
-        await repository.AttachToRunTreeAsync(blob.Id, mine, CancellationToken.None);
+        await repository.AttachToRunTreeAsync(blob.Id, mine, DateTimeOffset.UtcNow, CancellationToken.None);
 
         Assert.True(await repository.BelongsToRunTreeAsync(blob.Id, mine, CancellationToken.None));
         Assert.False(await repository.BelongsToRunTreeAsync(blob.Id, theirs, CancellationToken.None));
@@ -113,8 +113,8 @@ public class BlobRepositoryTests(DaemonTestFixture fixture)
 
         var tree = new ExecutionId(Guid.NewGuid());
 
-        await repository.AttachToRunTreeAsync(blob.Id, tree, CancellationToken.None);
-        await repository.AttachToRunTreeAsync(blob.Id, tree, CancellationToken.None);
+        await repository.AttachToRunTreeAsync(blob.Id, tree, DateTimeOffset.UtcNow, CancellationToken.None);
+        await repository.AttachToRunTreeAsync(blob.Id, tree, DateTimeOffset.UtcNow, CancellationToken.None);
 
         Assert.True(await repository.BelongsToRunTreeAsync(blob.Id, tree, CancellationToken.None));
     }

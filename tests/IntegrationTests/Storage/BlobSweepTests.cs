@@ -132,7 +132,7 @@ public class BlobSweepTests(DaemonTestFixture fixture)
     {
         var (repository, store, reclaimer) = Module();
         var (blob, tree) = await StoredIntermediate(repository, store);
-        await repository.AttachToRunTreeAsync(blob.Id, ExecutionId.New(), CancellationToken.None);
+        await repository.AttachToRunTreeAsync(blob.Id, ExecutionId.New(), DateTimeOffset.UtcNow, CancellationToken.None);
 
         Assert.Equal(
             new BlobReclamationReport(0, 1, 0),
@@ -174,7 +174,7 @@ public class BlobSweepTests(DaemonTestFixture fixture)
             id, key, BlobState.Ready, retention, origin, "text/plain", stat.Size, now);
 
         await repository.AddAsync(blob, CancellationToken.None);
-        await repository.AttachToRunTreeAsync(id, tree, CancellationToken.None);
+        await repository.AttachToRunTreeAsync(id, tree, now, CancellationToken.None);
 
         return blob;
     }

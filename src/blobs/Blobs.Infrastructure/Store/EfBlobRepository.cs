@@ -91,7 +91,7 @@ public sealed class EfBlobRepository(BlobsDbContext context) : IBlobRepository
     }
 
     public async Task AttachToRunTreeAsync(
-        BlobId id, ExecutionId rootExecution, CancellationToken cancellationToken)
+        BlobId id, ExecutionId rootExecution, DateTimeOffset at, CancellationToken cancellationToken)
     {
         // Asked first, and the database constraint is still the thing that makes this correct.
         //
@@ -107,7 +107,7 @@ public sealed class EfBlobRepository(BlobsDbContext context) : IBlobRepository
         {
             BlobId = id.Value,
             RootExecutionId = rootExecution.Value,
-            AttachedAt = DateTimeOffset.UtcNow,
+            AttachedAt = at,
         });
 
         try

@@ -50,9 +50,14 @@ public interface IBlobRepository
     /// Records that a blob belongs to a run tree — because it was produced there, attached by a
     /// client at schedule, or carried into a new tree by a <c>workflow.spawn</c>. Attaching one that
     /// is already a member changes nothing.
+    /// <para>
+    /// <paramref name="at"/> is given rather than read from the clock here, as it is for
+    /// <see cref="RecordRunTreeEndedAsync"/>: the sweep's backstop is measured from it, and a rule
+    /// over ages is only testable when every age it compares comes from the caller.
+    /// </para>
     /// </summary>
     Task AttachToRunTreeAsync(
-        BlobId id, ExecutionId rootExecution, CancellationToken cancellationToken);
+        BlobId id, ExecutionId rootExecution, DateTimeOffset at, CancellationToken cancellationToken);
 
     /// <summary>
     /// Appends to a blob's timeline, folding into an existing row when one already has the same

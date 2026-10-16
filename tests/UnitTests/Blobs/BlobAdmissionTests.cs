@@ -386,7 +386,7 @@ public class BlobAdmissionTests
         }
 
         public Task AttachToRunTreeAsync(
-            BlobId id, ExecutionId rootExecution, CancellationToken cancellationToken)
+            BlobId id, ExecutionId rootExecution, DateTimeOffset at, CancellationToken cancellationToken)
         {
             Attached.Add((id, rootExecution));
             _members.Add((id, rootExecution));
