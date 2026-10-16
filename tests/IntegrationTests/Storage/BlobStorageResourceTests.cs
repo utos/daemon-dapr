@@ -11,12 +11,13 @@ namespace IntegrationTests.Storage;
 /// This asserts the resource is there and answers — not that the daemon uses it, because it does
 /// not yet. It exists so the next change starts from a fixture that is known to work: when the
 /// blob store lands and a test fails, the question is whether the store is wrong, and that is only
-/// a useful question if "MinIO never started" has already been ruled out.
+/// a useful question if "the store never started" has already been ruled out.
 /// </para>
 /// <para>
-/// Nothing here pins MinIO in particular. What the daemon will depend on is the S3 API, and MinIO
+/// Nothing here pins RustFS in particular. What the daemon will depend on is the S3 API, and RustFS
 /// is how a container speaks it — so the assertions are about the shape of what Aspire hands over
-/// and about the server answering, both of which any S3 implementation must satisfy.
+/// and about the server answering, both of which any S3 implementation must satisfy. Only the
+/// health probe's path is the server's own.
 /// </para>
 /// </summary>
 [Collection(DaemonTestCollection.Name)]
@@ -57,7 +58,7 @@ public class BlobStorageResourceTests(DaemonTestFixture fixture)
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 
         var response = await client.GetAsync(
-            new Uri(endpoint, "/minio/health/live"), CancellationToken.None);
+            new Uri(endpoint, "/health"), CancellationToken.None);
 
         Assert.True(response.IsSuccessStatusCode,
             $"the blob store at {endpoint} answered {(int)response.StatusCode}");

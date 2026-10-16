@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 namespace Common.Blobs.S3;
 
 /// <summary>
-/// <see cref="IObjectStore"/> over the S3 API — MinIO in development, any S3-compatible server or
+/// <see cref="IObjectStore"/> over the S3 API — RustFS in development, any S3-compatible server or
 /// real S3 in a deployment.
 /// <para>
 /// One driver for all of them, deliberately. The spec's § Storage requirements are the S3 API's

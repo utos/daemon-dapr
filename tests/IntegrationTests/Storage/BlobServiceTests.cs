@@ -12,7 +12,7 @@ namespace IntegrationTests.Storage;
 /// <summary>
 /// <c>BlobService</c> — <c>api/docs/binary-data.md</c> § The BlobService, the inspect-and-remove half.
 /// <para>
-/// Through the real service against real MinIO, because what these prove is the surface: the enums exist
+/// Through the real service against real RustFS, because what these prove is the surface: the enums exist
 /// on both sides of the wire with different members and a different zero value, the timestamps are
 /// optional, and a signed location is only useful if a client can actually replay it. A test below does
 /// exactly that — downloads a blob's bytes with nothing but the URL and headers the daemon handed over,

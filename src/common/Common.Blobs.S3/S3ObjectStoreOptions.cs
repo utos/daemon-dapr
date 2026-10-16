@@ -10,7 +10,7 @@ public sealed class S3ObjectStoreOptions
     public const string SectionName = "Blobs";
 
     /// <summary>
-    /// The S3 endpoint, for a store that is not AWS: MinIO in development, or any S3-compatible
+    /// The S3 endpoint, for a store that is not AWS: RustFS in development, or any S3-compatible
     /// server. Empty means real S3 at <see cref="Region"/>.
     /// </summary>
     public string Endpoint { get; set; } = string.Empty;
@@ -37,7 +37,7 @@ public sealed class S3ObjectStoreOptions
 
     /// <summary>
     /// Path-style addressing (<c>host/bucket/key</c>) rather than virtual-host style
-    /// (<c>bucket.host/key</c>). Required by MinIO and by most S3-compatible servers, which have
+    /// (<c>bucket.host/key</c>). Required by most S3-compatible servers, which have
     /// no wildcard DNS; real S3 wants it off.
     /// </summary>
     public bool ForcePathStyle { get; set; } = true;

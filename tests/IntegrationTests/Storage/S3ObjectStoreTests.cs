@@ -11,7 +11,7 @@ namespace IntegrationTests.Storage;
 /// <summary>
 /// The blob store driver against a real S3 server — <c>api/docs/binary-data.md</c> § Storage.
 /// <para>
-/// Against MinIO rather than a fake, because what is being tested is the agreement between this
+/// Against RustFS rather than a fake, because what is being tested is the agreement between this
 /// driver and an S3 implementation, and a fake would only test the driver's agreement with my
 /// reading of S3. The four things § Storage requires are what is asserted: objects are readable
 /// after they are written, reads take a window rather than the whole object, locations can be
@@ -217,7 +217,7 @@ public class S3ObjectStoreTests(DaemonTestFixture fixture)
 
     private static ObjectKey Key() => new("test/" + Guid.NewGuid().ToString("n"));
     /// <summary>
-    /// The driver, pointed at the run's MinIO by the same connection string the daemon reads.
+    /// The driver, pointed at the run's RustFS by the same connection string the daemon reads.
     /// <para>
     /// The bucket is ensured in <see cref="TestBlobStore"/> rather than assumed from the daemon's
     /// startup. These are tests of the driver, and borrowing another process's provisioning made every

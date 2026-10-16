@@ -11,6 +11,18 @@ version, and its minor is the spec: `0.20.x` in any of them means *implements
 spec 0.20*. A release gives its version only to the components that changed, so
 the numbers below may skip; a component with nothing new does not release.
 
+## [Unreleased]
+
+### Changed
+
+- **RustFS replaces MinIO as the object store**, in the Aspire model and in the compose deployment.
+  MinIO's images stopped being publicly pullable, first from Docker Hub and then from `quay.io`, so
+  neither the integration suite nor a fresh `docker compose up` could start. The daemon is
+  unchanged: it speaks the S3 API, and RustFS takes the same connection string. In the compose file,
+  `MINIO_VERSION` is now `RUSTFS_VERSION`; `BLOBS_ACCESS_KEY`, `BLOBS_SECRET_KEY` and the
+  `blobs-data` volume keep their names. Reading an existing MinIO volume with RustFS is untested: if
+  its objects matter, copy them to the new store with any S3 client rather than reusing the volume
+
 ## [0.20.3] - 2026-10-13
 
 Implements spec `0.20`. The spec re-cut what a transition rule is, changed what a timer's

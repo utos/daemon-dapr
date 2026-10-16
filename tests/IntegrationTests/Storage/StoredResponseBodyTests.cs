@@ -26,7 +26,7 @@ public class StoredResponseBodyTests(DaemonTestFixture fixture)
     public async Task A_body_over_the_threshold_is_stored_and_read_back_through_the_store()
     {
         // Larger than the daemon's inline threshold, so the value the run carries is a handle and
-        // the bytes are in MinIO. The marker at the end is what proves the whole object came back
+        // the bytes are in the store. The marker at the end is what proves the whole object came back
         // rather than a prefix.
         const string marker = "-=END=-";
         var body = new string('a', 400 * 1024) + marker;

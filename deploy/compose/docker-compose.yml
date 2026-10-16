@@ -8,7 +8,7 @@
 #   postgres      the one database: Dapr's actor state (the `dapr-statestore` config below is
 #                 the Dapr component), the read models, the event streams and the output streams;
 #                 the daemon migrates its own tables on start
-#   blobs         MinIO, the object store binary data goes in. Only bytes: which blobs exist, who
+#   blobs         RustFS, the object store binary data goes in. Only bytes: which blobs exist, who
 #                 may read them and when they can go is the daemon's record, in postgres
 #
 # Set DAEMON_IMAGE to run a locally built image, and POSTGRES_PASSWORD to change the default.
@@ -101,24 +101,23 @@ services:
       retries: 20
 
   blobs:
-    # quay.io, not the Docker Hub default: `docker.io/minio/minio` answers an anonymous pull with
-    # "access denied" at every tag, while `quay.io/minio/minio` at the same tag pulls. Docker Hub
-    # itself is fine — every other container here comes from it.
-    image: quay.io/minio/minio:${MINIO_VERSION:-RELEASE.2025-09-07T16-13-09Z}
-    command: ["server", "/data", "--console-address", ":9001"]
+    # RustFS, not MinIO, which this was until its images stopped being publicly pullable — first
+    # from Docker Hub, then from quay.io. The daemon depends on the S3 API, not on the server.
+    image: rustfs/rustfs:${RUSTFS_VERSION:-1.0.1}
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: "${BLOBS_ACCESS_KEY:-utos}"
-      MINIO_ROOT_PASSWORD: "${BLOBS_SECRET_KEY:-utos-secret}"
+      RUSTFS_ACCESS_KEY: "${BLOBS_ACCESS_KEY:-utos}"
+      RUSTFS_SECRET_KEY: "${BLOBS_SECRET_KEY:-utos-secret}"
     volumes:
       # A volume, unlike the development store in the Aspire model, which deliberately has none: a
       # test run must not inherit objects from the last one, and a deployment must not lose a durable
-      # blob because a container restarted.
+      # blob because a container restarted. The image's `/data` belongs to its non-root user, and a
+      # new named volume takes that ownership.
       - blobs-data:/data
     healthcheck:
       # Waited for, because the daemon creates its bucket during startup and a store that is not
       # answering yet turns that into a failure the daemon cannot retry.
-      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/health >/dev/null || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 20

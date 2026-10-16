@@ -12,7 +12,7 @@
         <PackageReference Include="Aspire.Hosting.AppHost" />
         <PackageReference Include="Aspire.Hosting.PostgreSQL" />
         <PackageReference Include="CommunityToolkit.Aspire.Hosting.Dapr"/>
-        <PackageReference Include="CommunityToolkit.Aspire.Hosting.Minio"/>
+        <PackageReference Include="CommunityToolkit.Aspire.Hosting.RustFs"/>
         <PackageReference Include="Grpc.AspNetCore" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />

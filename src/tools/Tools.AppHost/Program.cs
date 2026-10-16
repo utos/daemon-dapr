@@ -21,20 +21,16 @@ var components = Directory.CreateTempSubdirectory("utos-dapr-components-").FullN
 // 400 MB response be a value a workflow passes around rather than a row in an events table.
 // See api/docs/binary-data.md.
 //
-// MinIO because it speaks the S3 API in a container, so the driver the daemon writes is the one a
+// RustFS because it speaks the S3 API in a container, so the driver the daemon writes is the one a
 // deployment runs against real S3 rather than a second path exercised only in tests. Deliberately
 // no data volume, for the reason postgres above has none: a test run must not inherit objects
 // from the last one, and `utos.blob.*` retention is a rule the daemon has to enforce rather than
 // something a wiped volume can hide.
-// From quay.io, not the Docker Hub default the integration ships with: `docker.io/minio/minio`
-// answers an anonymous pull with "access denied ... repository does not exist or may require
-// 'docker login'", while `quay.io/minio/minio` at the same tag pulls. Docker Hub itself is fine —
-// every other container here comes from it — so this is MinIO's distribution, not our registry.
-// Without the override the container never starts, and because the daemon waits for it that
-// surfaces as the whole integration suite timing out rather than as a pull failure.
+// Not MinIO, which this was until its images stopped being publicly pullable — first from Docker
+// Hub, then from quay.io. Nothing here depends on which server it is, only on the S3 API.
 var blobs = builder
-    .AddMinioContainer(ServiceName.Storage.Blobs)
-    .WithImageRegistry("quay.io");
+    .AddRustFs(ServiceName.Storage.Blobs)
+    .WithImageTag("1.0.1");
 
 builder
     .AddProject<Projects.API_Main>(ServiceName.App.MainApi)

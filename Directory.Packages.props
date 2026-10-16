@@ -10,7 +10,7 @@
     <PackageVersion Include="Aspire.Npgsql" Version="13.6.1" />
     <PackageVersion Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.6.1" />
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Dapr" Version="13.0.0" />
-    <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Minio" Version="13.5.0" />
+    <PackageVersion Include="CommunityToolkit.Aspire.Hosting.RustFs" Version="13.6.0" />
     <PackageVersion Include="coverlet.collector" Version="10.1.0" />
     <PackageVersion Include="Dapr.AspNetCore" Version="1.18.10" />
     <PackageVersion Include="Dapr.Workflow" Version="1.18.10" />
